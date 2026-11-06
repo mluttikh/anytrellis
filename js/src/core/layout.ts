@@ -27,6 +27,10 @@ export interface PanelBox {
   /** A strip over the panel (a wrap's, or an opened panel's), and its label. */
   strip: Rect | null;
   label: string;
+  /** Where its x and y axes are drawn (tick labels included), or null: the pointer zooms
+   * and pans one axis there. */
+  xAxis: Rect | null;
+  yAxis: Rect | null;
 }
 
 export interface Strip {
@@ -96,11 +100,10 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   // y labels' width per column, from the ticks of the panels that draw a y axis; not those
   // with an empty cell on their left, whose labels go in that cell
   const yAxisWidth = new Array<number>(cols).fill(0);
+  const yLabelWidth = panels.map((p, i) => (showY[i] ? yLabelsWidth(spec, p.y, opts) : 0));
   panels.forEach((p, i) => {
     if (!showY[i] || (p.col > 0 && cell(p.row, p.col - 1) === undefined)) return;
-    const labels = ticks(spec.y.kind, p.y[0], p.y[1], spec.y.origin, spec.y.kind === "band" ? 1000 : 5, spec.y.levels); // bands: measure every label
-    const w = Math.max(0, ...labels.map((t) => opts.measure(t.label)));
-    yAxisWidth[p.col] = Math.max(yAxisWidth[p.col], Math.ceil(w) + TICK + 4);
+    yAxisWidth[p.col] = Math.max(yAxisWidth[p.col], yLabelWidth[i]);
   });
   const xAxisHeight = fs + TICK + 6;
   const rowHasX = new Array<boolean>(rows).fill(false);
@@ -157,6 +160,8 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
       showY: showY[i],
       strip: wrapStrip ? { x: rect.x, y: rect.y - wrapStrip, w: pw, h: wrapStrip - 1 } : null,
       label: p.label,
+      xAxis: showX[i] ? { x: rect.x, y: rect.y + ph, w: pw, h: xAxisHeight } : null,
+      yAxis: showY[i] ? { x: rect.x - yLabelWidth[i], y: rect.y, w: yLabelWidth[i], h: ph } : null,
     };
   });
 
@@ -202,12 +207,17 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   };
 }
 
+/** The width of a y axis (labels and ticks) over `domain`; bands: every label measured. */
+function yLabelsWidth(spec: TrellisSpec, domain: [number, number], opts: LayoutOptions): number {
+  const labels = ticks(spec.y.kind, domain[0], domain[1], spec.y.origin, spec.y.kind === "band" ? 1000 : 5, spec.y.levels);
+  return Math.ceil(Math.max(0, ...labels.map((t) => opts.measure(t.label)))) + TICK + 4;
+}
+
 /** One panel on the whole width, with both its axes and a strip naming it. */
 function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Layout {
   const fs = opts.fontSize;
   const p = spec.panels[index];
-  const labels = ticks(spec.y.kind, p.y[0], p.y[1], spec.y.origin, spec.y.kind === "band" ? 1000 : 5, spec.y.levels);
-  const yW = Math.ceil(Math.max(0, ...labels.map((t) => opts.measure(t.label)))) + TICK + 4;
+  const yW = yLabelsWidth(spec, p.y, opts);
   const stripH = Math.round(fs * 1.5 + 4);
   const xAxisHeight = fs + TICK + 6;
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
@@ -225,7 +235,18 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
   return {
     width: opts.width,
     height: Math.ceil(plotBottom + bottom + 2),
-    panels: [{ index, rect, showX: true, showY: true, strip: { x: rect.x, y: top, w, h: stripH - 1 }, label: panelName(spec, index) }],
+    panels: [
+      {
+        index,
+        rect,
+        showX: true,
+        showY: true,
+        strip: { x: rect.x, y: top, w, h: stripH - 1 },
+        label: panelName(spec, index),
+        xAxis: { x: rect.x, y: rect.y + h, w, h: xAxisHeight },
+        yAxis: { x: rect.x - yW, y: rect.y, w: yW, h },
+      },
+    ],
     strips: [],
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
     xTitle: xTitleH ? { x: rect.x + w / 2, y: plotBottom + xTitleH - 2 } : null,

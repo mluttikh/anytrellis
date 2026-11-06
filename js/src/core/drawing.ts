@@ -108,8 +108,9 @@ export interface FrontState {
   /** The hovered mark: centre (px) and radius, in panel `hoverPanel`. */
   hover: { x: number; y: number; r: number; color: string } | null;
   hoverPanel: number | null;
-  /** A zoom box being dragged (px). */
+  /** A zoom box being dragged (px), and where it will zoom the panels linked to it. */
   box: Rect | null;
+  ghosts: Rect[];
 }
 
 export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layout: Layout, views: PanelView[], theme: Theme, state: FrontState): void {
@@ -241,6 +242,17 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.restore();
   }
 
+  for (const g of state.ghosts) {
+    ctx.fillStyle = theme.accent;
+    ctx.globalAlpha = 0.06;
+    ctx.fillRect(g.x, g.y, g.w, g.h);
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = theme.accent;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(g.x + 0.5, g.y + 0.5, g.w, g.h);
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
   if (state.box) {
     const b = state.box;
     ctx.fillStyle = theme.accent;

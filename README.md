@@ -56,6 +56,20 @@ Click the plot, then: scroll to zoom x (Shift + scroll: y), drag to pan, `r` to 
 Zoom and pan apply to every panel that shares the scale. Hovering shows the nearest mark's
 values and a crosshair across the panels that share x.
 
+**One axis.** Over an axis, scrolling zooms that axis alone and dragging pans it;
+double-clicking it resets it. An axis stands for its whole scale: with `share_y="row"` the
+left axis of a row zooms that row.
+
+**Box zoom.** Shift+drag draws a box (or switch plain drag to it: `z`, or the toolbar). The
+box follows the drag: mostly sideways zooms x alone, mostly up or down y alone, otherwise
+both. While you draw it, the panels it will also zoom show where.
+
+**Fit y.** `y` (or the toolbar) fits every y scale to the data in view, and keeps fitting
+it as you zoom or pan x; a shared y fits all its panels together, so they stay comparable.
+Zooming y by hand stops it. `Trellis(..., fit_y=True)` starts with it on.
+
+`u` (or Cmd/Ctrl+Z) undoes a zoom, one step at a time.
+
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the
 same zoom, and Backspace, Esc, a double-click or *All panels* goes back. The zoom stays
@@ -71,6 +85,9 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 |---|---|
 | `f` | full screen, and back |
 | `r`, `0` | reset the zoom |
+| `u`, Cmd/Ctrl+Z | undo the last zoom |
+| `z` | drag draws a zoom box, and back (Shift+drag: the other) |
+| `y` | fit y to the data in view, and stop |
 | Enter | open the panel under the pointer |
 | Page Up / Page Down | previous / next panel |
 | Backspace, Esc | back to all panels |
@@ -111,6 +128,7 @@ cd js && npm test && npm run typecheck     # TypeScript: ticks, layout, picking
 npm run build                              # after changing js/src
 node test/visual.mjs <dir of save_html pages>      # screenshots per backend
 node test/interact.mjs <page.html>                 # hover, linked zoom, pan, reset, dark
+node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, undo
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
 ```
 

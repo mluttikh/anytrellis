@@ -420,3 +420,11 @@ def test_legend_position():
     assert '"legend_position": "bottom"' in b.to_html()
     with pytest.raises(ValueError, match="legend must be one of"):
         Trellis(SMALL, legend="left")
+
+
+def test_fit_y():
+    t = Trellis(SMALL, wrap="g").points(x="t", y="v")
+    assert t._scene()[0]["fit_y"] is False
+    f = Trellis(SMALL, wrap="g", fit_y=True).points(x="t", y="v")
+    assert f._scene()[0]["fit_y"] is True
+    assert '"fit_y": true' in f.to_html()

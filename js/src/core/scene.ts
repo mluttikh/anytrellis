@@ -166,3 +166,50 @@ export function hitPoint(hit: Hit, map: PanelMap, px: number, py: number): { x: 
   }
   return { x: c[i * 4], y: c[i * 4 + 1], y0: 0 };
 }
+
+/** The y extent of panel `p`'s own marks (not grey context) where x is in [x0, x1]: a line
+ * segment crossing an end counts with its y at that end. `base`: the low or high end is a
+ * bar's base, which a fit keeps unpadded. Null: nothing there. */
+export function yExtent(scene: Scene, p: number, x0: number, x1: number): { lo: number; hi: number; baseLo: boolean; baseHi: boolean } | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  let baseLo = false;
+  let baseHi = false;
+  const add = (y: number, base: boolean): void => {
+    if (y < lo || (y === lo && base)) {
+      lo = y;
+      baseLo = base;
+    }
+    if (y > hi || (y === hi && base)) {
+      hi = y;
+      baseHi = base;
+    }
+  };
+  for (const layer of scene.layers) {
+    if (layer.spec.context) continue;
+    const c = layer.coords;
+    const rect = layer.kind === KIND_RECT;
+    for (let i = layer.starts[p]; i < layer.starts[p + 1]; i++) {
+      let ax = c[i * 4];
+      let ay = c[i * 4 + 1];
+      let bx = c[i * 4 + 2];
+      let by = c[i * 4 + 3];
+      if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1) continue;
+      if (rect) {
+        add(ay, true); // the base
+        add(by, false);
+        continue;
+      }
+      if (ax !== bx) {
+        // clip the segment to [x0, x1]
+        if (ax > bx) [ax, ay, bx, by] = [bx, by, ax, ay];
+        const slope = (by - ay) / (bx - ax);
+        if (ax < x0) [ax, ay] = [x0, ay + (x0 - ax) * slope];
+        if (bx > x1) [bx, by] = [x1, by - (bx - x1) * slope];
+      }
+      add(ay, false);
+      add(by, false);
+    }
+  }
+  return lo <= hi && Number.isFinite(lo) && Number.isFinite(hi) ? { lo, hi, baseLo, baseHi } : null;
+}

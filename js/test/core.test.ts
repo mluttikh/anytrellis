@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layout } from "../src/core/layout";
-import { type Scene, pick } from "../src/core/scene";
+import { type Scene, pick, yExtent } from "../src/core/scene";
 import { KIND_CAPSULE, KIND_RECT } from "../src/core/renderers/renderer";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatNumber, formatValue, niceStep, ticks } from "../src/core/ticks";
@@ -131,6 +131,19 @@ describe("layout", () => {
     expect(l.height).toBeGreaterThan(c.y + c.h);
   });
 
+  it("knows where each axis is drawn, for zooming one axis there", () => {
+    const l = layout(spec([panel(0, 0), panel(0, 1), panel(1, 0), panel(1, 1)], 2, 2), opts);
+    const [a, , c] = l.panels;
+    expect(a.xAxis).toBeNull(); // shared x: only the bottom row draws it
+    expect(c.xAxis).toEqual({ x: c.rect.x, y: c.rect.y + c.rect.h, w: c.rect.w, h: l.xAxisHeight });
+    expect(a.yAxis!.x + a.yAxis!.w).toBe(a.rect.x);
+    expect(a.yAxis!.w).toBeGreaterThan(0);
+    expect(l.panels[1].yAxis).toBeNull();
+    const one = layout(spec([panel(0, 0), panel(0, 1)], 1, 2), { ...opts, focused: 1 });
+    expect(one.panels[0].xAxis).not.toBeNull();
+    expect(one.panels[0].yAxis).not.toBeNull();
+  });
+
   it("puts a strip over every panel of a wrap", () => {
     const l = layout(spec([panel(0, 0), panel(0, 1)], 1, 2), opts);
     for (const p of l.panels) expect(p.strip!.y + p.strip!.h).toBeLessThanOrEqual(p.rect.y);
@@ -167,6 +180,24 @@ describe("pick", () => {
     const hit = pick(scene, 0, map, 10, 80, 4)!;
     expect(hit.layer).toBe(bars);
     expect(hit.distance).toBe(0);
+  });
+});
+
+describe("yExtent", () => {
+  it("clips a line to the x window, at its y there", () => {
+    // a segment from (0, 0) to (10, 10), and one from (10, 10) to (20, 0)
+    const line = layer("line", [0, 0, 10, 10, 10, 10, 20, 0], KIND_CAPSULE, 1);
+    const scene = { layers: [line] } as unknown as Scene;
+    expect(yExtent(scene, 0, 2, 5)).toMatchObject({ lo: 2, hi: 5 });
+    expect(yExtent(scene, 0, 5, 15)).toMatchObject({ lo: 5, hi: 10 });
+    expect(yExtent(scene, 0, 30, 40)).toBeNull();
+  });
+
+  it("keeps bars' base, and skips context layers", () => {
+    const bars = layer("bars", [0, 0, 2, 5, 4, 0, 6, 3], KIND_RECT, 0);
+    const context = layer("points", [5, 100, 5, 100], KIND_CAPSULE, 3, true);
+    const scene = { layers: [bars, context] } as unknown as Scene;
+    expect(yExtent(scene, 0, 3, 7)).toEqual({ lo: 0, hi: 3, baseLo: true, baseHi: false });
   });
 });
 

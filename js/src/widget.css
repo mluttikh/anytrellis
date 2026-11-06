@@ -295,6 +295,11 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   border-color: var(--atr-border);
   background: var(--atr-panel);
 }
+.atr-button[aria-pressed="true"] {
+  color: var(--atr-accent);
+  border-color: var(--atr-border);
+  background: var(--atr-panel);
+}
 .atr-button:disabled {
   opacity: 0.35;
   cursor: default;

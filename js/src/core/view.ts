@@ -8,6 +8,13 @@
 // a panel moves every panel that shares its scale, also from an opened panel: back in the
 // grid, the panels show what the opened one showed.
 //
+// Zooming: the wheel zooms x (Shift: y; over an axis: that axis), drag pans (over an axis:
+// that axis alone), Shift+drag (or the toolbar's box zoom, z) draws a zoom box. A box
+// follows the drag: mostly sideways zooms x alone, mostly up or down y alone, else both
+// (the rule plotly.js uses); while it is drawn, the panels it will also zoom show where.
+// Fitting y (y, the toolbar) keeps every y group fitted to its data in view as x changes,
+// until y is zoomed by hand. u (or Cmd/Ctrl+Z) undoes a zoom, r resets all.
+//
 // Opening a panel (double-click, Enter) shows it alone on the whole width ("small
 // multiples, large singles", van den Elzen and van Wijk 2013); Page Up and Page Down step to
 // the previous and next panel, keeping the zoom. Full screen (f, the toolbar) uses the
@@ -17,7 +24,7 @@ import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readT
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
 import { createRenderer } from "./renderers/select";
 import type { Draw, Renderer } from "./renderers/renderer";
-import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick } from "./scene";
+import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { formatValue } from "./ticks";
 import type { DataSource, LegendSpec, RendererPreference, TrellisSpec } from "./types";
 
@@ -31,6 +38,33 @@ export interface ViewOptions {
 }
 
 type Range = [number, number];
+type Axis = "x" | "y";
+
+interface Drag {
+  kind: "pan" | "box" | Axis;
+  /** The view (index in views) where it started. */
+  view: number;
+  x: number;
+  y: number;
+  xr: Range;
+  yr: Range;
+  moved: boolean;
+}
+
+interface Snapshot {
+  x: [number, Range][];
+  y: [number, Range][];
+  fitY: boolean;
+}
+
+/** A box zoom along one axis when the other side is this small (px; plotly.js's rule). */
+const MIN_DRAG = 8;
+const MIN_ZOOM = 20;
+/** Wheel events this close together (ms) are one zoom, for undo. */
+const WHEEL_GESTURE = 600;
+const HISTORY = 100;
+/** A fitted y range's padding (a fraction of it each side), as Python pads domains. */
+const FIT_PAD = 0.04;
 
 const ZOOM_SPEED = 0.0015;
 const HOVER_RADIUS = 10;
@@ -45,6 +79,8 @@ const ICONS = {
   reset: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5" /><path d="M3 2.5V5h2.5" /></svg>',
   expand: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" /></svg>',
   collapse: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" /></svg>',
+  box: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" stroke-dasharray="2 1.6" /><path d="m10.5 10.5 3 3" /></svg>',
+  fitY: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10M3 13.5h10M8 5v6M6 7l2-2 2 2M6 9l2 2 2-2" /></svg>',
 };
 
 export class TrellisView {
@@ -54,6 +90,8 @@ export class TrellisView {
   private readonly toolbar: HTMLDivElement;
   private readonly backButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
+  private readonly boxButton: HTMLButtonElement;
+  private readonly fitButton: HTMLButtonElement;
   private readonly fullButton: HTMLButtonElement;
   private readonly legend: HTMLDivElement;
   private readonly stage: HTMLDivElement;
@@ -73,8 +111,15 @@ export class TrellisView {
   private yView = new Map<number, Range>();
   private views: PanelView[] = [];
   private frameRequested = false;
-  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null };
-  private drag: { view: number; x: number; y: number; xr: Range; yr: Range; moved: boolean } | null = null;
+  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [] };
+  private drag: Drag | null = null;
+  /** Plain drag draws a zoom box (else it pans; Shift does the other). */
+  private boxMode = false;
+  /** Every y group follows its data in view as x changes. */
+  private fitY = false;
+  private needFit = false;
+  private history: Snapshot[] = [];
+  private lastWheel = 0;
   private hoverKey = "";
   private tipRequest = 0;
   /** The panel under the pointer (index in spec.panels), for Enter. */
@@ -105,9 +150,12 @@ export class TrellisView {
     this.backButton = button(ICONS.back, "All panels (Backspace)", () => this.setFocus(null, true));
     this.backButton.hidden = true;
     this.resetButton = button(ICONS.reset, "Reset zoom (r)", () => this.resetZoom());
+    this.boxButton = button(ICONS.box, "Box zoom: drag a box (z; Shift+drag at any time)", () => this.setBoxMode(!this.boxMode));
+    this.fitButton = button(ICONS.fitY, "Fit y to the data in view (y)", () => this.setFitY(!this.fitY, true));
+    for (const b of [this.boxButton, this.fitButton]) b.setAttribute("aria-pressed", "false");
     this.fullButton = button(ICONS.expand, "Full screen (f)", () => this.toggleFullscreen());
     this.fullButton.hidden = !document.fullscreenEnabled; // in some frames (and iPhones): none
-    this.toolbar.append(this.backButton, this.resetButton, this.fullButton);
+    this.toolbar.append(this.backButton, this.boxButton, this.fitButton, this.resetButton, this.fullButton);
     this.header.append(this.heading, this.toolbar);
     this.legend = el("div", "atr-legend");
     this.stage = el("div", "atr-stage");
@@ -177,7 +225,12 @@ export class TrellisView {
     this.renderer?.retain(new Set(this.scene.layers.map((l) => l.set.key)));
     // keep the zoom when only the layers changed (same domains)
     const same = old !== null && JSON.stringify(old.panels) === JSON.stringify(spec.panels);
-    if (!same) this.resetViews();
+    if (!same) {
+      this.resetViews();
+      this.history = [];
+      this.setFitY(spec.fit_y === true, false);
+    }
+    this.fitButton.hidden = spec.y.kind === "band";
     // the opened panel stays open when the new spec still has it
     this.pendingFocus = null;
     this.focused = this.indexOf(openName);
@@ -226,7 +279,177 @@ export class TrellisView {
   }
 
   private resetZoom(): void {
+    this.remember();
     this.resetViews();
+    this.setFitY(this.spec?.fit_y === true, false);
+    this.hideTip();
+    this.request();
+  }
+
+  // ---- zooming --------------------------------------------------------------------------
+
+  private zoomState(): Snapshot {
+    return { x: [...this.xView].map(([g, r]) => [g, [...r]]), y: [...this.yView].map(([g, r]) => [g, [...r]]), fitY: this.fitY };
+  }
+
+  /** Keep the zoom as it is now, for undo. */
+  private remember(): void {
+    this.history.push(this.zoomState());
+    if (this.history.length > HISTORY) this.history.shift();
+  }
+
+  private undo(): void {
+    const last = this.history.pop();
+    if (!last) {
+      this.notify("Nothing to undo");
+      return;
+    }
+    this.xView = new Map(last.x);
+    this.yView = new Map(last.y);
+    this.setFitY(last.fitY, false);
+    this.needFit = false;
+    this.hideTip();
+    this.request();
+  }
+
+  /** x of group `xg` changed: y follows when it is fitted. */
+  private setX(xg: number, range: Range): void {
+    this.xView.set(xg, range);
+    if (this.fitY) this.needFit = true;
+  }
+
+  /** y zoomed or panned by hand: it is no longer fitted. */
+  private setY(yg: number, range: Range): void {
+    this.yView.set(yg, range);
+    if (this.fitY) {
+      this.setFitY(false, false);
+      this.notify("y zoomed by hand: no longer fitted (y fits again)");
+    }
+  }
+
+  private setFitY(on: boolean, user: boolean): void {
+    if (on && this.spec?.y.kind === "band") on = false;
+    if (user && on !== this.fitY) this.remember();
+    this.fitY = on;
+    this.fitButton.setAttribute("aria-pressed", String(on));
+    this.root.classList.toggle("atr-fit-y", on);
+    if (on) this.needFit = true;
+    if (user) {
+      this.notify(on ? "y follows the data in view" : "y stays as it is");
+      this.request();
+    }
+  }
+
+  private setBoxMode(on: boolean): void {
+    this.boxMode = on;
+    this.boxButton.setAttribute("aria-pressed", String(on));
+    this.root.classList.toggle("atr-box-mode", on);
+    this.notify(on ? "Drag a box to zoom (z or Shift+drag: pan)" : "Drag pans (Shift+drag: box zoom)");
+  }
+
+  /** Each y group fitted to its panels' data where their x is now. */
+  private fitGroups(): void {
+    const spec = this.spec;
+    const scene = this.scene;
+    if (!spec || !scene || spec.y.kind === "band") return;
+    const ext = new Map<number, { lo: number; hi: number; baseLo: boolean; baseHi: boolean }>();
+    spec.panels.forEach((p, i) => {
+      const xr = this.xView.get(p.xg) ?? p.x;
+      const e = yExtent(scene, i, Math.min(xr[0], xr[1]), Math.max(xr[0], xr[1]));
+      if (!e) return;
+      const g = ext.get(p.yg);
+      if (!g) {
+        ext.set(p.yg, { ...e });
+        return;
+      }
+      if (e.lo < g.lo || (e.lo === g.lo && e.baseLo)) [g.lo, g.baseLo] = [e.lo, e.baseLo || (e.lo === g.lo && g.baseLo)];
+      if (e.hi > g.hi || (e.hi === g.hi && e.baseHi)) [g.hi, g.baseHi] = [e.hi, e.baseHi || (e.hi === g.hi && g.baseHi)];
+    });
+    for (const [g, e] of ext) {
+      let { lo, hi } = e;
+      const span = hi - lo;
+      if (span > 0) {
+        if (!e.baseLo) lo -= FIT_PAD * span;
+        if (!e.baseHi) hi += FIT_PAD * span;
+      } else {
+        const d = Math.abs(lo) * 0.05 || 1;
+        lo -= d;
+        hi += d;
+      }
+      this.yView.set(g, [lo, hi]);
+    }
+  }
+
+  /** The axis (of views[view]) under a point, or null. */
+  private axisAt(x: number, y: number): { view: number; axis: Axis } | null {
+    const boxes = this.lay?.panels ?? [];
+    const inside = (r: { x: number; y: number; w: number; h: number } | null): boolean => r !== null && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+    for (let i = 0; i < boxes.length && i < this.views.length; i++) {
+      if (inside(boxes[i].xAxis)) return { view: i, axis: "x" };
+      if (inside(boxes[i].yAxis)) return { view: i, axis: "y" };
+    }
+    return null;
+  }
+
+  /** The zoom box of a drag from (d.x, d.y) to (x, y), kept in its panel: along x, y or
+   * both, by its shape; null while too small. */
+  private boxOf(d: Drag, x: number, y: number): { rect: Rect; along: "x" | "y" | "xy" } | null {
+    const r = this.views[d.view].rect;
+    const cx = Math.min(Math.max(x, r.x), r.x + r.w);
+    const cy = Math.min(Math.max(y, r.y), r.y + r.h);
+    const dx = Math.abs(cx - d.x);
+    const dy = Math.abs(cy - d.y);
+    const left = Math.min(cx, d.x);
+    const top = Math.min(cy, d.y);
+    if (dy < Math.min(Math.max(dx * 0.6, MIN_DRAG), MIN_ZOOM)) {
+      if (dx < MIN_DRAG) return null;
+      return { rect: { x: left, y: r.y, w: dx, h: r.h }, along: "x" };
+    }
+    if (dx < Math.min(dy * 0.6, MIN_ZOOM)) return { rect: { x: r.x, y: top, w: r.w, h: dy }, along: "y" };
+    return { rect: { x: left, y: top, w: dx, h: dy }, along: "xy" };
+  }
+
+  /** Where a box in views[vi] also zooms the other panels shown: the same x range in the
+   * panels of its x group, the same y range in those of its y group. */
+  private ghostsOf(vi: number, rect: Rect, along: "x" | "y" | "xy"): Rect[] {
+    const spec = this.spec!;
+    const src = this.views[vi];
+    const sp = spec.panels[src.panel];
+    const [x0, x1] = [(rect.x - src.map.ox) / src.map.sx, (rect.x + rect.w - src.map.ox) / src.map.sx];
+    const [y0, y1] = [(rect.y + rect.h - src.map.oy) / src.map.sy, (rect.y - src.map.oy) / src.map.sy];
+    const out: Rect[] = [];
+    this.views.forEach((v, i) => {
+      if (i === vi) return;
+      const p = spec.panels[v.panel];
+      const sameX = along !== "y" && p.xg === sp.xg;
+      const sameY = along !== "x" && p.yg === sp.yg;
+      if (!sameX && !sameY) return;
+      const r = v.rect;
+      const gx = sameX ? [v.map.ox + x0 * v.map.sx, v.map.ox + x1 * v.map.sx] : [r.x, r.x + r.w];
+      const gy = sameY ? [v.map.oy + y1 * v.map.sy, v.map.oy + y0 * v.map.sy] : [r.y, r.y + r.h];
+      out.push({ x: gx[0], y: gy[0], w: gx[1] - gx[0], h: gy[1] - gy[0] });
+    });
+    return out;
+  }
+
+  private applyBox(d: Drag, x: number, y: number): void {
+    const b = this.boxOf(d, x, y);
+    if (!b || !this.spec) return;
+    const v = this.views[d.view];
+    const p = this.spec.panels[v.panel];
+    const r = b.rect;
+    this.remember();
+    if (b.along !== "y") this.setX(p.xg, [(r.x - v.map.ox) / v.map.sx, (r.x + r.w - v.map.ox) / v.map.sx]);
+    if (b.along !== "x") this.setY(p.yg, [(r.y + r.h - v.map.oy) / v.map.sy, (r.y - v.map.oy) / v.map.sy]);
+  }
+
+  /** One axis of a group back to its full domain (double-click on the axis). */
+  private resetAxis(vi: number, axis: Axis): void {
+    const v = this.views[vi];
+    const p = this.spec!.panels[v.panel];
+    this.remember();
+    if (axis === "x") this.setX(p.xg, [p.x[0], p.x[1]]);
+    else this.setY(p.yg, [p.y[0], p.y[1]]);
     this.hideTip();
     this.request();
   }
@@ -386,6 +609,10 @@ export class TrellisView {
 
   private draw(): void {
     if (!this.spec || !this.scene || !this.lay) return;
+    if (this.needFit) {
+      this.needFit = false;
+      this.fitGroups();
+    }
     const views = this.panelViews();
     this.views = views;
     const back = this.back.getContext("2d")!;
@@ -456,18 +683,27 @@ export class TrellisView {
       (e) => {
         if (!this.spec || !this.isActive()) return;
         const [x, y] = this.local(e);
-        const vi = this.viewAt(x, y);
+        const onAxis = this.axisAt(x, y);
+        const vi = onAxis ? onAxis.view : this.viewAt(x, y);
         if (vi < 0) return;
         e.preventDefault();
-        const factor = Math.exp((e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY) * ZOOM_SPEED);
+        const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+        const dx = e.deltaX * scale;
+        const dy = e.deltaY * scale;
         const v = this.views[vi];
         const panel = this.spec.panels[v.panel];
-        if (e.shiftKey) {
-          const at = (y - v.map.oy) / v.map.sy;
-          this.yView.set(panel.yg, zoom(v.y, at, factor));
+        if (e.timeStamp - this.lastWheel > WHEEL_GESTURE) this.remember();
+        this.lastWheel = e.timeStamp;
+        // a trackpad's sideways swipe pans x; macOS turns Shift+wheel into a sideways scroll
+        const sideways = Math.abs(dx) > Math.abs(dy);
+        const axis: Axis = onAxis ? onAxis.axis : e.shiftKey ? "y" : "x";
+        if (sideways && !e.shiftKey && !onAxis) {
+          const shift = dx / v.map.sx;
+          this.setX(panel.xg, [v.x[0] + shift, v.x[1] + shift]);
         } else {
-          const at = (x - v.map.ox) / v.map.sx;
-          this.xView.set(panel.xg, zoom(v.x, at, factor));
+          const factor = Math.exp((sideways ? dx : dy) * ZOOM_SPEED);
+          if (axis === "y") this.setY(panel.yg, zoom(v.y, (y - v.map.oy) / v.map.sy, factor));
+          else this.setX(panel.xg, zoom(v.x, (x - v.map.ox) / v.map.sx, factor));
         }
         this.hideTip();
         this.request();
@@ -480,10 +716,12 @@ export class TrellisView {
         if (e.button !== 0) return;
         this.root.focus({ preventScroll: true });
         const [x, y] = this.local(e);
-        const vi = this.viewAt(x, y);
+        const onAxis = this.axisAt(x, y);
+        const vi = onAxis ? onAxis.view : this.viewAt(x, y);
         if (vi < 0) return;
         const v = this.views[vi];
-        this.drag = { view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false };
+        const kind = onAxis ? onAxis.axis : this.boxMode !== e.shiftKey ? "box" : "pan";
+        this.drag = { kind, view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false };
         stage.setPointerCapture(e.pointerId);
       },
       { signal },
@@ -497,23 +735,46 @@ export class TrellisView {
           const v = this.views[d.view];
           if (!v) return;
           if (!d.moved && Math.hypot(x - d.x, y - d.y) < 3) return;
+          if (!d.moved && d.kind !== "box") this.remember();
           d.moved = true;
+          this.hideTip();
+          if (d.kind === "box") {
+            const b = this.boxOf(d, x, y);
+            this.front_.box = b?.rect ?? null;
+            this.front_.ghosts = b ? this.ghostsOf(d.view, b.rect, b.along) : [];
+            this.front_.crossX = null;
+            this.front_.hover = null;
+            this.request();
+            return;
+          }
           const dx = (x - d.x) / v.map.sx;
           const dy = (y - d.y) / v.map.sy;
           const panel = this.spec.panels[v.panel];
-          this.xView.set(panel.xg, [d.xr[0] - dx, d.xr[1] - dx]);
-          this.yView.set(panel.yg, [d.yr[0] - dy, d.yr[1] - dy]);
-          this.hideTip();
+          // a fitted y follows x: dragging pans x alone
+          if (d.kind !== "y") this.setX(panel.xg, [d.xr[0] - dx, d.xr[1] - dx]);
+          if (d.kind === "y" || (d.kind === "pan" && !this.fitY)) this.setY(panel.yg, [d.yr[0] - dy, d.yr[1] - dy]);
           this.request();
           return;
         }
+        const onAxis = this.axisAt(x, y);
+        this.front.style.cursor = onAxis ? (onAxis.axis === "x" ? "ew-resize" : "ns-resize") : "";
         this.hover(x, y);
       },
       { signal },
     );
     const end = (e: PointerEvent): void => {
-      if (this.drag) stage.releasePointerCapture?.(e.pointerId);
+      const d = this.drag;
+      if (d) stage.releasePointerCapture?.(e.pointerId);
       this.drag = null;
+      if (d?.kind === "box" && (this.front_.box || this.front_.ghosts.length)) {
+        if (e.type === "pointerup" && d.moved) {
+          const [x, y] = this.local(e);
+          this.applyBox(d, x, y);
+        }
+        this.front_.box = null;
+        this.front_.ghosts = [];
+        this.request();
+      }
     };
     stage.addEventListener("pointerup", end, { signal });
     stage.addEventListener("pointercancel", end, { signal });
@@ -531,6 +792,11 @@ export class TrellisView {
       (e) => {
         if (!this.spec) return;
         const [x, y] = this.local(e);
+        const onAxis = this.axisAt(x, y);
+        if (onAxis) {
+          this.resetAxis(onAxis.view, onAxis.axis);
+          return;
+        }
         const vi = this.viewAt(x, y);
         if (this.spec.panels.length < 2) {
           if (vi >= 0) this.resetZoom();
@@ -544,6 +810,12 @@ export class TrellisView {
     this.root.addEventListener(
       "keydown",
       (e) => {
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "z") {
+          this.undo();
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         if ((e.key === "Enter" || e.key === " ") && (e.target as HTMLElement).closest("button")) return;
         if (this.key(e.key)) {
@@ -565,6 +837,16 @@ export class TrellisView {
       case "r":
       case "0":
         this.resetZoom();
+        return true;
+      case "u":
+        this.undo();
+        return true;
+      case "z":
+        this.setBoxMode(!this.boxMode);
+        return true;
+      case "y":
+        if (this.spec?.y.kind === "band") return false;
+        this.setFitY(!this.fitY, true);
         return true;
       case "Enter":
         if (!many || this.focused !== null) return false;

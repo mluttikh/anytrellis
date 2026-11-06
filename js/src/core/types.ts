@@ -113,6 +113,8 @@ export interface TrellisSpec {
   panel_height: number | null;
   /** auto: in a wrap's empty cells when it fits, else under the plot; bottom: under it. */
   legend_position?: "auto" | "bottom";
+  /** Start with y fitted to the data in view (it follows x zooms). */
+  fit_y?: boolean;
 }
 
 /** Where buffers come from: Python (BufferStore), or a page that embeds them. */

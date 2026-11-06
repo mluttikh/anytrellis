@@ -22,10 +22,11 @@ def _(mo):
     marks, slow for millions). `Trellis(..., renderer="webgl2")` picks one; the plot's
     bottom-right corner says which one draws.
 
-    **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y), drag to pan, and
-    press `r` to reset. Panels that share a scale zoom and pan together. Hover a mark for its
-    values. Double-click a panel to see it alone (Page Up and Page Down: the next ones;
-    Backspace: all again), and press `f` (or the toolbar's button) for full screen.
+    **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y; over an axis:
+    that axis), drag to pan, Shift+drag to zoom to a box, `u` to undo and `r` to reset. Panels
+    that share a scale zoom and pan together. `y` keeps y fitted to the data in view. Hover a
+    mark for its values. Double-click a panel to see it alone (Page Up and Page Down: the next
+    ones; Backspace: all again), and press `f` (or the toolbar's button) for full screen.
     """)
     return
 
@@ -64,8 +65,9 @@ def _(mo):
     ## A year of hourly readings
 
     24 stations with 4 sensors each, hourly for a year: about 840,000 line segments. Zoomed
-    out, the daily cycle fills a band and the seasons show; scroll in on a week and the days
-    and the sensors come apart, still sharp.
+    out, the daily cycle fills a band and the seasons show; scroll in on a week (or Shift+drag
+    across it) and the days and the sensors come apart, still sharp. `fit_y=True` keeps y
+    fitted to the week in view, the same for all panels, so they stay comparable.
     """)
     return
 
@@ -75,7 +77,8 @@ def _(Trellis, sensors):
     readings = sensors(stations=24, sensors=4, hours=24 * 365)
 
     year = (
-        Trellis(readings, wrap="station", cols=4, panel_height=110, title="Hourly temperatures")
+        Trellis(readings, wrap="station", cols=4, panel_height=110, fit_y=True,
+                title="Hourly temperatures")
         .line(x="time", y="temp", color="sensor", width=0.8, opacity=0.7)
     )
     year

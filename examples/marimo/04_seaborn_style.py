@@ -20,10 +20,11 @@ def _(mo):
     `col=`, `row=`, `col_wrap=` and `hue=`; in anytrellis they are `col=`, `row=`,
     `wrap=` with `cols=`, and `color=`. `facet_kws={"sharey": False}` is `share_y=False`.
 
-    **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y), drag to pan, and
-    press `r` to reset. Panels that share a scale zoom and pan together. Hover a mark for its
-    values. Double-click a panel to see it alone (Page Up and Page Down: the next ones;
-    Backspace: all again), and press `f` (or the toolbar's button) for full screen.
+    **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y; over an axis:
+    that axis), drag to pan, Shift+drag to zoom to a box, `u` to undo and `r` to reset. Panels
+    that share a scale zoom and pan together. `y` keeps y fitted to the data in view. Hover a
+    mark for its values. Double-click a panel to see it alone (Page Up and Page Down: the next
+    ones; Backspace: all again), and press `f` (or the toolbar's button) for full screen.
     """)
     return
 

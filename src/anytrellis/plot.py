@@ -86,6 +86,9 @@ class Trellis:
         palette: Colours for category colour columns (default: tab10).
         legend: ``"auto"``: in a wrap's empty cells after its last panel when it fits there,
             under the plot otherwise; ``"bottom"``: always under the plot.
+        fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
+            scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
+            and the toolbar switch it on and off.
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
     """
 
@@ -106,6 +109,7 @@ class Trellis:
         y_title: str | None = None,
         palette: Sequence[str] | None = None,
         legend: str = "auto",
+        fit_y: bool = False,
         renderer: str = "auto",
     ) -> None:
         self._data = None if data is None else Table(data)
@@ -130,6 +134,7 @@ class Trellis:
         if legend not in LEGENDS:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
         self.legend = legend
+        self.fit_y = bool(fit_y)
         if renderer not in RENDERERS:
             raise ValueError(f"renderer must be one of {RENDERERS}, got {renderer!r}")
         self.renderer = renderer
@@ -560,6 +565,7 @@ class Trellis:
             "height": self.height,
             "panel_height": self.panel_height,
             "legend_position": self.legend,
+            "fit_y": self.fit_y,
         }
         return spec, buffers
 
