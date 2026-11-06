@@ -2,7 +2,7 @@
 // front, axes, strips, titles, rules, the crosshair and the hovered mark.
 
 import type { Layout, Rect } from "./layout";
-import type { PanelMap } from "./scene";
+import type { PanelMap, TextData } from "./scene";
 import { type Tick, ticks } from "./ticks";
 import type { RuleLayerSpec, TrellisSpec } from "./types";
 
@@ -113,6 +113,8 @@ export interface FrontState {
   ghosts: Rect[];
   /** The selection's brush, where it shows in each panel (px). */
   brushes: Rect[];
+  /** Text layers, drawn over the marks. */
+  texts: TextData[];
 }
 
 export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layout: Layout, views: PanelView[], theme: Theme, state: FrontState): void {
@@ -128,6 +130,7 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
     for (const l of spec.layers) if (l.type === "rule") drawRule(ctx, l, v);
+    for (const t of state.texts) drawText(ctx, t, v, theme);
     if (state.crossX !== null && spec.panels[v.panel].xg === state.crossGroup) {
       const x = Math.round(v.map.ox + state.crossX * v.map.sx) + 0.5;
       ctx.strokeStyle = theme.axis;
@@ -273,6 +276,43 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.strokeStyle = theme.accent;
     ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h);
   }
+}
+
+function drawText(ctx: CanvasRenderingContext2D, t: TextData, v: PanelView, theme: Theme): void {
+  const l = t.spec;
+  const r = v.rect;
+  const c = t.coords;
+  ctx.save();
+  ctx.font = `${l.size}px ${theme.font}`;
+  ctx.textAlign = l.align;
+  ctx.textBaseline = "middle";
+  ctx.globalAlpha = l.opacity * (l.context ? 0.35 : 1);
+  const solid = l.color ? `rgba(${l.color[0]},${l.color[1]},${l.color[2]},${l.color[3] / 255})` : theme.text;
+  ctx.fillStyle = solid;
+  const margin = 200;
+  for (let i = t.starts[v.panel]; i < t.starts[v.panel + 1]; i++) {
+    const x = v.map.ox + c[i * 2] * v.map.sx + l.dx;
+    const y = v.map.oy + c[i * 2 + 1] * v.map.sy + l.dy;
+    if (!(x > r.x - margin && x < r.x + r.w + margin && y > r.y - l.size && y < r.y + r.h + l.size)) continue;
+    if (t.colors) {
+      const k = i * 4;
+      ctx.fillStyle = `rgba(${t.colors[k]},${t.colors[k + 1]},${t.colors[k + 2]},${t.colors[k + 3] / 255})`;
+    }
+    const px = x - l.dx; // the point the label belongs to
+    if (l.align !== "center" && px >= r.x && px <= r.x + r.w) {
+      // a label running past the panel's edge goes to the other side of its point
+      const w = ctx.measureText(t.labels[i]).width;
+      const over = l.align === "left" ? x + w > r.x + r.w : x - w < r.x;
+      if (over) {
+        ctx.textAlign = l.align === "left" ? "right" : "left";
+        ctx.fillText(t.labels[i], px - l.dx, y);
+        ctx.textAlign = l.align;
+        continue;
+      }
+    }
+    ctx.fillText(t.labels[i], x, y);
+  }
+  ctx.restore();
 }
 
 function drawRule(ctx: CanvasRenderingContext2D, l: RuleLayerSpec, v: PanelView): void {

@@ -8,7 +8,7 @@ pip install anytrellis
 ```
 
 Status: early development (0.1). One panel per level of the facet columns, every panel
-drawn with the same layers (lines, points, bars, reference rules), on shared scales unless
+drawn with the same layers (lines, points, bars, areas, rects, text, reference rules), on shared scales unless
 told otherwise. Every panel goes into one canvas, so a grid of hundreds of panels and
 millions of marks stays interactive.
 
@@ -30,6 +30,26 @@ from anytrellis.synthetic import sales
 
 Trellis(sales(), row="store", col="product").bars(x="month", y="units")
 ```
+
+## Marks
+
+Each mark is a method that adds a layer; layers draw in the order they were added.
+
+| method | draws |
+|---|---|
+| `line(x, y, color, group)` | a line per group (and colour) |
+| `points(x, y, color, size)` | a point per row |
+| `bars(x, y, color, position="stack"\|"dodge"\|"identity")` | a bar per row, from zero |
+| `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |
+| `rect(x, y, color, width=1, height=1)` / `rect(x, y, x2=, y2=)` | a cell per row (a heatmap), or a box between two corners |
+| `text(x, y, text, color, size, align, dx, dy)` | a label per row |
+| `rule(x=..., y=...)` | reference lines across every panel |
+
+A number column as `color` gets a continuous scale (and a gradient legend); text gets a
+palette. On a category axis a rect is one band wide by default. A text label's `dx`/`dy`
+are pixels, so labels keep their distance while zooming, and a label that would run past
+the panel's edge goes to the other side of its point. Every mark but `text` and `rule`
+takes `tooltip=[...]` columns and can be selected.
 
 ## Facets and scales
 
@@ -87,8 +107,8 @@ t.select()                              # clear
 ```
 
 A brush drawn in the browser reaches Python when you let go, so `t.selected()` in the next
-cell gives its rows. A point is selected inside the brush, a line segment with either end
-inside, a bar overlapping it; grey context is never selected.
+cell gives its rows. A point is selected inside the brush, a line or area segment with
+either end inside, a bar or rect overlapping it; grey context is never selected.
 
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the

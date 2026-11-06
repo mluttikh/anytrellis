@@ -1,8 +1,9 @@
 """Layers: what each mark type draws, as geometry in axis units.
 
-Every mark becomes instances of two primitives the GPU draws: a rectangle between two
-corners (bars), or a capsule from one point to another (a line segment; a point is a
-capsule of zero length). ``Geometry`` holds them sorted by panel, with each instance's
+Every mark becomes instances of three primitives the GPU draws: a rectangle between two
+corners (bars, rects), a capsule from one point to another (a line segment; a point is a
+capsule of zero length), or a trapezoid from a segment down to its base (areas). Text is
+drawn as labels at points. ``Geometry`` holds them sorted by panel, with each instance's
 source row (for tooltips) and colour.
 
 Axis units: numbers as they are, times in milliseconds since 1970 (wall-clock), and
@@ -18,7 +19,7 @@ import numpy as np
 
 from anytrellis.data import Column, Table
 
-Mark = Literal["line", "points", "bars", "rule"]
+Mark = Literal["line", "points", "bars", "area", "rect", "text", "rule"]
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "dodge", "identity"]
 
@@ -43,6 +44,15 @@ class Layer:
     position: Position = "stack"
     bar_width: float = 0.8
     tooltip: list[str] = field(default_factory=list)
+    # rects: a second corner (else centred on x, y), a tile's height (a fraction of the step)
+    x2: str | None = None
+    y2: str | None = None
+    rect_height: float = 1.0
+    # text: the labels' column, alignment and offset (px)
+    text: str | None = None
+    align: Literal["left", "center", "right"] = "center"
+    dx: float = 0.0
+    dy: float = 0.0
     # rules: constant positions
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
@@ -66,6 +76,9 @@ class Geometry:
     """Per instance level of a category colour column (for tooltips)."""
     rows_end: np.ndarray | None = None
     """A line segment's end row (``rows`` is its start); None for points and bars."""
+    base0: np.ndarray | None = None
+    base1: np.ndarray | None = None
+    """An area's base at each end of a segment (its top is y0, y1); None otherwise."""
 
     @property
     def count(self) -> int:
@@ -82,6 +95,8 @@ class Geometry:
             None if self.rgba is None else self.rgba[order],
             None if self.codes is None else self.codes[order],
             None if self.rows_end is None else self.rows_end[order],
+            None if self.base0 is None else self.base0[order],
+            None if self.base1 is None else self.base1[order],
         )  # fmt: skip
 
 
@@ -141,6 +156,80 @@ def line_geometry(
     second = np.concatenate([pairs + 1, dots])
     geom = Geometry(panel[first], xs[first], ys[first], xs[second], ys[second], rows[first],
                     rows_end=rows[second])  # fmt: skip
+    return geom.take(np.argsort(geom.panel, kind="stable"))
+
+
+def area_geometry(
+    rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.ndarray, series: np.ndarray,
+    *, stack: bool,
+) -> Geometry:  # fmt: skip
+    """Areas from each series' line down to 0, or (``stack``) stacked on the series before
+    it at the same x (positives up, negatives down): a trapezoid per segment, split where
+    the line crosses its base."""
+    xs, ys, ss = x[rows], y[rows], series[rows]
+    keep = np.isfinite(xs) & np.isfinite(ys)
+    rows, panel, xs, ys, ss = rows[keep], panel[keep], xs[keep], ys[keep], ss[keep]
+    base = np.zeros(len(ys))
+    top = ys.copy()
+    if stack and len(ys):
+        order = np.lexsort((ss, xs, panel))
+        rows, panel, xs, ys, ss = rows[order], panel[order], xs[order], ys[order], ss[order]
+        base, top = _stack(panel, xs, ys)
+    # segments between consecutive points of a series, in x
+    order = np.lexsort((xs, ss, panel))
+    rows, panel, xs, ss, base, top = (a[order] for a in (rows, panel, xs, ss, base, top))
+    pair = np.flatnonzero((panel[1:] == panel[:-1]) & (ss[1:] == ss[:-1]))
+    a, b = pair, pair + 1
+    x0, x1 = xs[a], xs[b]
+    t0, t1, b0, b1 = top[a], top[b], base[a], base[b]
+    r0, r1, pn = rows[a], rows[b], panel[a]
+    # where the line crosses its base, two trapezoids meeting there
+    d0, d1 = t0 - b0, t1 - b1
+    cross = (d0 * d1) < 0
+    if cross.any():
+        f = d0[cross] / (d0[cross] - d1[cross])
+        xm = x0[cross] + f * (x1[cross] - x0[cross])
+        ym = b0[cross] + f * (b1[cross] - b0[cross])
+        keep_ = ~cross
+        x0 = np.concatenate([x0[keep_], x0[cross], xm])
+        x1 = np.concatenate([x1[keep_], xm, x1[cross]])
+        t0 = np.concatenate([t0[keep_], t0[cross], ym])
+        t1 = np.concatenate([t1[keep_], ym, t1[cross]])
+        nb0 = np.concatenate([b0[keep_], b0[cross], ym])
+        nb1 = np.concatenate([b1[keep_], ym, b1[cross]])
+        b0, b1 = nb0, nb1
+        r0 = np.concatenate([r0[keep_], r0[cross], r0[cross]])
+        r1 = np.concatenate([r1[keep_], r1[cross], r1[cross]])
+        pn = np.concatenate([pn[keep_], pn[cross], pn[cross]])
+    geom = Geometry(pn, x0, t0, x1, t1, r0, rows_end=r1, base0=b0, base1=b1)
+    return geom.take(np.lexsort((geom.x0, pn)))
+
+
+def rect_geometry(
+    rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.ndarray,
+    x2: np.ndarray | None, y2: np.ndarray | None,
+    *, x_step: float, y_step: float, width: float, height: float,
+) -> Geometry:  # fmt: skip
+    """Tiles: from (x, y) to (x2, y2) where given, else centred on x (y), ``width``
+    (``height``) of the step between values wide (high): a heatmap's cells."""
+    xs, ys = x[rows], y[rows]
+    xe = x2[rows] if x2 is not None else None
+    ye = y2[rows] if y2 is not None else None
+    keep = np.isfinite(xs) & np.isfinite(ys)
+    if xe is not None:
+        keep &= np.isfinite(xe)
+    if ye is not None:
+        keep &= np.isfinite(ye)
+    rows, panel, xs, ys = rows[keep], panel[keep], xs[keep], ys[keep]
+    if xe is not None:
+        x0, x1 = xs, xe[keep]
+    else:
+        x0, x1 = xs - width * x_step / 2, xs + width * x_step / 2
+    if ye is not None:
+        y0, y1 = ys, ye[keep]
+    else:
+        y0, y1 = ys - height * y_step / 2, ys + height * y_step / 2
+    geom = Geometry(panel, x0, y0, x1, y1, rows)
     return geom.take(np.argsort(geom.panel, kind="stable"))
 
 

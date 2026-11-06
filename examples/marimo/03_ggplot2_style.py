@@ -210,5 +210,65 @@ def _(Trellis, known, pl):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `geom_area`
+
+    ```r
+    ggplot(population, aes(year, people, fill = age, group = age)) + geom_area() + facet_wrap(~ sex)
+    ```
+
+    Areas stack like bars do (`position="identity"` overlaps them instead); a number column as
+    the colour gets a continuous scale.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, load):
+    by_age = load("population")
+
+    ages = (
+        Trellis(by_age, wrap="sex", title="US population by age group")
+        .area(x="year", y="people", color="age", group="age", tooltip=["age"])
+    )
+    ages
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `geom_text`
+
+    ```r
+    ggplot(eight, aes(fertility, life_expect, label = country)) + geom_point(aes(colour = region)) +
+      geom_text(hjust = 0, nudge_x = 0.1) + facet_wrap(~ year)
+    ```
+
+    `dx=` and `dy=` move labels by pixels, so they keep their distance while zooming; a label
+    that would run past the panel's edge goes to the other side of its point.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, gapminder, pl):
+    eight = gapminder.filter(
+        pl.col("year").is_in([1955, 2005])
+        & pl.col("country").is_in(["China", "India", "Japan", "Netherlands", "Brazil", "Nigeria",
+                                   "United States", "Egypt"])
+    )
+
+    labelled = (
+        Trellis(eight, wrap="year", title="Eight countries, 1955 and 2005")
+        .points(x="fertility", y="life_expect", color="region", size=7)
+        .text(x="fertility", y="life_expect", text="country", align="left", dx=6)
+    )
+    labelled
+    return
+
+
 if __name__ == "__main__":
     app.run()

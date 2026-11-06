@@ -93,7 +93,11 @@ def _(Trellis, load, pl):
     quartet = load("anscombe")
     fitted = (
         quartet.group_by("dataset")
-        .agg(slope=pl.cov("x", "y") / pl.col("x").var(), mx=pl.col("x").mean(), my=pl.col("y").mean())
+        .agg(
+            slope=pl.cov("x", "y") / pl.col("x").var(),
+            mx=pl.col("x").mean(),
+            my=pl.col("y").mean(),
+        )
         .join(pl.DataFrame({"x": [3.0, 20.0]}), how="cross")
         .with_columns(y=pl.col("my") + pl.col("slope") * (pl.col("x") - pl.col("mx")))
     )

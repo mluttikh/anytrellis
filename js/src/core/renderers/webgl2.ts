@@ -9,6 +9,7 @@ interface Cached {
   version: number;
   coords: WebGLBuffer;
   colors: WebGLBuffer;
+  base: WebGLBuffer | null;
   /** The coordinates uploaded: a new version with the same array only re-sends colours. */
   source: Float32Array | null;
 }
@@ -23,6 +24,7 @@ export class WebGL2Renderer implements Renderer {
   private readonly loc: Record<string, WebGLUniformLocation | null>;
   private readonly aCoords: number;
   private readonly aColor: number;
+  private readonly aBase: number;
   private readonly cache = new Map<string, Cached>();
   private dpr = 1;
   private cssW = 1;
@@ -49,6 +51,7 @@ export class WebGL2Renderer implements Renderer {
     this.vao = gl.createVertexArray()!;
     this.aCoords = gl.getAttribLocation(this.program, "a_coords");
     this.aColor = gl.getAttribLocation(this.program, "a_color");
+    this.aBase = gl.getAttribLocation(this.program, "a_base");
     this.loc = {};
     for (const n of ["u_canvas", "u_map", "u_shape", "u_opacity", "u_dpr"]) this.loc[n] = gl.getUniformLocation(this.program, n);
     canvas.addEventListener("webglcontextlost", (e) => {
@@ -73,13 +76,18 @@ export class WebGL2Renderer implements Renderer {
     let c = this.cache.get(set.key);
     if (c && c.version === set.version) return c;
     if (!c) {
-      c = { version: -1, coords: gl.createBuffer()!, colors: gl.createBuffer()!, source: null };
+      c = { version: -1, coords: gl.createBuffer()!, colors: gl.createBuffer()!, base: null, source: null };
       this.cache.set(set.key, c);
     }
     if (c.source !== set.coords) {
       gl.bindBuffer(gl.ARRAY_BUFFER, c.coords);
       gl.bufferData(gl.ARRAY_BUFFER, set.coords, gl.STATIC_DRAW);
       c.source = set.coords;
+      if (set.base) {
+        c.base ??= gl.createBuffer()!;
+        gl.bindBuffer(gl.ARRAY_BUFFER, c.base);
+        gl.bufferData(gl.ARRAY_BUFFER, set.base, gl.STATIC_DRAW);
+      }
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, c.colors);
     gl.bufferData(gl.ARRAY_BUFFER, set.colors, gl.DYNAMIC_DRAW);
@@ -118,6 +126,17 @@ export class WebGL2Renderer implements Renderer {
       gl.enableVertexAttribArray(this.aColor);
       gl.vertexAttribPointer(this.aColor, 4, gl.UNSIGNED_BYTE, true, 4, d.start * 4);
       gl.vertexAttribDivisor(this.aColor, 1);
+      if (this.aBase >= 0) {
+        if (c.base) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, c.base);
+          gl.enableVertexAttribArray(this.aBase);
+          gl.vertexAttribPointer(this.aBase, 2, gl.FLOAT, false, 8, d.start * 8);
+          gl.vertexAttribDivisor(this.aBase, 1);
+        } else {
+          gl.disableVertexAttribArray(this.aBase);
+          gl.vertexAttrib2f(this.aBase, 0, 0);
+        }
+      }
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, d.count);
     }
     gl.disable(gl.SCISSOR_TEST);
@@ -129,6 +148,7 @@ export class WebGL2Renderer implements Renderer {
       if (keys.has(key)) continue;
       this.gl.deleteBuffer(c.coords);
       this.gl.deleteBuffer(c.colors);
+      if (c.base) this.gl.deleteBuffer(c.base);
       this.cache.delete(key);
     }
   }

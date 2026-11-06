@@ -34,8 +34,6 @@ def _(mo):
 
 @app.cell
 def _():
-    import polars as pl
-
     from anytrellis import Trellis
     from anytrellis.datasets import load
 

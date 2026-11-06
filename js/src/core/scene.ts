@@ -2,8 +2,8 @@
 // panel's base (its initial domain's low end, so float32 keeps precision for times), RGBA
 // bytes, and the panel ranges. Also finding the instance nearest the pointer (hover).
 
-import { type InstanceSet, KIND_CAPSULE, KIND_RECT } from "./renderers/renderer";
-import type { BufferRef, DataSource, MarkLayerSpec, TrellisSpec } from "./types";
+import { type InstanceSet, KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "./renderers/renderer";
+import type { BufferRef, DataSource, MarkLayerSpec, TextLayerSpec, TrellisSpec } from "./types";
 import { isMark } from "./types";
 
 export interface LayerData {
@@ -15,6 +15,8 @@ export interface LayerData {
   starts: Uint32Array;
   set: InstanceSet;
   codes: Uint16Array | null;
+  /** Areas: the base at each end of an instance (axis units, relative to the origin). */
+  base: Float64Array | null;
   /** Each instance's link key, or null: the layer is not linked. */
   link: Uint32Array | null;
   kind: number;
@@ -22,9 +24,19 @@ export interface LayerData {
   halfWidth: number;
 }
 
+/** A text layer: its labels decoded, at points (axis units, relative to the origins). */
+export interface TextData {
+  spec: TextLayerSpec;
+  coords: Float64Array;
+  starts: Uint32Array;
+  labels: string[];
+  colors: Uint8Array | null;
+}
+
 export interface Scene {
   spec: TrellisSpec;
   layers: LayerData[];
+  texts: TextData[];
   /** Each panel's base: its initial domain's low end on x and y. */
   baseX: Float64Array;
   baseY: Float64Array;
@@ -35,11 +47,16 @@ let nextVersion = 1;
 export function bufferIds(spec: TrellisSpec): string[] {
   const ids: string[] = [];
   for (const l of spec.layers) {
+    if (l.type === "text") {
+      ids.push(l.coords.id, l.starts.id, l.labels.id, l.offsets.id);
+      if (l.colors) ids.push(l.colors.id);
+    }
     if (!isMark(l)) continue;
     ids.push(l.coords.id, l.starts.id);
     if (l.color.rgba) ids.push(l.color.rgba.id);
     if (l.color.codes) ids.push(l.color.codes.id);
     if (l.link) ids.push(l.link.id);
+    if (l.base) ids.push(l.base.id);
   }
   return ids;
 }
@@ -95,21 +112,49 @@ export function buildScene(spec: TrellisSpec, source: DataSource): Scene {
       const [r, g, b, a] = l.color.solid ?? [76, 86, 106, 255];
       for (let i = 0; i < n; i++) colors.set([r, g, b, a], i * 4);
     }
-    const kind = l.type === "bars" ? KIND_RECT : KIND_CAPSULE;
+    let base: Float32Array | undefined;
+    const b64 = l.base ? (view(source, l.base) as Float64Array) : null;
+    if (b64) {
+      base = new Float32Array(n * 2);
+      for (let p = 0; p < np; p++) {
+        for (let i = starts[p]; i < starts[p + 1]; i++) {
+          base[i * 2] = b64[i * 2] - baseY[p];
+          base[i * 2 + 1] = b64[i * 2 + 1] - baseY[p];
+        }
+      }
+    }
+    const kind = l.type === "bars" || l.type === "rect" ? KIND_RECT : l.type === "area" ? KIND_TRAP : KIND_CAPSULE;
     const halfWidth = l.type === "line" ? l.width / 2 : l.type === "points" ? l.size / 2 : 0;
     layers.push({
       spec: l,
       index,
       coords,
       starts,
-      set: { key: `${l.coords.id}:${l.color.rgba?.id ?? l.color.solid?.join(",")}`, version: nextVersion++, count: n, coords: f32, colors },
+      set: { key: `${l.coords.id}:${l.color.rgba?.id ?? l.color.solid?.join(",")}`, version: nextVersion++, count: n, coords: f32, colors, base },
       codes: l.color.codes ? (view(source, l.color.codes) as Uint16Array) : null,
       link: l.link ? (view(source, l.link) as Uint32Array) : null,
+      base: b64,
       kind,
       halfWidth,
     });
   });
-  return { spec, layers, baseX, baseY };
+  const decoder = new TextDecoder();
+  const texts: TextData[] = [];
+  for (const l of spec.layers) {
+    if (l.type !== "text") continue;
+    const bytes = view(source, l.labels) as Uint8Array;
+    const offsets = view(source, l.offsets) as Uint32Array;
+    const labels: string[] = new Array(l.count);
+    for (let i = 0; i < l.count; i++) labels[i] = decoder.decode(bytes.subarray(offsets[i], offsets[i + 1]));
+    texts.push({
+      spec: l,
+      coords: view(source, l.coords) as Float64Array,
+      starts: view(source, l.starts) as Uint32Array,
+      labels,
+      colors: l.colors ? (view(source, l.colors) as Uint8Array) : null,
+    });
+  }
+  return { spec, layers, texts, baseX, baseY };
 }
 
 /** Maps a panel's data (axis units) to CSS px: screen = o + v * s. */
@@ -141,7 +186,18 @@ export function pick(scene: Scene, p: number, map: PanelMap, px: number, py: num
       const bx = map.ox + c[i * 4 + 2] * map.sx;
       const by = map.oy + c[i * 4 + 3] * map.sy;
       let d: number;
-      if (layer.kind === KIND_RECT) {
+      if (layer.kind === KIND_TRAP && layer.set.base) {
+        // inside the area: 0; else the nearer end of its top
+        const sb = layer.set.base;
+        const off = map.oy + scene.baseY[p] * map.sy;
+        const lo = Math.min(ax, bx);
+        const hi = Math.max(ax, bx);
+        const t = hi > lo ? (px - ax) / (bx - ax) : 0;
+        const top = ay + (by - ay) * t;
+        const bottom = off + (sb[i * 2] + (sb[i * 2 + 1] - sb[i * 2]) * t) * map.sy;
+        const inside = px >= lo && px <= hi && py >= Math.min(top, bottom) && py <= Math.max(top, bottom);
+        d = inside ? 0 : Math.min(Math.hypot(px - ax, py - ay), Math.hypot(px - bx, py - by));
+      } else if (layer.kind === KIND_RECT) {
         const dx = Math.max(Math.min(ax, bx) - px, 0, px - Math.max(ax, bx));
         const dy = Math.max(Math.min(ay, by) - py, 0, py - Math.max(ay, by));
         d = Math.hypot(dx, dy);
@@ -162,13 +218,17 @@ export function pick(scene: Scene, p: number, map: PanelMap, px: number, py: num
 export function hitPoint(hit: Hit, map: PanelMap, px: number, py: number): { x: number; y: number; y0: number } {
   const c = hit.layer.coords;
   const i = hit.instance;
+  const type = hit.layer.spec.type;
+  if (type === "rect") return { x: (c[i * 4] + c[i * 4 + 2]) / 2, y: (c[i * 4 + 1] + c[i * 4 + 3]) / 2, y0: 0 };
   if (hit.layer.kind === KIND_RECT) return { x: (c[i * 4] + c[i * 4 + 2]) / 2, y: c[i * 4 + 3], y0: c[i * 4 + 1] };
-  if (hit.layer.spec.type === "line") {
+  // y0: an area's base there (its value is y - y0); 0 otherwise
+  const base = hit.layer.base;
+  if (type === "line" || type === "area") {
     const da = Math.hypot(px - (map.ox + c[i * 4] * map.sx), py - (map.oy + c[i * 4 + 1] * map.sy));
     const db = Math.hypot(px - (map.ox + c[i * 4 + 2] * map.sx), py - (map.oy + c[i * 4 + 3] * map.sy));
-    if (db < da) return { x: c[i * 4 + 2], y: c[i * 4 + 3], y0: 0 };
+    if (db < da) return { x: c[i * 4 + 2], y: c[i * 4 + 3], y0: base ? base[i * 2 + 1] : 0 };
   }
-  return { x: c[i * 4], y: c[i * 4 + 1], y0: 0 };
+  return { x: c[i * 4], y: c[i * 4 + 1], y0: base ? base[i * 2] : 0 };
 }
 
 /** The y extent of panel `p`'s own marks (not grey context) where x is in [x0, x1]: a line
@@ -200,9 +260,15 @@ export function yExtent(scene: Scene, p: number, x0: number, x1: number): { lo: 
       let by = c[i * 4 + 3];
       if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1) continue;
       if (rect) {
-        add(ay, true); // the base
+        add(ay, layer.spec.type === "bars"); // a bar's base
         add(by, false);
         continue;
+      }
+      const base = layer.set.base;
+      if (base) {
+        // an area's base (relative to the panel's): kept unpadded
+        add(base[i * 2] + scene.baseY[p], true);
+        add(base[i * 2 + 1] + scene.baseY[p], true);
       }
       if (ax !== bx) {
         // clip the segment to [x0, x1]

@@ -1,10 +1,12 @@
 // The one primitive, in GLSL (WebGL2) and WGSL (WebGPU): six vertices per instance, a box
-// for a rectangle or a capsule around a segment, antialiased by distance in the fragment.
+// for a rectangle, a capsule around a segment (antialiased by distance in the fragment), or
+// a trapezoid from a segment to its base (areas: two triangles, vertical sides).
 
 export const GLSL_VS = /* glsl */ `#version 300 es
 precision highp float;
 in vec4 a_coords;
 in vec4 a_color;
+in vec2 a_base;
 uniform vec2 u_canvas;
 uniform vec4 u_map;
 uniform vec2 u_shape;
@@ -24,7 +26,17 @@ void main() {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
-  if (v_kind == 0) {
+  if (v_kind == 2) {
+    float ba = u_map.w + a_base.x * u_map.z;
+    float bb = u_map.w + a_base.y * u_map.z;
+    if (isnan(ba) || isnan(bb)) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      return;
+    }
+    px = vec2(mix(a.x, b.x, corner.x), mix(mix(a.y, ba, corner.y), mix(b.y, bb, corner.y), corner.x));
+    v_local = vec2(0.0);
+    v_seg = vec2(0.0);
+  } else if (v_kind == 0) {
     vec2 lo = min(a, b);
     vec2 hi = max(a, b);
     vec2 mid = (lo + hi) * 0.5;
@@ -93,7 +105,7 @@ fn bad(v: f32) -> bool {
 }
 
 @vertex
-fn vs(@builtin(vertex_index) vi: u32, @location(0) coords: vec4f, @location(1) color: vec4f) -> Out {
+fn vs(@builtin(vertex_index) vi: u32, @location(0) coords: vec4f, @location(1) color: vec4f, @location(2) base: vec2f) -> Out {
   var o: Out;
   let c = vi % 6u;
   let corner = vec2f(select(0.0, 1.0, c == 1u || c == 2u || c == 4u), select(0.0, 1.0, c == 2u || c == 4u || c == 5u));
@@ -106,7 +118,17 @@ fn vs(@builtin(vertex_index) vi: u32, @location(0) coords: vec4f, @location(1) c
     return o;
   }
   var px: vec2f;
-  if (o.kind == 0u) {
+  if (o.kind == 2u) {
+    let ba = u.map.w + base.x * u.map.z;
+    let bb = u.map.w + base.y * u.map.z;
+    if (bad(base.x) || bad(base.y)) {
+      o.pos = vec4f(2.0, 2.0, 2.0, 1.0);
+      return o;
+    }
+    px = vec2f(mix(a.x, b.x, corner.x), mix(mix(a.y, ba, corner.y), mix(b.y, bb, corner.y), corner.x));
+    o.local = vec2f(0.0);
+    o.seg = vec2f(0.0);
+  } else if (o.kind == 0u) {
     let mid = (min(a, b) + max(a, b)) * 0.5;
     let half = max((max(a, b) - min(a, b)) * 0.5, vec2f(0.5));
     px = mix(mid - half, mid + half, corner);

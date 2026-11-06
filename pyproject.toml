@@ -87,7 +87,7 @@ target-version = "py312"
 extend-exclude = ["_scratch"]
 
 [tool.ruff.format]
-exclude = ["*.md", "*.ipynb"]
+exclude = ["*.md", "*.ipynb", "examples/marimo/*.py"]  # generated, laid out by hand
 
 [tool.ruff.lint]
 select = [

@@ -13,7 +13,9 @@ const UNIFORM_FLOATS = 12;
 interface Shared {
   device: GPUDevice;
   adapterName: string;
-  pipelines: Map<GPUTextureFormat, { pipeline: GPURenderPipeline; layout: GPUBindGroupLayout }>;
+  /** Per format and whether sets bring a base (trapezoids): without, a constant one. */
+  pipelines: Map<string, { pipeline: GPURenderPipeline; layout: GPUBindGroupLayout }>;
+  layout: GPUBindGroupLayout | null;
 }
 
 let shared: Promise<Shared | null> | null = null;
@@ -32,19 +34,21 @@ async function device(allowSoftware: boolean): Promise<Shared | null> {
       dev.lost.then(() => {
         shared = null;
       });
-      return { device: dev, adapterName: name, pipelines: new Map() };
+      return { device: dev, adapterName: name, pipelines: new Map(), layout: null };
     })().catch(() => null);
   }
   return shared;
 }
 
-function pipelineFor(s: Shared, format: GPUTextureFormat): { pipeline: GPURenderPipeline; layout: GPUBindGroupLayout } {
-  let p = s.pipelines.get(format);
+function pipelineFor(s: Shared, format: GPUTextureFormat, withBase = false): { pipeline: GPURenderPipeline; layout: GPUBindGroupLayout } {
+  const id = `${format}:${withBase}`;
+  let p = s.pipelines.get(id);
   if (p) return p;
   const module = s.device.createShaderModule({ code: WGSL });
-  const layout = s.device.createBindGroupLayout({
+  s.layout ??= s.device.createBindGroupLayout({
     entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform", hasDynamicOffset: true } }],
   });
+  const layout = s.layout;
   const pipeline = s.device.createRenderPipeline({
     layout: s.device.createPipelineLayout({ bindGroupLayouts: [layout] }),
     vertex: {
@@ -53,6 +57,8 @@ function pipelineFor(s: Shared, format: GPUTextureFormat): { pipeline: GPURender
       buffers: [
         { arrayStride: 16, stepMode: "instance", attributes: [{ shaderLocation: 0, offset: 0, format: "float32x4" }] },
         { arrayStride: 4, stepMode: "instance", attributes: [{ shaderLocation: 1, offset: 0, format: "unorm8x4" }] },
+        // a set's base, or (stride 0) one constant for sets without
+        { arrayStride: withBase ? 8 : 0, stepMode: "instance", attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }] },
       ],
     },
     fragment: {
@@ -71,7 +77,7 @@ function pipelineFor(s: Shared, format: GPUTextureFormat): { pipeline: GPURender
     primitive: { topology: "triangle-list" },
   });
   p = { pipeline, layout };
-  s.pipelines.set(format, p);
+  s.pipelines.set(id, p);
   return p;
 }
 
@@ -79,6 +85,7 @@ interface Cached {
   version: number;
   coords: GPUBuffer;
   colors: GPUBuffer;
+  base: GPUBuffer | null;
   /** The coordinates uploaded: a new version with the same array only re-sends colours. */
   source: Float32Array;
 }
@@ -89,6 +96,7 @@ export class WebGPURenderer implements Renderer {
   onFailure: ((reason: string) => void) | null = null;
   private readonly cache = new Map<string, Cached>();
   private uniforms: GPUBuffer | null = null;
+  private noBase: GPUBuffer | null = null;
   private bindGroup: GPUBindGroup | null = null;
   private capacity = 0;
   private dpr = 1;
@@ -143,6 +151,7 @@ export class WebGPURenderer implements Renderer {
     if (c) {
       c.coords.destroy();
       c.colors.destroy();
+      c.base?.destroy();
     }
     const make = (data: ArrayBufferView): GPUBuffer => {
       const size = Math.max(16, Math.ceil(data.byteLength / 4) * 4);
@@ -150,7 +159,7 @@ export class WebGPURenderer implements Renderer {
       if (data.byteLength) dev.queue.writeBuffer(b, 0, data.buffer, data.byteOffset, Math.floor(data.byteLength / 4) * 4);
       return b;
     };
-    c = { version: set.version, coords: make(set.coords), colors: make(colors), source: set.coords };
+    c = { version: set.version, coords: make(set.coords), colors: make(colors), base: set.base ? make(set.base) : null, source: set.coords };
     this.cache.set(set.key, c);
     return c;
   }
@@ -178,12 +187,18 @@ export class WebGPURenderer implements Renderer {
     const pass = encoder.beginRenderPass({
       colorAttachments: [{ view: this.context.getCurrentTexture().createView(), loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
     });
-    const { pipeline } = pipelineFor(this.s, this.format);
-    pass.setPipeline(pipeline);
+    this.noBase ??= this.s.device.createBuffer({ size: 16, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    let bound: GPURenderPipeline | null = null;
     draws.forEach((d, i) => {
       const clip = deviceClip(d.clip, this.dpr, this.canvas.width, this.canvas.height);
       if (!clip) return;
       const c = this.upload(d.set);
+      const { pipeline } = pipelineFor(this.s, this.format, c.base !== null);
+      if (pipeline !== bound) {
+        pass.setPipeline(pipeline);
+        bound = pipeline;
+      }
+      pass.setVertexBuffer(2, c.base ?? this.noBase!);
       pass.setScissorRect(clip[0], clip[1], clip[2], clip[3]);
       pass.setBindGroup(0, this.bindGroup!, [i * STRIDE]);
       pass.setVertexBuffer(0, c.coords);
@@ -199,6 +214,7 @@ export class WebGPURenderer implements Renderer {
       if (keys.has(key)) continue;
       c.coords.destroy();
       c.colors.destroy();
+      c.base?.destroy();
       this.cache.delete(key);
     }
   }
@@ -206,6 +222,7 @@ export class WebGPURenderer implements Renderer {
   destroy(): void {
     this.retain(new Set());
     this.uniforms?.destroy();
+    this.noBase?.destroy();
     this.context.unconfigure();
   }
 }

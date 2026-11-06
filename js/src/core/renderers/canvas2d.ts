@@ -2,7 +2,7 @@
 // filled or stroked as one path.
 
 import type { RendererKind } from "../types";
-import { type Frame, KIND_RECT, type Renderer } from "./renderer";
+import { type Frame, KIND_RECT, KIND_TRAP, type Renderer } from "./renderer";
 
 export class Canvas2DRenderer implements Renderer {
   readonly kind: RendererKind = "canvas2d";
@@ -45,12 +45,12 @@ export class Canvas2DRenderer implements Renderer {
       ctx.globalAlpha = d.opacity;
       ctx.lineCap = "round";
       ctx.lineWidth = Math.max(0.5, d.halfWidth * 2);
-      const { coords, colors } = d.set;
+      const { coords, colors, base } = d.set;
       let style = -1;
       let open = false;
       const flush = (): void => {
         if (!open) return;
-        if (d.kind === KIND_RECT) ctx.fill();
+        if (d.kind === KIND_RECT || d.kind === KIND_TRAP) ctx.fill();
         else ctx.stroke();
         open = false;
       };
@@ -70,7 +70,16 @@ export class Canvas2DRenderer implements Renderer {
         const bx = d.ox + coords[i * 4 + 2] * d.sx;
         const by = d.oy + coords[i * 4 + 3] * d.sy;
         if (!Number.isFinite(ax + ay + bx + by)) continue;
-        if (d.kind === KIND_RECT) {
+        if (d.kind === KIND_TRAP && base) {
+          const ba = d.oy + base[i * 2] * d.sy;
+          const bb = d.oy + base[i * 2 + 1] * d.sy;
+          if (!Number.isFinite(ba + bb)) continue;
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.lineTo(bx, bb);
+          ctx.lineTo(ax, ba);
+          ctx.closePath();
+        } else if (d.kind === KIND_RECT) {
           const x = Math.min(ax, bx);
           const y = Math.min(ay, by);
           ctx.rect(x, y, Math.max(1, Math.abs(bx - ax)), Math.max(1, Math.abs(by - ay)));

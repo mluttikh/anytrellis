@@ -1,9 +1,9 @@
 """Selections: a brush (an interval on x, on y or both) that selects the marks it meets, in
 every panel or in one, grown by link keys to every row sharing a key with a selected one.
 
-The browser and Python agree on what a brush selects: a point inside it, a line segment
-with either end inside (both its rows), a bar overlapping it (its row). Context layers
-(``facet="exclude"``) are never selected.
+The browser and Python agree on what a brush selects: a point inside it, a line or area
+segment with either end inside (both its rows), a bar or rect overlapping it (its row).
+Context layers (``facet="exclude"``) are never selected.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def row_mask(mark: str, geom: Geometry, n: int, x: tuple[float, float] | None,
     y0, y1 = sorted(y) if y is not None else (-np.inf, np.inf)
     rows = np.zeros(n, dtype=bool)
     here = np.ones(geom.count, dtype=bool) if panel is None else geom.panel == panel
-    if mark == "bars":
+    if mark in ("bars", "rect"):
         hit = here & (
             (np.maximum(geom.x0, geom.x1) >= x0) & (np.minimum(geom.x0, geom.x1) <= x1)
             & (np.maximum(geom.y0, geom.y1) >= y0) & (np.minimum(geom.y0, geom.y1) <= y1)

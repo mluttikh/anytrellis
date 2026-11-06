@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { layout } from "../src/core/layout";
 import { type Scene, pick, yExtent } from "../src/core/scene";
 import { FADED, select, selectionColors } from "../src/core/selection";
-import { KIND_CAPSULE, KIND_RECT } from "../src/core/renderers/renderer";
+import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatNumber, formatValue, niceStep, ticks } from "../src/core/ticks";
 import type { MarkLayerSpec, PanelSpec, TrellisSpec } from "../src/core/types";
@@ -161,6 +161,7 @@ function layer(type: MarkLayerSpec["type"], coords: number[], kind: number, half
     set: { key: "k", version: 1, count: n, coords: new Float32Array(coords), colors: new Uint8Array(n * 4) },
     codes: null,
     link: null as Uint32Array | null,
+    base: null as Float64Array | null,
     kind,
     halfWidth,
   };
@@ -246,6 +247,28 @@ describe("select", () => {
     const { dim, hi } = selectionColors(l as never, new Uint8Array([0, 1]), null);
     expect(dim[3]).toBe(Math.round(200 * FADED));
     expect([...hi]).toEqual([0, 0, 0, 0, 40, 50, 60, 255]);
+  });
+});
+
+describe("areas", () => {
+  // a trapezoid from (0, 4) to (10, 8), down to a base at 2
+  const area = () => {
+    const l = layer("area", [0, 4, 10, 8], KIND_TRAP, 0);
+    l.base = new Float64Array([2, 2]);
+    (l.set as { base?: Float32Array }).base = new Float32Array([2, 2]);
+    return l;
+  };
+  const map = { sx: 10, ox: 0, sy: -10, oy: 100 }; // x px = 10x, y px = 100 - 10y
+
+  it("is hovered inside, between its top and its base", () => {
+    const scene = { layers: [area()], baseY: new Float64Array([0]) } as unknown as Scene;
+    expect(pick(scene, 0, map, 50, 100 - 10 * 4, 4)?.distance).toBe(0); // x 5, y 4
+    expect(pick(scene, 0, map, 50, 100 - 10 * 1, 4)).toBeNull(); // below the base
+  });
+
+  it("fits y to its top and its base", () => {
+    const scene = { layers: [area()], baseY: new Float64Array([0]) } as unknown as Scene;
+    expect(yExtent(scene, 0, 0, 5)).toEqual({ lo: 2, hi: 6, baseLo: true, baseHi: false });
   });
 });
 

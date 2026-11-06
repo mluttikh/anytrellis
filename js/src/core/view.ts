@@ -122,7 +122,7 @@ export class TrellisView {
   private yView = new Map<number, Range>();
   private views: PanelView[] = [];
   private frameRequested = false;
-  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: [] };
+  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: [], texts: [] };
   private drag: Drag | null = null;
   /** What plain drag does: pan, draw a zoom box, or draw a brush. Shift+drag: a zoom box
    * (in zoom mode: pan). */
@@ -419,8 +419,8 @@ export class TrellisView {
       const { dim, hi } = selectionColors(layer, mask, prev?.dim.colors ?? null);
       const coords = layer.set.coords;
       return {
-        dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords, colors: dim },
-        hi: { key: `${layer.set.key}:hi`, version: (prev?.hi.version ?? 0) + 1, count: layer.set.count, coords, colors: hi },
+        dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords, colors: dim, base: layer.set.base },
+        hi: { key: `${layer.set.key}:hi`, version: (prev?.hi.version ?? 0) + 1, count: layer.set.count, coords, colors: hi, base: layer.set.base },
       };
     });
   }
@@ -776,6 +776,7 @@ export class TrellisView {
     const front = this.front.getContext("2d")!;
     front.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     front.clearRect(0, 0, this.width, this.lay.height);
+    this.front_.texts = this.scene.texts;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.theme, this.front_);
   }
@@ -1089,7 +1090,8 @@ export class TrellisView {
     const layer = hit.layer;
     const rows: [string, string][] = [];
     const keys = spec.panels[p].keys.join(" · ");
-    const isBar = layer.kind === 0;
+    // a bar's or a stacked area's own value: from its base
+    const isBar = layer.spec.type === "bars" || layer.spec.type === "area";
     rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels)]);
     rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels)]);
     const legend = layer.spec.color.legend;

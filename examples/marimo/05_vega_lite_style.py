@@ -69,7 +69,7 @@ def _(Trellis, load):
         .line(x="date", y="price", color="symbol", tooltip=["symbol"])
     )
     rows
-    return
+    return (stocks,)
 
 
 @app.cell(hide_code=True)
@@ -119,6 +119,58 @@ def _(Trellis, load, pl):
         .points(x="fertility", y="life_expect", color="region", size=7, tooltip=["country"])
     )
     columns
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## A trellis of heatmaps
+
+    ```python
+    alt.Chart(weather).mark_rect() \
+        .encode(x="date(date):O", y="month(date):O", color="max(temp_max)") \
+        .facet(facet="year(date)", columns=2)
+    ```
+
+    `rect()` draws a cell per row, centred on x and y (`width=`/`height=` in data units, one by
+    default); `x2=`/`y2=` give the corners instead.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, load, pl):
+    daily = load("seattle_weather").with_columns(
+        year=pl.col("date").dt.year(), month=pl.col("date").dt.month(), day=pl.col("date").dt.day()
+    )
+
+    heatmap = (
+        Trellis(daily, wrap="year", cols=2, panel_height=150, title="Seattle: daily high (°C)")
+        .rect(x="day", y="month", color="temp_max", tooltip=["date"])
+    )
+    heatmap
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Areas
+
+    `mark_area` under `mark_line`, each stock on its own y scale.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, stocks):
+    filled = (
+        Trellis(stocks, wrap="symbol", cols=3, share_y=False, title="Stock prices")
+        .area(x="date", y="price", color="symbol", opacity=0.5)
+        .line(x="date", y="price", color="symbol", tooltip=["symbol"])
+    )
+    filled
     return
 
 

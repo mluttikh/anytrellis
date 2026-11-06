@@ -64,7 +64,7 @@ is drawn on the GPU in one canvas, so millions of marks stay smooth.
 """
         + HOW_TO_USE
     ),
-    py(IMPORTS),
+    py(IMPORTS.replace("import polars as pl\n\n", "")),  # 01 uses no Polars
     py("""
 cars = load("cars")
 cars.head()
@@ -214,7 +214,11 @@ them: a second table with the `dataset` column lands in its own panels.
 quartet = load("anscombe")
 fitted = (
     quartet.group_by("dataset")
-    .agg(slope=pl.cov("x", "y") / pl.col("x").var(), mx=pl.col("x").mean(), my=pl.col("y").mean())
+    .agg(
+        slope=pl.cov("x", "y") / pl.col("x").var(),
+        mx=pl.col("x").mean(),
+        my=pl.col("y").mean(),
+    )
     .join(pl.DataFrame({"x": [3.0, 20.0]}), how="cross")
     .with_columns(y=pl.col("my") + pl.col("slope") * (pl.col("x") - pl.col("mx")))
 )
@@ -424,6 +428,50 @@ dodged = (
 )
 dodged
 """),
+    md("""
+## `geom_area`
+
+```r
+ggplot(population, aes(year, people, fill = age, group = age)) + geom_area() + facet_wrap(~ sex)
+```
+
+Areas stack like bars do (`position="identity"` overlaps them instead); a number column as
+the colour gets a continuous scale.
+"""),
+    py("""
+by_age = load("population")
+
+ages = (
+    Trellis(by_age, wrap="sex", title="US population by age group")
+    .area(x="year", y="people", color="age", group="age", tooltip=["age"])
+)
+ages
+"""),
+    md("""
+## `geom_text`
+
+```r
+ggplot(eight, aes(fertility, life_expect, label = country)) + geom_point(aes(colour = region)) +
+  geom_text(hjust = 0, nudge_x = 0.1) + facet_wrap(~ year)
+```
+
+`dx=` and `dy=` move labels by pixels, so they keep their distance while zooming; a label
+that would run past the panel's edge goes to the other side of its point.
+"""),
+    py("""
+eight = gapminder.filter(
+    pl.col("year").is_in([1955, 2005])
+    & pl.col("country").is_in(["China", "India", "Japan", "Netherlands", "Brazil", "Nigeria",
+                               "United States", "Egypt"])
+)
+
+labelled = (
+    Trellis(eight, wrap="year", title="Eight countries, 1955 and 2005")
+    .points(x="fertility", y="life_expect", color="region", size=7)
+    .text(x="fertility", y="life_expect", text="country", align="left", dx=6)
+)
+labelled
+"""),
 )
 
 # ---- 04 -----------------------------------------------------------------------------------
@@ -601,6 +649,42 @@ columns = (
     .points(x="fertility", y="life_expect", color="region", size=7, tooltip=["country"])
 )
 columns
+"""),
+    md("""
+## A trellis of heatmaps
+
+```python
+alt.Chart(weather).mark_rect() \\
+    .encode(x="date(date):O", y="month(date):O", color="max(temp_max)") \\
+    .facet(facet="year(date)", columns=2)
+```
+
+`rect()` draws a cell per row, centred on x and y (`width=`/`height=` in data units, one by
+default); `x2=`/`y2=` give the corners instead.
+"""),
+    py("""
+daily = load("seattle_weather").with_columns(
+    year=pl.col("date").dt.year(), month=pl.col("date").dt.month(), day=pl.col("date").dt.day()
+)
+
+heatmap = (
+    Trellis(daily, wrap="year", cols=2, panel_height=150, title="Seattle: daily high (°C)")
+    .rect(x="day", y="month", color="temp_max", tooltip=["date"])
+)
+heatmap
+"""),
+    md("""
+## Areas
+
+`mark_area` under `mark_line`, each stock on its own y scale.
+"""),
+    py("""
+filled = (
+    Trellis(stocks, wrap="symbol", cols=3, share_y=False, title="Stock prices")
+    .area(x="date", y="price", color="symbol", opacity=0.5)
+    .line(x="date", y="price", color="symbol", tooltip=["symbol"])
+)
+filled
 """),
 )
 

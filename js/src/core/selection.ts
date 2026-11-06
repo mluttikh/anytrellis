@@ -6,7 +6,7 @@
 // selected one, in all panels: brush some countries in 1955 and follow them in every year.
 //
 // A mark meets the brush: a point inside it; a line segment with either end inside; a bar
-// overlapping it. Grey context layers are never selected.
+// or rect overlapping it (an area: like a line). Grey context layers are never selected.
 
 import { KIND_RECT } from "./renderers/renderer";
 import type { LayerData, Scene } from "./scene";

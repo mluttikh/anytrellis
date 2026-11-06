@@ -59,7 +59,7 @@ export interface ColorSpec {
 }
 
 export interface MarkLayerSpec {
-  type: "line" | "points" | "bars";
+  type: "line" | "points" | "bars" | "area" | "rect";
   name: string;
   count: number;
   /** x0, y0, x1, y1 per instance (float64, relative to the axis origins), sorted by panel. */
@@ -79,6 +79,8 @@ export interface MarkLayerSpec {
   /** Per instance, its row's key of the link columns (uint32): a selection grows to every
    * mark sharing a key. Absent: not linked. */
   link?: BufferRef | null;
+  /** Areas: the base's y at each end of an instance (float64, 2 per instance). */
+  base?: BufferRef | null;
 }
 
 export interface RuleLayerSpec {
@@ -92,7 +94,29 @@ export interface RuleLayerSpec {
   dash: number[];
 }
 
-export type LayerSpec = MarkLayerSpec | RuleLayerSpec;
+/** Labels at points, drawn on the front canvas. */
+export interface TextLayerSpec {
+  type: "text";
+  name: string;
+  count: number;
+  /** x, y per label (float64, relative to the axis origins), sorted by panel. */
+  coords: BufferRef;
+  starts: BufferRef;
+  /** The labels as UTF-8 bytes; label i is bytes offsets[i] .. offsets[i + 1]. */
+  labels: BufferRef;
+  offsets: BufferRef;
+  /** RGBA per label (a colour column), else one colour, else the theme's text colour. */
+  colors: BufferRef | null;
+  color: [number, number, number, number] | null;
+  size: number;
+  align: "left" | "center" | "right";
+  dx: number;
+  dy: number;
+  opacity: number;
+  context: boolean;
+}
+
+export type LayerSpec = MarkLayerSpec | RuleLayerSpec | TextLayerSpec;
 
 export interface LegendSpec {
   title: string;
@@ -131,5 +155,5 @@ export type RendererKind = "webgpu" | "webgl2" | "canvas2d";
 export type RendererPreference = RendererKind | "auto";
 
 export function isMark(layer: LayerSpec): layer is MarkLayerSpec {
-  return layer.type !== "rule";
+  return layer.type !== "rule" && layer.type !== "text";
 }

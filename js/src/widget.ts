@@ -1,5 +1,6 @@
 // anywidget entry: connects a Python Trellis model (TrellisWidget) to TrellisView.
 
+import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
 import type { RendererPreference, TrellisSpec } from "./core/types";
@@ -103,7 +104,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     if (spec?.version) {
       view.setSpec(spec).catch((err) => view.setStatus(`Cannot draw: ${String(err)}`));
       // keep only the buffers some view of this model still shows
-      s.store.retain(new Set(bufferIdsOf(spec)));
+      s.store.retain(new Set(bufferIds(spec)));
     }
   };
   // Trellis.open / close in Python (or another view of the same widget)
@@ -123,17 +124,6 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     s.views.delete(view);
     view.destroy();
   };
-}
-
-function bufferIdsOf(spec: TrellisSpec): string[] {
-  const ids: string[] = [];
-  for (const l of spec.layers) {
-    if (l.type === "rule") continue;
-    ids.push(l.coords.id, l.starts.id);
-    if (l.color.rgba) ids.push(l.color.rgba.id);
-    if (l.color.codes) ids.push(l.color.codes.id);
-  }
-  return ids;
 }
 
 export default { render };

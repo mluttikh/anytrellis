@@ -465,6 +465,7 @@ def test_select_times_as_datetimes():
     t = Trellis(data).points(x="t", y="v")
     t.select(x=("2026-03-01T12:00", "2026-03-03"))
     assert list(t.selected()["v"]) == [2.0, 3.0]
+    assert t.selection is not None
     lo, hi = t.selection["x"]
     assert lo == np.datetime64("2026-03-01T12:00", "ms")
     assert hi == np.datetime64("2026-03-03", "ms")
@@ -478,6 +479,7 @@ def test_link_grows_the_selection_across_panels():
     assert sorted(t.selected()["country"]) == ["BE", "BE", "NL", "NL"]
     t.select(x=(0, 3), panel="1")  # NL in year 1 only, followed into year 2
     assert sorted(t.selected()["country"]) == ["NL", "NL"]
+    assert t.selection is not None
     assert t.selection["panel"] == "1"
     with pytest.raises(ValueError, match="no panel '3'"):
         t.select(x=(0, 3), panel=3)
@@ -511,3 +513,77 @@ def test_selection_syncs_with_the_widget_and_html():
     assert '"selection": {"x": null, "y": [0.0, 5.0]}' in t.to_html()
     t.select()
     assert w.selection is None
+
+
+# ---- area, rect, text ---------------------------------------------------------------------
+
+
+def base_of(t: Trellis, layer: int = 0) -> np.ndarray:
+    spec, _ = scene(t)
+    return array(t, spec["layers"][layer]["base"])
+
+
+def test_area_stacks_series_at_equal_x():
+    data = {"t": [0.0, 1.0, 0.0, 1.0], "v": [1.0, 2.0, 10.0, 20.0], "s": ["a", "a", "b", "b"]}
+    t = Trellis(data).area(x="t", y="v", color="s")
+    tops = coords(t)[:, [1, 3]]
+    bases = base_of(t)
+    # a from 0 to (1, 2); b on top of it: from (1, 2) to (11, 22)
+    assert sorted(map(tuple, tops.tolist())) == [(1.0, 2.0), (11.0, 22.0)]
+    assert sorted(map(tuple, bases.tolist())) == [(0.0, 0.0), (1.0, 2.0)]
+    spec, _ = scene(t)
+    assert spec["panels"][0]["y"][0] == 0.0  # the base at 0, unpadded
+
+
+def test_area_splits_where_it_crosses_its_base():
+    data = {"t": [0.0, 2.0], "v": [1.0, -1.0]}
+    t = Trellis(data).area(x="t", y="v", position="identity")
+    c = coords(t)
+    assert len(c) == 2  # two trapezoids meeting at x = 1
+    assert sorted(c[:, 2].tolist()) == [1.0, 2.0]
+    assert np.allclose(base_of(t), 0.0)
+
+
+def test_rect_tiles_a_step_wide_or_to_x2():
+    data = {"x": [0.0, 2.0, 4.0], "y": [0.0, 0.0, 0.0], "v": [1.0, 2.0, 3.0]}
+    c = coords(Trellis(data).rect(x="x", y="y", color="v"))
+    assert c[0].tolist() == [-1.0, -0.5, 1.0, 0.5]  # x step 2, y step 1 (one value)
+    band = {"a": ["p", "q"], "b": ["r", "r"], "v": [1.0, 2.0]}
+    c = coords(Trellis(band).rect(x="a", y="b", color="v", width=0.9))
+    assert np.allclose(c[0], [-0.45, -0.5, 0.45, 0.5])
+    spans = {"x": [0.0], "x2": [3.0], "y": [1.0], "y2": [5.0]}
+    assert coords(Trellis(spans).rect(x="x", y="y", x2="x2", y2="y2"))[0].tolist() == [0, 1, 3, 5]
+
+
+def test_rect_tooltip_shows_a_number_colour():
+    data = {"x": ["a", "b"], "y": ["c", "c"], "v": [1.5, 2.5]}
+    t = Trellis(data).rect(x="x", y="y", color="v")
+    spec, _ = scene(t)
+    assert spec["layers"][0]["tooltip"] is True
+    assert t._tooltip(0, 1) == [["v", "2.5"]]
+
+
+def test_brush_selects_rects_it_overlaps_and_area_segments_with_an_end_inside():
+    cells = {"x": [0.0, 2.0, 4.0], "y": [0.0, 0.0, 0.0], "v": [1.0, 2.0, 3.0]}
+    t = Trellis(cells).rect(x="x", y="y", color="v")
+    t.select(x=(0.5, 0.9))  # inside the first cell (it spans -1..1), not at its centre
+    assert t.selected()["x"].tolist() == [0.0]
+    series = {"x": [0.0, 1.0, 2.0, 3.0], "y": [1.0, 2.0, 3.0, 4.0]}
+    a = Trellis(series).area(x="x", y="y")
+    a.select(x=(0.9, 1.1))  # x = 1: the ends of two segments, one row
+    assert a.selected()["x"].tolist() == [1.0]
+
+
+def test_text_sends_labels_as_utf8():
+    data = {"x": [1.0, 2.0], "y": [1.0, 2.0], "name": ["Zürich", "Oslo"]}
+    t = Trellis(data).text(x="x", y="y", text="name", align="left", dx=4)
+    spec, buffers = scene(t)
+    layer = spec["layers"][0]
+    assert layer["type"] == "text"
+    assert layer["align"] == "left"
+    raw = buffers.data[layer["labels"]["id"]]
+    offsets = np.frombuffer(buffers.data[layer["offsets"]["id"]], dtype=np.uint32)
+    labels = [raw[offsets[i] : offsets[i + 1]].decode("utf-8") for i in range(2)]
+    assert labels == ["Zürich", "Oslo"]
+    with pytest.raises(ValueError, match="align must be"):
+        Trellis(data).text(x="x", y="y", text="name", align="middle")

@@ -2,7 +2,9 @@
 //
 // An instance is two points (a, b) and a colour. Drawn as a rectangle (KIND_RECT) it fills
 // the box between a and b (bars); drawn as a capsule (KIND_CAPSULE) it is the segment a-b
-// with round ends, `halfWidth` px either side (a line segment; a point when a == b).
+// with round ends, `halfWidth` px either side (a line segment; a point when a == b). Drawn
+// as a trapezoid (KIND_TRAP: areas) it fills from the segment a-b down (or up) to the
+// set's `base`: y at a and at b, so the sides are vertical.
 // Coordinates are float32 relative to each panel's base; a draw maps them to CSS pixels with
 // screen = offset + value * scale per axis, and clips to its panel.
 
@@ -10,6 +12,7 @@ import type { RendererKind } from "../types";
 
 export const KIND_RECT = 0;
 export const KIND_CAPSULE = 1;
+export const KIND_TRAP = 2;
 
 export interface Rect {
   x: number;
@@ -27,6 +30,8 @@ export interface InstanceSet {
   coords: Float32Array;
   /** RGBA bytes per instance. */
   colors: Uint8Array;
+  /** Trapezoids: the base's y at a and at b per instance (relative like coords). */
+  base?: Float32Array;
 }
 
 export interface Draw {

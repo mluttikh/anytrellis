@@ -26,11 +26,13 @@ from anytrellis.layers import (
     Geometry,
     Layer,
     Position,
+    area_geometry,
     axis_values,
     bar_geometry,
     expand,
     line_geometry,
     point_geometry,
+    rect_geometry,
     series_codes,
     step_of,
 )
@@ -255,6 +257,120 @@ class Trellis:
         return self._add(Layer("bars", name or self._name("bars"), data, x, y, color, (),
                                facet, opacity=opacity, position=position, bar_width=width,
                                tooltip=list(tooltip)))  # fmt: skip
+
+    def area(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        color: str | None = None,
+        group: str | Sequence[str] | None = None,
+        position: Position = "stack",
+        opacity: float = 0.8,
+        facet: FacetMode = "auto",
+        tooltip: Sequence[str] = (),
+        name: str | None = None,
+    ) -> Self:
+        """Filled areas under the line of each series, down to 0.
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column.
+            y: The y column.
+            color: A colour column (one area per category) or one colour.
+            group: Column(s) whose combinations are separate areas (besides ``color``).
+            position: ``"stack"`` (default: each series on the ones before it, at equal x)
+                or ``"identity"`` (each from 0, overlapping).
+            opacity: 0 to 1.
+            facet: As for ``line``.
+            tooltip: Columns shown on hover, besides x and y.
+            name: The layer's name.
+        """
+        if position not in ("stack", "identity"):
+            raise ValueError(f"position must be 'stack' or 'identity', got {position!r}")
+        return self._add(Layer("area", name or self._name("area"), data, x, y, color,
+                               _names(group), facet, opacity=opacity, position=position,
+                               tooltip=list(tooltip)))  # fmt: skip
+
+    def rect(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        x2: str | None = None,
+        y2: str | None = None,
+        color: str | None = None,
+        width: float = 1.0,
+        height: float = 1.0,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        tooltip: Sequence[str] = (),
+        name: str | None = None,
+    ) -> Self:
+        """Rectangles: tiles centred on (x, y), one step of the data wide and high (a
+        heatmap, with a number colour), or from (x, y) to (x2, y2).
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column (the tiles' centres, or their left with ``x2``).
+            y: The y column (centres, or bottoms with ``y2``).
+            x2: The tiles' right edges.
+            y2: The tiles' tops.
+            color: A colour column or one colour (numbers: a colormap, as a heatmap).
+            width: A tile's width as a fraction of the step between x values.
+            height: A tile's height as a fraction of the step between y values.
+            opacity: 0 to 1.
+            facet: As for ``line``.
+            tooltip: Columns shown on hover, besides x and y (a number colour: shown).
+            name: The layer's name.
+        """
+        if not (0 < width <= 1 and 0 < height <= 1):
+            raise ValueError("width and height must be in (0, 1]")
+        layer = Layer("rect", name or self._name("rect"), data, x, y, color, (), facet,
+                      opacity=opacity, bar_width=width, tooltip=list(tooltip), x2=x2, y2=y2,
+                      rect_height=height)  # fmt: skip
+        return self._add(layer)
+
+    def text(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        text: str,
+        color: str | None = None,
+        size: float = 11.0,
+        align: str = "center",
+        dx: float = 0.0,
+        dy: float = 0.0,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        name: str | None = None,
+    ) -> Self:
+        """A label per row: the ``text`` column's value at (x, y).
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column.
+            y: The y column.
+            text: The column of labels.
+            color: A colour column or one colour (default: the theme's text colour).
+            size: Font size in CSS pixels.
+            align: ``"left"``, ``"center"`` or ``"right"`` of the point.
+            dx: Offset to the right, in CSS pixels.
+            dy: Offset down, in CSS pixels.
+            opacity: 0 to 1.
+            facet: As for ``line``.
+            name: The layer's name.
+        """
+        if align not in ("left", "center", "right"):
+            raise ValueError(f"align must be 'left', 'center' or 'right', got {align!r}")
+        layer = Layer("text", name or self._name("text"), data, x, y, color, (), facet,
+                      size=size, opacity=opacity, text=text, align=align,
+                      dx=dx, dy=dy)  # fmt: skip
+        return self._add(layer)
 
     def rule(
         self,
@@ -626,6 +742,15 @@ class Trellis:
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
         bars_step = step_of([axis_values(self._table(lr).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
                              for lr in marks if lr.mark == "bars"])  # fmt: skip
+        steps = {
+            "bars": bars_step,
+            "rect_x": 1.0 if x_levels is not None else step_of(
+                [axis_values(self._table(lr).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
+                 for lr in marks if lr.mark == "rect" and lr.x2 is None]),
+            "rect_y": 1.0 if y_levels is not None else step_of(
+                [axis_values(self._table(lr).column(lr.y), y_levels)  # ty: ignore[invalid-argument-type]
+                 for lr in marks if lr.mark == "rect" and lr.y2 is None]),
+        }  # fmt: skip
         built: list[tuple[Layer, Table, Geometry | None]] = []
         rule_values: dict[str, list[float]] = {}
         for layer in self._layers:
@@ -638,14 +763,17 @@ class Trellis:
                 built.append((layer, self._data or Table({}), None))
                 continue
             table = self._table(layer)
-            geom = _geometry(layer, table, grid, x_levels, y_levels, colors, bars_step)
+            geom = _geometry(layer, table, grid, x_levels, y_levels, colors, steps)
             extents["x"].add(geom.panel, geom.x0)
             extents["x"].add(geom.panel, geom.x1)
             extents["y"].add(geom.panel, geom.y0)
             extents["y"].add(geom.panel, geom.y1)
+            if geom.base0 is not None and geom.base1 is not None:
+                extents["y"].add(geom.panel, geom.base0)
+                extents["y"].add(geom.panel, geom.base1)
             built.append((layer, table, geom))
         self._geometry = built
-        zero = any(layer.mark == "bars" for layer in marks)
+        zero = any(layer.mark in ("bars", "area") for layer in marks)
         xg = group_ids(grid, self._share["x"])
         yg = group_ids(grid, self._share["y"])
         xd = domains(extents["x"], xg, x_kind, band_size=len(x_levels or []))
@@ -668,9 +796,14 @@ class Trellis:
                 origin = x_origin if layer.axis == "x" else y_origin
                 layers_spec.append(_rule_spec(layer, rule_values[layer.name], origin))
                 continue
+            if layer.mark == "text":
+                layers_spec.append(_text_spec(layer, _table, geom, npanels, buffers, x_origin,
+                                              y_origin))  # fmt: skip
+                continue
             spec_layer = _layer_spec(
                 layer, geom, npanels, buffers, colors, x_origin, y_origin, plain
             )
+            spec_layer["tooltip"] = bool(_tooltip_columns(layer, _table))
             keys = self._keys.get(id(layer))
             spec_layer["link"] = (
                 None if keys is None else buffers.add(keys[geom.rows].astype(np.uint32), "uint32")
@@ -712,10 +845,11 @@ class Trellis:
         """The tooltip columns of one instance: ``[[name, value], ...]``."""
         self._scene()
         layer, table, geom = self._geometry[layer_index]
-        if geom is None or not layer.tooltip:
+        names = _tooltip_columns(layer, table)
+        if geom is None or not names:
             return []
         row = int(geom.rows[instance])
-        return [[name, _text(table.raw(name)[row])] for name in layer.tooltip]
+        return [[name, _text(table.raw(name)[row])] for name in names]
 
 
 # ---- helpers ------------------------------------------------------------------------------
@@ -854,7 +988,7 @@ def _geometry(
     x_levels: list[str] | None,
     y_levels: list[str] | None,
     colors: _ColorScales,
-    bars_step: float,
+    steps: dict[str, float],
 ) -> Geometry:
     assert layer.x is not None
     assert layer.y is not None
@@ -875,10 +1009,22 @@ def _geometry(
         if color_col is not None and color_col.kind == "category":
             extra.append(color_col.name)
         geom = line_geometry(rows, panel, x, y, series_codes(table, extra))
-    elif layer.mark == "points":
+    elif layer.mark == "area":
+        extra = list(layer.group)
+        if color_col is not None and color_col.kind == "category":
+            extra.append(color_col.name)
+        geom = area_geometry(rows, panel, x, y, series_codes(table, extra),
+                             stack=layer.position == "stack")  # fmt: skip
+    elif layer.mark in ("points", "text"):
         geom = point_geometry(rows, panel, x, y)
+    elif layer.mark == "rect":
+        x2 = axis_values(table.column(layer.x2), x_levels) if layer.x2 else None
+        y2 = axis_values(table.column(layer.y2), y_levels) if layer.y2 else None
+        geom = rect_geometry(rows, panel, x, y, x2, y2, x_step=steps["rect_x"],
+                             y_step=steps["rect_y"], width=layer.bar_width,
+                             height=layer.rect_height)  # fmt: skip
     else:
-        step = 1.0 if x_levels is not None else bars_step
+        step = 1.0 if x_levels is not None else steps["bars"]
         geom = bar_geometry(rows, panel, x, y, step=step, width=layer.bar_width, codes=codes,
                             ncodes=ncodes, position=layer.position)  # fmt: skip
     if color_col is not None:
@@ -916,10 +1062,17 @@ def _layer_spec(
     else:
         solid = layer.color if layer.color is not None else colors.default(layer, index)
         color["solid"] = list(rgba(solid))
+    base = None
+    if geom.base0 is not None and geom.base1 is not None:
+        base = buffers.add(
+            np.stack([geom.base0 - y_origin, geom.base1 - y_origin], axis=1), "float64",
+            components=2,
+        )  # fmt: skip
     return {
         "type": layer.mark,
         "name": layer.name,
         "count": geom.count,
+        "base": base,
         "coords": buffers.add(coords, "float64", components=4),
         "starts": buffers.add(geom.starts(npanels), "uint32"),
         "color": color,
@@ -927,6 +1080,51 @@ def _layer_spec(
         "size": layer.size,
         "opacity": layer.opacity,
         "tooltip": bool(layer.tooltip),
+        "context": layer.facet == "exclude",
+    }
+
+
+def _tooltip_columns(layer: Layer, table: Table) -> list[str]:
+    """A layer's tooltip columns: those asked for, and a number colour column."""
+    names = list(layer.tooltip)
+    color = layer.color
+    if color is not None and color in table and color not in names:
+        names += [color] if table.column(color).kind == "number" else []
+    return names
+
+
+def _text_spec(
+    layer: Layer,
+    table: Table,
+    geom: Geometry,
+    npanels: int,
+    buffers: Buffers,
+    x_origin: float,
+    y_origin: float,
+) -> dict[str, Any]:
+    """A text layer: points, and their labels as UTF-8 with offsets."""
+    assert layer.text is not None
+    raw = table.raw(layer.text)
+    labels = [_text(raw[r]).encode("utf-8") for r in geom.rows]
+    offsets = np.zeros(len(labels) + 1, dtype=np.uint32)
+    np.cumsum([len(b) for b in labels], out=offsets[1:])
+    data = np.frombuffer(b"".join(labels), dtype=np.uint8) if labels else np.zeros(0, np.uint8)
+    coords = np.stack([geom.x0 - x_origin, geom.y0 - y_origin], axis=1)
+    return {
+        "type": "text",
+        "name": layer.name,
+        "count": geom.count,
+        "coords": buffers.add(coords, "float64", components=2),
+        "starts": buffers.add(geom.starts(npanels), "uint32"),
+        "labels": buffers.add(data, "uint8"),
+        "offsets": buffers.add(offsets, "uint32"),
+        "colors": None if geom.rgba is None else buffers.add(geom.rgba, "uint8", components=4),
+        "color": None if layer.color is None or layer.color in table else list(rgba(layer.color)),
+        "size": layer.size,
+        "align": layer.align,
+        "dx": layer.dx,
+        "dy": layer.dy,
+        "opacity": layer.opacity,
         "context": layer.facet == "exclude",
     }
 
