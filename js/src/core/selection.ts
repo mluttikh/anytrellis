@@ -133,6 +133,54 @@ export function selectionColors(layer: LayerData, mask: Uint8Array, dim: Uint8Ar
   return { dim: faded, hi };
 }
 
+/** What another plot's selection highlights here (a linked plot): per layer of the spec,
+ * a mask of its instances, the selected share of each bar (filled from its base), or null:
+ * drawn as it is. */
+export interface Highlight {
+  layers: ({ mask: Uint8Array } | { fraction: Float32Array } | null)[];
+}
+
+/** A highlight as a selection of the scene's layers, or null when it fits none of them (a
+ * spec that changed since: Python sends the new one). A bar's share: selected if above 0. */
+export function highlighted(scene: Scene | null, h: Highlight): { selection: Selection; fractions: (Float32Array | null)[] } | null {
+  if (!scene) return null;
+  const masks: (Uint8Array | null)[] = [];
+  const fractions: (Float32Array | null)[] = [];
+  let selected = 0;
+  let total = 0;
+  let any = false;
+  scene.layers.forEach((layer) => {
+    const entry = h.layers[layer.index];
+    const n = layer.set.count;
+    let mask: Uint8Array | null = null;
+    let fraction: Float32Array | null = null;
+    if (entry && "mask" in entry && entry.mask.length === n) mask = entry.mask;
+    else if (entry && "fraction" in entry && entry.fraction.length === n) {
+      fraction = entry.fraction;
+      mask = new Uint8Array(n);
+      for (let i = 0; i < n; i++) mask[i] = fraction[i] > 0 ? 1 : 0;
+    }
+    if (mask && !layer.spec.context) {
+      any = true;
+      total += n;
+      for (let i = 0; i < n; i++) selected += mask[i];
+    } else mask = null;
+    masks.push(mask);
+    fractions.push(mask ? fraction : null);
+  });
+  return any ? { selection: { masks, selected, total }, fractions } : null;
+}
+
+/** Bars filled to a share of their height: each from its base (y0) up. */
+export function filled(coords: Float32Array, fraction: Float32Array): Float32Array {
+  const out = new Float32Array(coords);
+  for (let i = 0; i < fraction.length; i++) {
+    const y0 = coords[i * 4 + 1];
+    out[i * 4 + 3] = y0 + Math.min(1, Math.max(0, fraction[i])) * (coords[i * 4 + 3] - y0);
+  }
+  return out;
+}
+
 /** How much of its opacity an unselected mark keeps. */
 export const FADED = 0.15;
 

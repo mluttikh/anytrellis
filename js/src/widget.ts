@@ -4,7 +4,7 @@ import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
 import type { RendererPreference, TrellisSpec } from "./core/types";
-import { TrellisView } from "./core/view";
+import { type Highlight, TrellisView } from "./core/view";
 
 interface AnyModel {
   get(key: string): any;
@@ -21,6 +21,8 @@ interface ModelState {
   pending: Map<number, (msg: any) => void>;
   nextRequest: number;
   tooltips: Map<string, Promise<string[][]>>;
+  /** What a linked plot's selection highlights here (from Python), or null. */
+  highlight: Highlight | null;
 }
 
 const states = new WeakMap<AnyModel, ModelState>();
@@ -36,6 +38,7 @@ function stateFor(model: AnyModel): ModelState {
     pending: new Map(),
     nextRequest: 0,
     tooltips: new Map(),
+    highlight: null,
   };
   model.on("msg:custom", (msg: any, buffers: (DataView | ArrayBuffer)[] = []) => {
     if (msg?.type === "put") state.store.receive(msg as PutMessage, buffers[0]);
@@ -43,6 +46,9 @@ function stateFor(model: AnyModel): ModelState {
     else if (msg?.type === "answer") {
       state.pending.get(msg.request)?.(msg);
       state.pending.delete(msg.request);
+    } else if (msg?.type === "highlight") {
+      state.highlight = highlightOf(msg, buffers);
+      state.views.forEach((v) => v.setHighlight(state.highlight));
     }
   });
   state.store.onStall = (stalled) => state.views.forEach((v) => v.setStatus(stalled ? NO_DATA_HINT : null));
@@ -50,6 +56,32 @@ function stateFor(model: AnyModel): ModelState {
   states.set(model, state);
   return state;
 }
+
+/** A highlight message's layers, read from its binary buffers. */
+function highlightOf(msg: any, buffers: (DataView | ArrayBuffer)[]): Highlight | null {
+  if (!Array.isArray(msg.layers)) return null;
+  const bytes = (i: number): Uint8Array => {
+    const b = buffers[i];
+    if (!b) return new Uint8Array(0);
+    return b instanceof ArrayBuffer ? new Uint8Array(b) : new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+  };
+  return {
+    layers: msg.layers.map((l: any) => {
+      if (l && typeof l.mask === "number") {
+        // a bit per instance, the first in the lowest bit
+        const bits = bytes(l.mask);
+        const mask = new Uint8Array(l.count ?? bits.length * 8);
+        for (let i = 0; i < mask.length; i++) mask[i] = (bits[i >> 3] >> (i & 7)) & 1;
+        return { mask };
+      }
+      if (l && typeof l.fraction === "number") return { fraction: new Float32Array(bytes(l.fraction).slice().buffer) };
+      return null;
+    }),
+  };
+}
+
+/** How often a linked plot sends its brush while it is dragged. */
+const LIVE_MS = 50;
 
 /** Ask Python and wait for its answer (a message with the same request number). */
 function ask(model: AnyModel, s: ModelState, content: Record<string, unknown>): Promise<any> {
@@ -76,6 +108,7 @@ function ask(model: AnyModel, s: ModelState, content: Record<string, unknown>): 
 
 function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void {
   const s = stateFor(model);
+  let lastLive = 0; // when the brush last went to Python
   const view = new TrellisView(el, {
     source: s.store,
     renderer: (model.get("renderer") ?? "auto") as RendererPreference,
@@ -94,11 +127,22 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       model.save_changes();
     },
     onSelect: (brush) => {
+      lastLive = performance.now();
       model.set("selection", brush);
       model.save_changes();
     },
+    // a linked plot: the others follow the brush as it moves (Python relays it)
+    onBrushing: (brush) => {
+      const now = performance.now();
+      if (!model.get("_live") || now - lastLive < LIVE_MS) return;
+      lastLive = now;
+      model.set("selection", brush);
+      model.save_changes();
+    },
+    onClear: () => model.send({ type: "clear" }),
   });
   s.views.add(view);
+  view.setHighlight(s.highlight);
   const load = (): void => {
     const spec = model.get("_spec") as TrellisSpec;
     if (spec?.version) {
@@ -117,6 +161,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   onFocus();
   onSelection();
   load();
+  model.send({ type: "ready" }); // what a link highlights here
   return () => {
     model.off("change:_spec", load);
     model.off("change:open_panel", onFocus);

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { layout } from "../src/core/layout";
 import { type Scene, pick, yExtent } from "../src/core/scene";
-import { FADED, select, selectionColors } from "../src/core/selection";
+import { FADED, filled, highlighted, select, selectionColors } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { deviceClip } from "../src/core/renderers/renderer";
-import { formatNumber, formatValue, niceStep, ticks } from "../src/core/ticks";
+import { formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
 import type { MarkLayerSpec, PanelSpec, TrellisSpec } from "../src/core/types";
 
 const DAY = 86_400_000;
@@ -53,6 +53,12 @@ describe("ticks", () => {
     expect(labels(Math.log10(20), Math.log10(60), 4)).toEqual(["20", "30", "40", "50", "60"]);
     for (const t of ticks("log", Math.log10(20), Math.log10(60), 0, 4)) expect(Number.isFinite(t.value)).toBe(true);
     expect(formatValue("log", 2, 0, 3)).toBe("100");
+    // between the labelled decades: the skipped ones, and 2 to 9 times each with room
+    const major = ticks("log", 0, 8, 0, 4);
+    expect(minorTicks("log", 0, 8, 0, major, 100)).toEqual([1, 3, 5, 7]);
+    const fine = minorTicks("log", 0, 1, 0, ticks("log", 0, 1, 0, 6), 400).map((v) => Math.round(10 ** v));
+    expect(fine).toEqual([3, 4, 6, 7, 8, 9]);
+    expect(minorTicks("number", 0, 1, 0, [], 400)).toEqual([]);
     expect(formatValue("log", Math.log10(1234.5), 0, 0.5)).toBe("1235");
   });
 
@@ -276,6 +282,26 @@ describe("select", () => {
     const { dim, hi } = selectionColors(l as never, new Uint8Array([0, 1]), null);
     expect(dim[3]).toBe(Math.round(200 * FADED));
     expect([...hi]).toEqual([0, 0, 0, 0, 40, 50, 60, 255]);
+  });
+});
+
+describe("a linked plot's highlight", () => {
+  it("selects the masked marks and fills bars to their share", () => {
+    const points = { ...layer("points", [1, 1, 1, 1, 5, 5, 5, 5], KIND_CAPSULE, 2), index: 0 };
+    const bars = { ...layer("bars", [0, 0, 1, 10, 1, 0, 2, 4], KIND_RECT, 0), index: 2 };
+    const scene = { layers: [points, bars] } as unknown as Scene;
+    const h = highlighted(scene, { layers: [{ mask: new Uint8Array([0, 1]) }, null, { fraction: new Float32Array([0.25, 0]) }] });
+    expect([...h!.selection.masks[0]!]).toEqual([0, 1]);
+    expect([...h!.selection.masks[1]!]).toEqual([1, 0]);
+    expect(h!.selection.selected).toBe(2);
+    expect([...filled(bars.set.coords, h!.fractions[1]!)]).toEqual([0, 0, 1, 2.5, 1, 0, 2, 0]);
+  });
+
+  it("leaves out what no longer fits the layers (an older spec)", () => {
+    const points = layer("points", [1, 1, 1, 1], KIND_CAPSULE, 2);
+    const scene = { layers: [points] } as unknown as Scene;
+    expect(highlighted(scene, { layers: [{ mask: new Uint8Array([1, 1, 1]) }] })).toBeNull();
+    expect(highlighted(scene, { layers: [null] })).toBeNull();
   });
 });
 

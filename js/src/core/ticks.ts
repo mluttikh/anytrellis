@@ -94,6 +94,31 @@ function logTicks(lo: number, hi: number, count: number): Tick[] {
   return out;
 }
 
+/** Fainter gridlines between a log axis's ticks (axis units relative to `origin`): every
+ * decade the ticks skip, and 2 to 9 times each when they are at least 5 px apart over the
+ * axis's `pixels`. Other axes: none. */
+export function minorTicks(kind: AxisKind, lo: number, hi: number, origin: number, major: Tick[], pixels: number): number[] {
+  if (kind !== "log" || !(hi > lo)) return [];
+  const a = lo + origin;
+  const b = hi + origin;
+  const taken = new Set(major.map((t) => Math.round((t.value + origin) * 1e6)));
+  const pick = (mults: number[]): number[] => {
+    const out: number[] = [];
+    for (let e = Math.floor(a); e <= Math.ceil(b) && out.length < 2000; e++) {
+      for (const m of mults) {
+        const v = e + Math.log10(m);
+        if (v >= a && v <= b && !taken.has(Math.round(v * 1e6))) out.push(v - origin);
+      }
+    }
+    return out;
+  };
+  const fine = pick([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  // the closest pair of a decade's lines: 9 and 10, log10(10/9) of a decade apart
+  if ((pixels / (b - a)) * Math.log10(10 / 9) >= 5) return fine;
+  const decades = pick([1]);
+  return (pixels / (b - a)) >= 5 ? decades : [];
+}
+
 function bandTicks(lo: number, hi: number, levels: string[], count: number): Tick[] {
   const first = Math.max(0, Math.ceil(lo));
   const last = Math.min(levels.length - 1, Math.floor(hi));

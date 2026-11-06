@@ -132,6 +132,27 @@ cell gives its rows. A point is selected inside the brush, a line or area segmen
 either end inside, a bar or rect overlapping it, a box when its body or lines are met;
 grey context is never selected.
 
+**Linked plots.** `link(a, b, ...)` gives plots one selection (crossfiltering): brush in
+one and the others show the same rows, following the brush as it moves. Points and lines of
+those rows stay bright and the rest fade, a histogram's bars fill to the share of their
+count that is selected, and a box lights up when any of its rows is. A brush in another plot
+of the link replaces the first; a click or Esc in any of them clears it.
+
+```python
+from anytrellis import link
+
+scatter = Trellis(cars).points(x="weight", y="mpg")
+power = Trellis(cars).hist(x="horsepower")
+link(scatter, power)                     # the same table: the same rows
+link(by_year, lives, on="country")       # any tables: the rows sharing a country
+power.selected()                         # the rows the link's selection picks
+```
+
+Without `on=`, the plots must draw the same table (the same object): a filtered copy is
+another table, so link it `on=` a key column. Python relays the selection, so the plots are
+linked while the kernel runs, not in a page from `save_html`. `unlink()` the returned link
+to set them apart.
+
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the
 same zoom, and Backspace, Esc, a double-click or *All panels* goes back. The zoom stays
@@ -177,6 +198,7 @@ Notebooks in [`examples/jupyter`](examples/jupyter) (JupyterLab, VS Code) and th
 | `04_seaborn_style` | `relplot` (scatter and line, `col_wrap`), `FacetGrid` histograms, `catplot(kind="bar")` |
 | `05_vega_lite_style` | `row` / `column` / `facet` channels, `resolve_scale`, a trellis of grouped bars |
 | `06_large_data` | a million points, a year of hourly readings, a hundred panels |
+| `07_linked_plots` | crossfiltering a scatter, histograms and boxes; plots linked by a key column |
 
 Their data comes with the package: `from anytrellis.datasets import load; load("barley")`
 (anscombe, barley, cars, gapminder, penguins, population, seattle_weather, stocks; from
@@ -195,6 +217,7 @@ node test/interact.mjs <page.html>                 # hover, linked zoom, pan, re
 node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, undo
 node test/select.mjs <page.html> [dir] [renderer]  # brushing, moving, clearing
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
+node test/linked.mjs <url of 07 in JupyterLab>     # linked plots: brushing across plots
 ```
 
 Pages force a backend with `?renderer=webgpu|webgl2|canvas2d` in their URL.

@@ -10,6 +10,15 @@ buffers, drawn in the browser. This module is the protocol between them.
 * ``open_panel`` (synced both ways): the name of the panel shown alone, or None.
 * ``selection`` (synced both ways): the brush, ``{"x": [lo, hi] | None, "y": ...}`` in axis
   units relative to the spec's origins, or None (the browser sends it on release).
+* ``_live`` (synced): send the brush while it is dragged, about 20 times a second (a
+  linked plot), not only on release.
+* ``{"type": "highlight", "layers": [...] | None, "selected", "total"}`` (Python to the
+  browser, a linked plot): what another plot's selection highlights here. Per spec layer
+  ``{"mask": i, "count": n}`` (a bit per instance, in binary buffer ``i``, the first in
+  the lowest bit), ``{"fraction": i, "count": n}`` (float32: a histogram bar's selected
+  share) or None (drawn as it is); ``layers`` None: nothing.
+  The browser asks for it with ``{"type": "ready"}`` when a view starts, and sends
+  ``{"type": "clear"}`` for a click that clears the link's selection.
 * ``{"type": "tooltip", "request", "layer", "index"}`` asks for the tooltip columns of one
   instance of a layer; Python answers ``{"type": "answer", "request", "rows"}``.
 
@@ -45,6 +54,8 @@ class TrellisWidget(anywidget.AnyWidget):
     open_panel = traitlets.Unicode(None, allow_none=True).tag(sync=True)
     #: The selection's brush (``Trellis.select``, or one drawn in the browser), or None.
     selection = traitlets.Dict(None, allow_none=True).tag(sync=True)
+    #: Send the brush while it is dragged, not only on release (a linked plot).
+    _live = traitlets.Bool(False).tag(sync=True)
 
     def __init__(self, plot: Trellis, state: dict[str, Any]) -> None:
         self._plot = plot
@@ -55,6 +66,7 @@ class TrellisWidget(anywidget.AnyWidget):
 
     def _on_selection(self, change: dict[str, Any]) -> None:
         self._plot._selection = change["new"]  # drawn in the browser: save_html keeps it
+        self._plot._selection_changed()
 
     def _on_focus(self, change: dict[str, Any]) -> None:
         self._plot._focus = change["new"]  # opened in the browser: save_html keeps it
@@ -71,6 +83,10 @@ class TrellisWidget(anywidget.AnyWidget):
             except Exception as err:  # the browser shows what it has; the kernel carries on
                 answer["error"] = str(err)
             self.send(answer)
+        elif kind == "ready":  # a view started: what a link highlights in it
+            self._plot._send_highlight()
+        elif kind == "clear":  # a click in a linked plot with no brush of its own
+            self._plot._clear_link()
 
     def _send_buffer(self, buffer_id: str) -> None:
         _, buffers = self._plot._scene()

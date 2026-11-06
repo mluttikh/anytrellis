@@ -28,7 +28,9 @@ import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readT
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
-import { type Brush, type Selection, select, selectionColors } from "./selection";
+import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors } from "./selection";
+
+export type { Highlight } from "./selection";
 import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { formatValue } from "./ticks";
 import type { DataSource, LegendSpec, RendererPreference, TrellisSpec } from "./types";
@@ -42,7 +44,12 @@ export interface ViewOptions {
   onFocus?: (name: string | null) => void;
   /** The reader drew, moved or cleared the selection (on release). */
   onSelect?: (brush: Brush | null) => void;
+  /** The brush as it is dragged (many times a second). */
+  onBrushing?: (brush: Brush | null) => void;
+  /** The reader cleared a highlight (a click or Escape with no brush of their own). */
+  onClear?: () => void;
 }
+
 
 type Range = [number, number];
 type Axis = "x" | "y";
@@ -131,6 +138,8 @@ export class TrellisView {
   private brush: Brush | null = null;
   private selection: Selection | null = null;
   private selectionSets: ({ dim: InstanceSet; hi: InstanceSet } | null)[] = [];
+  /** A linked plot's selection, shown when there is no brush here. */
+  private highlight: Highlight | null = null;
   /** Every y group follows its data in view as x changes. */
   private fitY = false;
   private needFit = false;
@@ -393,6 +402,13 @@ export class TrellisView {
     if (!same) this.setBrush(brush, false);
   }
 
+  /** What a linked plot's selection highlights here, or none. */
+  setHighlight(highlight: Highlight | null): void {
+    this.highlight = highlight;
+    this.needSelect = true;
+    this.request();
+  }
+
   get selected(): { selected: number; total: number } | null {
     this.settleSelection();
     return this.selection ? { selected: this.selection.selected, total: this.selection.total } : null;
@@ -406,18 +422,20 @@ export class TrellisView {
 
   private computeSelection(): void {
     const scene = this.scene;
-    if (!scene || !this.brush) {
+    const shared = !this.brush && this.highlight ? highlighted(scene, this.highlight) : null;
+    if (!scene || (!this.brush && !shared)) {
       this.selection = null;
       return;
     }
-    this.selection = select(scene, this.brush);
+    this.selection = shared?.selection ?? select(scene, this.brush!);
     const old = this.selectionSets;
     this.selectionSets = scene.layers.map((layer, i) => {
       const mask = this.selection!.masks[i];
       if (!mask) return null;
       const prev = old[i]?.dim.key === `${layer.set.key}:dim` ? old[i] : null;
       const { dim, hi } = selectionColors(layer, mask, prev?.dim.colors ?? null);
-      const coords = layer.set.coords;
+      const fraction = shared?.fractions[i];
+      const coords = fraction ? filled(layer.set.coords, fraction) : layer.set.coords;
       return {
         dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords, colors: dim, base: layer.set.base },
         hi: { key: `${layer.set.key}:hi`, version: (prev?.hi.version ?? 0) + 1, count: layer.set.count, coords, colors: hi, base: layer.set.base },
@@ -888,6 +906,7 @@ export class TrellisView {
           if (d.kind === "brush") {
             this.front_.hover = null;
             this.setBrush(this.brushOf(d, x, y), false);
+            this.opts.onBrushing?.(this.brush);
             return;
           }
           if (d.kind === "move" && this.dragBrush) {
@@ -896,6 +915,7 @@ export class TrellisView {
             const my = (y - d.y) / v.map.sy;
             this.front_.hover = null;
             this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null }, false);
+            this.opts.onBrushing?.(this.brush);
             return;
           }
           const dx = (x - d.x) / v.map.sx;
@@ -921,8 +941,9 @@ export class TrellisView {
         this.dragBrush = null;
         if (e.type === "pointercancel") return;
         if (!d.moved) {
-          // a click clears the selection
+          // a click clears the selection (a linked plot's too)
           if (this.brush) this.setBrush(null, true);
+          else if (this.highlight) this.opts.onClear?.();
           return;
         }
         this.opts.onSelect?.(this.brush);
@@ -1025,6 +1046,10 @@ export class TrellisView {
       case "Escape":
         if (this.brush) {
           this.setBrush(null, true);
+          return true;
+        }
+        if (this.highlight && this.focused === null && this.opts.onClear) {
+          this.opts.onClear();
           return true;
         }
         if (this.focused === null) return false;
@@ -1270,3 +1295,4 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: stri
   if (text !== undefined) e.textContent = text;
   return e;
 }
+

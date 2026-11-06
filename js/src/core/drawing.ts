@@ -3,7 +3,7 @@
 
 import type { Layout, Rect } from "./layout";
 import type { PanelMap, TextData } from "./scene";
-import { type Tick, ticks } from "./ticks";
+import { type Tick, minorTicks, ticks } from "./ticks";
 import type { RuleLayerSpec, TrellisSpec } from "./types";
 
 export interface Theme {
@@ -97,6 +97,25 @@ export function drawBack(ctx: CanvasRenderingContext2D, spec: TrellisSpec, views
       }
     }
     ctx.stroke();
+    // a log axis: fainter lines between its ticks
+    const minorX = minorTicks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, spec.x.kind === "log" ? xTicks(spec, v) : [], r.w);
+    const minorY = minorTicks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, spec.y.kind === "log" ? yTicks(spec, v) : [], r.h);
+    if (minorX.length || minorY.length) {
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      for (const value of minorX) {
+        const x = Math.round(v.map.ox + value * v.map.sx) + 0.5;
+        ctx.moveTo(x, r.y);
+        ctx.lineTo(x, r.y + r.h);
+      }
+      for (const value of minorY) {
+        const y = Math.round(v.map.oy + value * v.map.sy) + 0.5;
+        ctx.moveTo(r.x, y);
+        ctx.lineTo(r.x + r.w, y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     ctx.restore();
   }
 }

@@ -39,6 +39,7 @@ from anytrellis.layers import (
     series_codes,
     step_of,
 )
+from anytrellis.linking import Link, Masks, highlight_message
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
 from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
 from anytrellis.stats import Part
@@ -104,6 +105,7 @@ class Trellis:
         link: Column(s) that identify a thing across panels (a country, a station): a
             selection grows to every row sharing them, in all panels and layers that have
             the columns. Select a few countries in 1955 and see them in every year.
+            (Separate plots sharing a selection: ``anytrellis.link``.)
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
     """
 
@@ -163,6 +165,9 @@ class Trellis:
         self.renderer = renderer
         self._widget: TrellisWidget | None = None
         self._focus: str | None = None
+        self._link_group: Link | None = None
+        self._highlight: Masks | None = None
+        """The rows another plot of the link selects (``anytrellis.link``), or None."""
         self._scene_cache: tuple[dict[str, Any], Buffers] | None = None
         self._geometry: list[tuple[Layer, Table, Geometry | None]] = []
         self._drawn: list[_Drawn] = []
@@ -771,24 +776,45 @@ class Trellis:
 
     def selected(self, layer: str | int | None = None) -> Any:
         """The selected rows of a layer's data (default: the first layer), as the same kind
-        of table (Polars, pandas, PyArrow, ...); none selected: no rows."""
+        of table (Polars, pandas, PyArrow, ...); none selected: no rows. In a linked plot
+        (``anytrellis.link``) without a brush of its own: the rows another plot selects."""
         self._scene()
         user = self._user_layer(layer)
+        table = self._table(user)
+        if self._current_selection() is None and self._highlight is not None:
+            mask = self._highlight.get(id(user))
+            if mask is None:
+                mask = np.zeros(table.n, dtype=bool)
+        else:
+            mask = self._source_mask(user)
+        return table.take(np.flatnonzero(mask))
+
+    def _source_mask(self, user: Layer) -> np.ndarray:
+        """The rows of a layer's data its brush selects."""
         entries = [i for i, d in enumerate(self._drawn) if d.user is user]
         if self._drawn[entries[0]].part is None:
             lay, table, geom = self._geometry[entries[0]]
             assert geom is not None
-            return table.take(np.flatnonzero(self._row_mask(lay, table, geom)))
+            return self._row_mask(lay, table, geom)
         # a summary: the rows its selected bins, boxes or curve pieces stand for
-        source = self._table(user)
-        mask = np.zeros(source.n, dtype=bool)
+        mask = np.zeros(self._table(user).n, dtype=bool)
         for i in entries:
             lay, table, geom = self._geometry[i]
             part = self._drawn[i].part
             assert geom is not None
             assert part is not None
             mask[part.members.of(self._row_mask(lay, table, geom))] = True
-        return source.take(np.flatnonzero(mask))
+        return mask
+
+    def _mark_layers(self) -> list[Layer]:
+        """The layers with rows (not rules), as given."""
+        return [lr for lr in self._layers if lr.mark != "rule"]
+
+    def _selected_masks(self) -> list[tuple[Table, np.ndarray]]:
+        """Each layer's data and the rows of it the brush selects (context layers: none)."""
+        self._scene()
+        return [(self._table(lr), self._source_mask(lr))
+                for lr in self._mark_layers() if lr.facet != "exclude"]  # fmt: skip
 
     def _row_mask(self, layer: Layer, table: Table, geom: Geometry) -> np.ndarray:
         brush = self._current_selection()
@@ -852,6 +878,42 @@ class Trellis:
         self._selection = brush
         if self._widget is not None:
             self._widget.selection = brush  # ty: ignore[invalid-assignment]  # allow_none
+        else:
+            self._selection_changed()  # with a widget: when its trait changes
+
+    def _selection_changed(self) -> None:
+        """The brush changed (here or in the browser): a link shows it in its other plots."""
+        if self._link_group is not None:
+            self._link_group.changed(self)
+
+    def _clear_link(self) -> None:
+        """A click in the browser with nothing of its own selected: the link's selection
+        goes."""
+        if self._link_group is not None:
+            self._link_group.clear()
+
+    def _set_highlight(self, masks: Masks | None) -> None:
+        if masks is None and self._highlight is None:
+            return
+        self._highlight = masks
+        self._send_highlight()
+
+    def _send_highlight(self) -> None:
+        """Tell the browser which marks the link highlights (it asks when it starts)."""
+        if self._widget is None:
+            return
+        entries: list[tuple[Layer, Any, Any]] = []
+        if self._highlight is not None:
+            self._scene()
+            drawn = zip(self._drawn, self._geometry, strict=True)
+            entries = [(d.user, d.part, geom) for d, (_, _, geom) in drawn]
+        message, buffers = highlight_message(entries, self._highlight)
+        self._widget.send(message, buffers=buffers)
+
+    def _live(self, on: bool) -> None:
+        """Send the brush while it is dragged (a linked plot), not only on release."""
+        if self._widget is not None:
+            self._widget._live = on
 
     # ---- showing ------------------------------------------------------------------------
 
@@ -864,7 +926,8 @@ class Trellis:
 
             spec, _ = self._scene()
             state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus,
-                     "selection": self._selection}  # fmt: skip
+                     "selection": self._selection,
+                     "_live": self._link_group is not None}  # fmt: skip
             self._widget = TrellisWidget(self, state)
         return self._widget
 
@@ -956,6 +1019,8 @@ class Trellis:
         if self._widget is not None:
             spec, _ = self._scene()
             self._widget._spec = spec
+        if self._link_group is not None and self._link_group.source is not None:
+            self._link_group.relay()  # the selected rows, or the marks showing them, changed
         return self
 
     def _table(self, layer: Layer) -> Table:
