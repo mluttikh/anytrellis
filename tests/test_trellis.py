@@ -428,3 +428,86 @@ def test_fit_y():
     f = Trellis(SMALL, wrap="g", fit_y=True).points(x="t", y="v")
     assert f._scene()[0]["fit_y"] is True
     assert '"fit_y": true' in f.to_html()
+
+
+# ---- selecting ----------------------------------------------------------------------------
+
+
+def test_select_points_in_every_panel():
+    t = Trellis(SMALL, wrap="g").points(x="t", y="v")
+    assert t.selection is None
+    assert len(t.selected()["v"]) == 0
+    t.select(x=(0.5, 1.5))
+    assert list(t.selected()["v"]) == [2.0, 20.0, 200.0]  # the brush holds in all panels
+    t.select(x=(0.5, 1.5), y=(0, 50))
+    assert list(t.selected()["v"]) == [2.0, 20.0]
+    assert t.selection == {"x": (0.5, 1.5), "y": (0.0, 50.0), "panel": None}
+    t.select()
+    assert t.selection is None
+
+
+def test_select_line_segments_by_either_end():
+    t = Trellis(SMALL, wrap="g").line(x="t", y="v")
+    t.select(y=(15, 25))  # only the end of panel b's segment
+    assert list(t.selected()["v"]) == [20.0]
+
+
+def test_select_bars_that_overlap():
+    t = Trellis(SMALL).bars(x="h", y="v", position="dodge")
+    t.select(x="y")
+    assert t.selection == {"x": ["y"], "y": None, "panel": None}
+    assert sorted(t.selected()["v"]) == [2.0, 20.0]
+
+
+def test_select_times_as_datetimes():
+    data = {"t": np.array(["2026-03-01", "2026-03-02", "2026-03-03"], dtype="datetime64[ms]"),
+            "v": [1.0, 2.0, 3.0]}  # fmt: skip
+    t = Trellis(data).points(x="t", y="v")
+    t.select(x=("2026-03-01T12:00", "2026-03-03"))
+    assert list(t.selected()["v"]) == [2.0, 3.0]
+    lo, hi = t.selection["x"]
+    assert lo == np.datetime64("2026-03-01T12:00", "ms")
+    assert hi == np.datetime64("2026-03-03", "ms")
+
+
+def test_link_grows_the_selection_across_panels():
+    data = {"year": [1, 1, 2, 2], "country": ["NL", "BE", "NL", "BE"],
+            "x": [1.0, 5.0, 9.0, 2.0], "y": [1.0, 1.0, 1.0, 1.0]}  # fmt: skip
+    t = Trellis(data, wrap="year", link="country").points(x="x", y="y")
+    t.select(x=(0, 3))  # NL in year 1, BE in year 2
+    assert sorted(t.selected()["country"]) == ["BE", "BE", "NL", "NL"]
+    t.select(x=(0, 3), panel="1")  # NL in year 1 only, followed into year 2
+    assert sorted(t.selected()["country"]) == ["NL", "NL"]
+    assert t.selection["panel"] == "1"
+    with pytest.raises(ValueError, match="no panel '3'"):
+        t.select(x=(0, 3), panel=3)
+    spec, _ = scene(t)
+    keys = array(t, spec["layers"][0]["link"])
+    assert keys.dtype == np.uint32
+    assert len(set(keys.tolist())) == 2
+    plain = Trellis(data, wrap="year").points(x="x", y="y").select(x=(0, 3))
+    assert sorted(plain.selected()["country"]) == ["BE", "NL"]
+    with pytest.raises(ValueError, match="no layer's data has these columns"):
+        scene(Trellis(data, link="city").points(x="x", y="y"))
+
+
+def test_selected_keeps_the_table_kind_and_picks_layers():
+    t = Trellis(pl.DataFrame(SMALL), wrap="g").points(x="t", y="v").line(x="t", y="v")
+    t.select(x=(0.5, 1.5))
+    out = t.selected("line")
+    assert isinstance(out, pl.DataFrame)
+    assert out["v"].to_list() == [2.0, 20.0, 200.0]
+    assert t.selected(1).height == 3
+    with pytest.raises(ValueError, match="no layer 'bars'"):
+        t.selected("bars")
+
+
+def test_selection_syncs_with_the_widget_and_html():
+    t = Trellis(SMALL, wrap="g").points(x="t", y="v").select(x=(0.5, 1.5))
+    w = t.widget
+    assert w.selection == {"x": [0.5, 1.5], "y": None, "panel": None}
+    w.selection = {"x": None, "y": [0.0, 5.0]}  # drawn in the browser
+    assert list(t.selected()["v"]) == [1.0, 2.0]
+    assert '"selection": {"x": null, "y": [0.0, 5.0]}' in t.to_html()
+    t.select()
+    assert w.selection is None

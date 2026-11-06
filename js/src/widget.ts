@@ -1,5 +1,6 @@
 // anywidget entry: connects a Python Trellis model (TrellisWidget) to TrellisView.
 
+import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
 import type { RendererPreference, TrellisSpec } from "./core/types";
 import { TrellisView } from "./core/view";
@@ -91,6 +92,10 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       model.set("open_panel", name);
       model.save_changes();
     },
+    onSelect: (brush) => {
+      model.set("selection", brush);
+      model.save_changes();
+    },
   });
   s.views.add(view);
   const load = (): void => {
@@ -103,13 +108,18 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   };
   // Trellis.open / close in Python (or another view of the same widget)
   const onFocus = (): void => view.setFocusName((model.get("open_panel") as string | null) ?? null);
+  // Trellis.select in Python (or another view)
+  const onSelection = (): void => view.setSelection((model.get("selection") as Brush | null) ?? null);
   model.on("change:_spec", load);
   model.on("change:open_panel", onFocus);
+  model.on("change:selection", onSelection);
   onFocus();
+  onSelection();
   load();
   return () => {
     model.off("change:_spec", load);
     model.off("change:open_panel", onFocus);
+    model.off("change:selection", onSelection);
     s.views.delete(view);
     view.destroy();
   };

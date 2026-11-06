@@ -9,6 +9,8 @@ interface Cached {
   version: number;
   coords: WebGLBuffer;
   colors: WebGLBuffer;
+  /** The coordinates uploaded: a new version with the same array only re-sends colours. */
+  source: Float32Array | null;
 }
 
 export class WebGL2Renderer implements Renderer {
@@ -71,13 +73,16 @@ export class WebGL2Renderer implements Renderer {
     let c = this.cache.get(set.key);
     if (c && c.version === set.version) return c;
     if (!c) {
-      c = { version: -1, coords: gl.createBuffer()!, colors: gl.createBuffer()! };
+      c = { version: -1, coords: gl.createBuffer()!, colors: gl.createBuffer()!, source: null };
       this.cache.set(set.key, c);
     }
-    gl.bindBuffer(gl.ARRAY_BUFFER, c.coords);
-    gl.bufferData(gl.ARRAY_BUFFER, set.coords, gl.STATIC_DRAW);
+    if (c.source !== set.coords) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.coords);
+      gl.bufferData(gl.ARRAY_BUFFER, set.coords, gl.STATIC_DRAW);
+      c.source = set.coords;
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, c.colors);
-    gl.bufferData(gl.ARRAY_BUFFER, set.colors, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, set.colors, gl.DYNAMIC_DRAW);
     c.version = set.version;
     return c;
   }

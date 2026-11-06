@@ -23,9 +23,10 @@ def _(mo):
 
     **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y; over an axis:
     that axis), drag to pan, Shift+drag to zoom to a box, `u` to undo and `r` to reset. Panels
-    that share a scale zoom and pan together. `y` keeps y fitted to the data in view. Hover a
-    mark for its values. Double-click a panel to see it alone (Page Up and Page Down: the next
-    ones; Backspace: all again), and press `f` (or the toolbar's button) for full screen.
+    that share a scale zoom and pan together. `y` keeps y fitted to the data in view, and `s`
+    makes drag a brush that selects (Esc clears). Hover a mark for its values. Double-click a
+    panel to see it alone (Page Up and Page Down: the next ones; Backspace: all again), and
+    press `f` (or the toolbar's button) for full screen.
     """)
     return
 
@@ -152,6 +153,42 @@ def _(Trellis, load):
         .points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country", "pop"])
     )
     years
+    return (gapminder,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Following countries: brushing with `link`
+
+    Small multiples lose what the animation had: which dot is which country over time. Linked
+    brushing brings it back. With `link="country"`, a brush selects in the panel you draw it
+    in and then every row of the same countries, in all panels; the rest fade. Press `s` (or
+    the toolbar's select button) and drag a brush in 1955: the countries that had fewer than
+    three children per woman then, followed through fifty years. Drag the brush to move it, a
+    click or Esc clears it.
+
+    From Python, `select()` does the same, and `selected()` gives the rows, also of a brush
+    drawn in the browser.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, gapminder):
+    followed = (
+        Trellis(gapminder, wrap="year", cols=4, panel_height=150, link="country",
+                title="Fewer than three children per woman in 1955: where they went")
+        .points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])
+        .select(x=(0, 3), panel="1955")
+    )
+    followed
+    return (followed,)
+
+
+@app.cell
+def _(followed):
+    followed.selected()["country"].unique().sort().to_list()
     return
 
 

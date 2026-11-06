@@ -15,6 +15,10 @@
 // Fitting y (y, the toolbar) keeps every y group fitted to its data in view as x changes,
 // until y is zoomed by hand. u (or Cmd/Ctrl+Z) undoes a zoom, r resets all.
 //
+// Selecting (s, the toolbar): drag a brush, shaped like a zoom box; it selects the marks it
+// meets in every panel (and, with link keys, every mark sharing a key with them); the rest
+// fade. Drag the brush to move it; a click or Esc clears it. Python sees it on release.
+//
 // Opening a panel (double-click, Enter) shows it alone on the whole width ("small
 // multiples, large singles", van den Elzen and van Wijk 2013); Page Up and Page Down step to
 // the previous and next panel, keeping the zoom. Full screen (f, the toolbar) uses the
@@ -23,7 +27,8 @@
 import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readTheme } from "./drawing";
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
 import { createRenderer } from "./renderers/select";
-import type { Draw, Renderer } from "./renderers/renderer";
+import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
+import { type Brush, type Selection, select, selectionColors } from "./selection";
 import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { formatValue } from "./ticks";
 import type { DataSource, LegendSpec, RendererPreference, TrellisSpec } from "./types";
@@ -35,13 +40,15 @@ export interface ViewOptions {
   tooltip?: (layer: number, instance: number) => Promise<string[][]>;
   /** The reader opened a panel (its name) or went back to all of them (null). */
   onFocus?: (name: string | null) => void;
+  /** The reader drew, moved or cleared the selection (on release). */
+  onSelect?: (brush: Brush | null) => void;
 }
 
 type Range = [number, number];
 type Axis = "x" | "y";
 
 interface Drag {
-  kind: "pan" | "box" | Axis;
+  kind: "pan" | "box" | "brush" | "move" | Axis;
   /** The view (index in views) where it started. */
   view: number;
   x: number;
@@ -50,6 +57,8 @@ interface Drag {
   yr: Range;
   moved: boolean;
 }
+
+type Mode = "pan" | "zoom" | "select";
 
 interface Snapshot {
   x: [number, Range][];
@@ -80,6 +89,7 @@ const ICONS = {
   expand: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" /></svg>',
   collapse: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" /></svg>',
   box: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" stroke-dasharray="2 1.6" /><path d="m10.5 10.5 3 3" /></svg>',
+  select: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="7" rx="1" stroke-dasharray="2 1.6" /><path d="M6 8h4" /></svg>',
   fitY: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10M3 13.5h10M8 5v6M6 7l2-2 2 2M6 9l2 2 2-2" /></svg>',
 };
 
@@ -91,6 +101,7 @@ export class TrellisView {
   private readonly backButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
   private readonly boxButton: HTMLButtonElement;
+  private readonly selectButton: HTMLButtonElement;
   private readonly fitButton: HTMLButtonElement;
   private readonly fullButton: HTMLButtonElement;
   private readonly legend: HTMLDivElement;
@@ -111,16 +122,24 @@ export class TrellisView {
   private yView = new Map<number, Range>();
   private views: PanelView[] = [];
   private frameRequested = false;
-  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [] };
+  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: [] };
   private drag: Drag | null = null;
-  /** Plain drag draws a zoom box (else it pans; Shift does the other). */
-  private boxMode = false;
+  /** What plain drag does: pan, draw a zoom box, or draw a brush. Shift+drag: a zoom box
+   * (in zoom mode: pan). */
+  private mode: Mode = "pan";
+  /** The selection: a brush (axis units), the marks it selects, and the sets drawing it. */
+  private brush: Brush | null = null;
+  private selection: Selection | null = null;
+  private selectionSets: ({ dim: InstanceSet; hi: InstanceSet } | null)[] = [];
   /** Every y group follows its data in view as x changes. */
   private fitY = false;
   private needFit = false;
   private history: Snapshot[] = [];
   private lastWheel = 0;
   private hoverKey = "";
+  /** The brush as a move started. */
+  private dragBrush: Brush | null = null;
+  private needSelect = false;
   private tipRequest = 0;
   /** The panel under the pointer (index in spec.panels), for Enter. */
   private pointerPanel: number | null = null;
@@ -150,12 +169,14 @@ export class TrellisView {
     this.backButton = button(ICONS.back, "All panels (Backspace)", () => this.setFocus(null, true));
     this.backButton.hidden = true;
     this.resetButton = button(ICONS.reset, "Reset zoom (r)", () => this.resetZoom());
-    this.boxButton = button(ICONS.box, "Box zoom: drag a box (z; Shift+drag at any time)", () => this.setBoxMode(!this.boxMode));
+    this.boxButton = button(ICONS.box, "Box zoom: drag a box (z; Shift+drag at any time)", () => this.setMode(this.mode === "zoom" ? "pan" : "zoom"));
+    this.selectButton = button(ICONS.select, "Select: drag a brush (s)", () => this.setMode(this.mode === "select" ? "pan" : "select"));
+    this.selectButton.setAttribute("aria-pressed", "false");
     this.fitButton = button(ICONS.fitY, "Fit y to the data in view (y)", () => this.setFitY(!this.fitY, true));
     for (const b of [this.boxButton, this.fitButton]) b.setAttribute("aria-pressed", "false");
     this.fullButton = button(ICONS.expand, "Full screen (f)", () => this.toggleFullscreen());
     this.fullButton.hidden = !document.fullscreenEnabled; // in some frames (and iPhones): none
-    this.toolbar.append(this.backButton, this.boxButton, this.fitButton, this.resetButton, this.fullButton);
+    this.toolbar.append(this.backButton, this.selectButton, this.boxButton, this.fitButton, this.resetButton, this.fullButton);
     this.header.append(this.heading, this.toolbar);
     this.legend = el("div", "atr-legend");
     this.stage = el("div", "atr-stage");
@@ -231,6 +252,9 @@ export class TrellisView {
       this.setFitY(spec.fit_y === true, false);
     }
     this.fitButton.hidden = spec.y.kind === "band";
+    this.selectionSets = [];
+    this.needSelect = false;
+    this.computeSelection();
     // the opened panel stays open when the new spec still has it
     this.pendingFocus = null;
     this.focused = this.indexOf(openName);
@@ -340,11 +364,110 @@ export class TrellisView {
     }
   }
 
-  private setBoxMode(on: boolean): void {
-    this.boxMode = on;
-    this.boxButton.setAttribute("aria-pressed", String(on));
-    this.root.classList.toggle("atr-box-mode", on);
-    this.notify(on ? "Drag a box to zoom (z or Shift+drag: pan)" : "Drag pans (Shift+drag: box zoom)");
+  private setMode(mode: Mode): void {
+    this.mode = mode;
+    this.boxButton.setAttribute("aria-pressed", String(mode === "zoom"));
+    this.selectButton.setAttribute("aria-pressed", String(mode === "select"));
+    this.notify(
+      mode === "zoom"
+        ? "Drag a box to zoom (z or Shift+drag: pan)"
+        : mode === "select"
+          ? "Drag to select (s: back to panning; Shift+drag: box zoom)"
+          : "Drag pans (Shift+drag: box zoom)",
+    );
+  }
+
+  // ---- selecting ------------------------------------------------------------------------
+
+  /** The selection is this brush (null: none). `user`: the reader made it (tell Python). */
+  private setBrush(brush: Brush | null, user: boolean): void {
+    this.brush = brush && (brush.x || brush.y) ? brush : null;
+    this.needSelect = true; // once per frame: a brush moves faster than frames come
+    if (user) this.opts.onSelect?.(this.brush);
+    this.request();
+  }
+
+  /** The selection from Python (Trellis.select), or none. */
+  setSelection(brush: Brush | null): void {
+    const same = JSON.stringify(brush ?? null) === JSON.stringify(this.brush);
+    if (!same) this.setBrush(brush, false);
+  }
+
+  get selected(): { selected: number; total: number } | null {
+    this.settleSelection();
+    return this.selection ? { selected: this.selection.selected, total: this.selection.total } : null;
+  }
+
+  private settleSelection(): void {
+    if (!this.needSelect) return;
+    this.needSelect = false;
+    this.computeSelection();
+  }
+
+  private computeSelection(): void {
+    const scene = this.scene;
+    if (!scene || !this.brush) {
+      this.selection = null;
+      return;
+    }
+    this.selection = select(scene, this.brush);
+    const old = this.selectionSets;
+    this.selectionSets = scene.layers.map((layer, i) => {
+      const mask = this.selection!.masks[i];
+      if (!mask) return null;
+      const prev = old[i]?.dim.key === `${layer.set.key}:dim` ? old[i] : null;
+      const { dim, hi } = selectionColors(layer, mask, prev?.dim.colors ?? null);
+      const coords = layer.set.coords;
+      return {
+        dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords, colors: dim },
+        hi: { key: `${layer.set.key}:hi`, version: (prev?.hi.version ?? 0) + 1, count: layer.set.count, coords, colors: hi },
+      };
+    });
+  }
+
+  /** The brush where it shows in view `v` (px, in the panel), or null. */
+  private brushRect(v: PanelView): Rect | null {
+    const b = this.brush;
+    if (!b || (b.panel !== null && b.panel !== undefined && b.panel !== v.panel)) return null;
+    const r = v.rect;
+    let x0 = r.x;
+    let x1 = r.x + r.w;
+    let y0 = r.y;
+    let y1 = r.y + r.h;
+    if (b.x) {
+      const a = v.map.ox + b.x[0] * v.map.sx;
+      const c = v.map.ox + b.x[1] * v.map.sx;
+      x0 = Math.max(x0, Math.min(a, c));
+      x1 = Math.min(x1, Math.max(a, c));
+    }
+    if (b.y) {
+      const a = v.map.oy + b.y[0] * v.map.sy;
+      const c = v.map.oy + b.y[1] * v.map.sy;
+      y0 = Math.max(y0, Math.min(a, c));
+      y1 = Math.min(y1, Math.max(a, c));
+    }
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  }
+
+  /** A brush from a drag in views[d.view], shaped as a zoom box would be. */
+  private brushOf(d: Drag, x: number, y: number): Brush | null {
+    const b = this.boxOf(d, x, y);
+    if (!b) return null;
+    const v = this.views[d.view];
+    const r = b.rect;
+    // linked: in its own panel (the link spreads it); else the same range in all of them
+    const linked = this.scene?.layers.some((l) => l.link) ?? false;
+    return {
+      x: b.along === "y" ? null : [(r.x - v.map.ox) / v.map.sx, (r.x + r.w - v.map.ox) / v.map.sx],
+      y: b.along === "x" ? null : [(r.y + r.h - v.map.oy) / v.map.sy, (r.y - v.map.oy) / v.map.sy],
+      panel: linked ? v.panel : null,
+    };
+  }
+
+  private selectedNotice(): void {
+    this.settleSelection();
+    const s = this.selection;
+    if (s) this.notify(`${s.selected.toLocaleString()} of ${s.total.toLocaleString()} marks selected`);
   }
 
   /** Each y group fitted to its panels' data where their x is now. */
@@ -613,6 +736,7 @@ export class TrellisView {
       this.needFit = false;
       this.fitGroups();
     }
+    this.settleSelection();
     const views = this.panelViews();
     this.views = views;
     const back = this.back.getContext("2d")!;
@@ -621,7 +745,11 @@ export class TrellisView {
     drawBack(back, this.spec, views, this.theme);
     if (this.renderer) {
       const draws: Draw[] = [];
-      for (const layer of this.scene.layers) {
+      // with a selection: every layer faded, then the selected marks on top
+      const passes: { layer: LayerData; set: InstanceSet }[] = [];
+      this.scene.layers.forEach((layer, i) => passes.push({ layer, set: this.selectionSets[i]?.dim ?? layer.set }));
+      if (this.selection) this.scene.layers.forEach((layer, i) => this.selectionSets[i] && passes.push({ layer, set: this.selectionSets[i]!.hi }));
+      for (const { layer, set } of passes) {
         for (const v of views) {
           const p = v.panel;
           const start = layer.starts[p];
@@ -629,7 +757,7 @@ export class TrellisView {
           if (!count) continue;
           const { map, rect } = v;
           draws.push({
-            set: layer.set,
+            set,
             start,
             count,
             clip: rect,
@@ -648,6 +776,7 @@ export class TrellisView {
     const front = this.front.getContext("2d")!;
     front.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     front.clearRect(0, 0, this.width, this.lay.height);
+    this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.theme, this.front_);
   }
 
@@ -720,7 +849,15 @@ export class TrellisView {
         const vi = onAxis ? onAxis.view : this.viewAt(x, y);
         if (vi < 0) return;
         const v = this.views[vi];
-        const kind = onAxis ? onAxis.axis : this.boxMode !== e.shiftKey ? "box" : "pan";
+        let kind: Drag["kind"];
+        if (onAxis) kind = onAxis.axis;
+        else if (this.mode === "zoom") kind = e.shiftKey ? "pan" : "box";
+        else if (e.shiftKey) kind = "box";
+        else if (this.mode === "select") {
+          const br = this.brushRect(v);
+          kind = br && x >= br.x && x <= br.x + br.w && y >= br.y && y <= br.y + br.h ? "move" : "brush";
+          this.dragBrush = this.brush;
+        } else kind = "pan";
         this.drag = { kind, view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false };
         stage.setPointerCapture(e.pointerId);
       },
@@ -735,7 +872,7 @@ export class TrellisView {
           const v = this.views[d.view];
           if (!v) return;
           if (!d.moved && Math.hypot(x - d.x, y - d.y) < 3) return;
-          if (!d.moved && d.kind !== "box") this.remember();
+          if (!d.moved && d.kind !== "box" && d.kind !== "brush" && d.kind !== "move") this.remember();
           d.moved = true;
           this.hideTip();
           if (d.kind === "box") {
@@ -745,6 +882,19 @@ export class TrellisView {
             this.front_.crossX = null;
             this.front_.hover = null;
             this.request();
+            return;
+          }
+          if (d.kind === "brush") {
+            this.front_.hover = null;
+            this.setBrush(this.brushOf(d, x, y), false);
+            return;
+          }
+          if (d.kind === "move" && this.dragBrush) {
+            const b = this.dragBrush;
+            const mx = (x - d.x) / v.map.sx;
+            const my = (y - d.y) / v.map.sy;
+            this.front_.hover = null;
+            this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null }, false);
             return;
           }
           const dx = (x - d.x) / v.map.sx;
@@ -766,6 +916,18 @@ export class TrellisView {
       const d = this.drag;
       if (d) stage.releasePointerCapture?.(e.pointerId);
       this.drag = null;
+      if (d?.kind === "brush" || d?.kind === "move") {
+        this.dragBrush = null;
+        if (e.type === "pointercancel") return;
+        if (!d.moved) {
+          // a click clears the selection
+          if (this.brush) this.setBrush(null, true);
+          return;
+        }
+        this.opts.onSelect?.(this.brush);
+        this.selectedNotice();
+        return;
+      }
       if (d?.kind === "box" && (this.front_.box || this.front_.ghosts.length)) {
         if (e.type === "pointerup" && d.moved) {
           const [x, y] = this.local(e);
@@ -842,7 +1004,10 @@ export class TrellisView {
         this.undo();
         return true;
       case "z":
-        this.setBoxMode(!this.boxMode);
+        this.setMode(this.mode === "zoom" ? "pan" : "zoom");
+        return true;
+      case "s":
+        this.setMode(this.mode === "select" ? "pan" : "select");
         return true;
       case "y":
         if (this.spec?.y.kind === "band") return false;
@@ -857,6 +1022,13 @@ export class TrellisView {
         this.setFocus(this.pointerPanel, true);
         return true;
       case "Escape":
+        if (this.brush) {
+          this.setBrush(null, true);
+          return true;
+        }
+        if (this.focused === null) return false;
+        this.setFocus(null, true);
+        return true;
       case "Backspace":
         if (this.focused === null) return false;
         this.setFocus(null, true);

@@ -35,6 +35,7 @@ from anytrellis.layers import (
     step_of,
 )
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
+from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
 from anytrellis.styling import (
     CONTEXT_COLOR,
     MISSING_COLOR,
@@ -89,6 +90,9 @@ class Trellis:
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
+        link: Column(s) that identify a thing across panels (a country, a station): a
+            selection grows to every row sharing them, in all panels and layers that have
+            the columns. Select a few countries in 1955 and see them in every year.
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
     """
 
@@ -110,6 +114,7 @@ class Trellis:
         palette: Sequence[str] | None = None,
         legend: str = "auto",
         fit_y: bool = False,
+        link: str | Sequence[str] | None = None,
         renderer: str = "auto",
     ) -> None:
         self._data = None if data is None else Table(data)
@@ -135,6 +140,10 @@ class Trellis:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
         self.legend = legend
         self.fit_y = bool(fit_y)
+        self._link = _names(link)
+        self._selection: Brush | None = None
+        self._axes: dict[str, tuple[AxisKind, list[str] | None, float]] = {}
+        self._keys: dict[int, np.ndarray | None] = {}
         if renderer not in RENDERERS:
             raise ValueError(f"renderer must be one of {RENDERERS}, got {renderer!r}")
         self.renderer = renderer
@@ -360,6 +369,121 @@ class Trellis:
         if self._widget is not None:
             self._widget.open_panel = name
 
+    # ---- selecting ----------------------------------------------------------------------
+
+    def select(self, x: Any = None, y: Any = None, *, panel: Any = None) -> Self:
+        """Select the marks in a range of x, of y or of both, as a brush drawn in the
+        browser does: in every panel, or in ``panel`` alone (a name from ``panels()``, or a
+        tuple of its levels); with ``link``, also every row sharing a key with them, in all
+        panels. ``select()`` clears the selection.
+
+        ```python
+        t.select(x=("2026-03-05", "2026-03-08"))   # a time axis: dates, datetimes
+        t.select(x=(2, 4), y=(60, 80))             # numbers
+        t.select(x=["Europe", "Asia"])             # a category axis: its categories
+        t.select(x=(0, 3), panel="1955")           # with link="country": follow them
+        ```
+        """
+        self._scene()
+        brush: Brush | None = None
+        if x is not None or y is not None:
+            brush = {"x": self._range_in("x", x), "y": self._range_in("y", y), "panel": None}
+            if panel is not None:
+                keys = panel if isinstance(panel, tuple) else (panel,)
+                name = " · ".join(str(k) for k in keys)
+                names = self.panels()
+                if name not in names:
+                    raise ValueError(f"no panel {name!r}; the panels are {names[:8]}")
+                brush["panel"] = names.index(name)
+        self._set_selection(brush)
+        return self
+
+    @property
+    def selection(self) -> dict[str, Any] | None:
+        """The selection (made here or in the browser): ``{"x": ..., "y": ..., "panel":
+        ...}``, each axis a ``(low, high)`` range (times as ``datetime64``; a category axis:
+        the categories in it) or None for any, and the panel it was drawn in (a linked plot)
+        or None for all; None when nothing is selected."""
+        brush = self._current_selection()
+        if brush is None:
+            return None
+        self._scene()
+        out = {axis: range_out(brush.get(axis), *self._axes[axis]) for axis in ("x", "y")}
+        panel = brush.get("panel")
+        out["panel"] = None if panel is None else self.panels()[int(panel)]
+        return out
+
+    def selected(self, layer: str | int | None = None) -> Any:
+        """The selected rows of a layer's data (default: the first layer), as the same kind
+        of table (Polars, pandas, PyArrow, ...); none selected: no rows."""
+        self._scene()
+        entry = self._layer_entry(layer)
+        lay, table, geom = entry
+        assert geom is not None
+        return table.take(np.flatnonzero(self._row_mask(lay, table, geom)))
+
+    def _row_mask(self, layer: Layer, table: Table, geom: Geometry) -> np.ndarray:
+        brush = self._current_selection()
+        if brush is None:
+            return np.zeros(table.n, dtype=bool)
+        x = self._absolute("x", brush.get("x"))
+        y = self._absolute("y", brush.get("y"))
+        panel = None if brush.get("panel") is None else int(brush["panel"])
+        mask = row_mask(layer.mark, geom, table.n, x, y, panel)
+        keys = self._keys.get(id(layer))
+        if keys is None:
+            return mask
+        # the keys selected in any linked layer
+        chosen: list[np.ndarray] = []
+        for other, other_table, other_geom in self._geometry:
+            other_keys = self._keys.get(id(other))
+            if other_geom is None or other_keys is None or other.facet == "exclude":
+                continue
+            m = (
+                mask
+                if other is layer
+                else row_mask(other.mark, other_geom, other_table.n, x, y, panel)
+            )
+            chosen.append(other_keys[m])
+        return grow(mask, keys, np.unique(np.concatenate(chosen)) if chosen else np.array([]))
+
+    def _layer_entry(self, layer: str | int | None) -> tuple[Layer, Table, Geometry | None]:
+        marks = [e for e in self._geometry if e[2] is not None]
+        if not marks:
+            raise ValueError("this plot has no layers with marks")
+        if layer is None:
+            plain = [e for e in marks if e[0].facet != "exclude"]
+            return (plain or marks)[0]
+        if isinstance(layer, int):
+            entry = self._geometry[layer]
+            if entry[2] is None:
+                raise ValueError(f"layer {layer} is a rule: it has no rows to select")
+            return entry
+        for entry in marks:
+            if entry[0].name == layer:
+                return entry
+        raise ValueError(f"no layer {layer!r}; the layers are {[e[0].name for e in marks]}")
+
+    def _range_in(self, axis: str, value: Any) -> list[float] | None:
+        kind, levels, origin = self._axes[axis]
+        return range_in(value, kind, levels, origin, _scalar)
+
+    def _absolute(self, axis: str, r: list[float] | None) -> tuple[float, float] | None:
+        if r is None:
+            return None
+        origin = self._axes[axis][2]
+        return (float(r[0]) + origin, float(r[1]) + origin)
+
+    def _current_selection(self) -> Brush | None:
+        if self._widget is not None:
+            return self._widget.selection or None
+        return self._selection
+
+    def _set_selection(self, brush: Brush | None) -> None:
+        self._selection = brush
+        if self._widget is not None:
+            self._widget.selection = brush  # ty: ignore[invalid-assignment]  # allow_none
+
     # ---- showing ------------------------------------------------------------------------
 
     @property
@@ -370,7 +494,8 @@ class Trellis:
             from anytrellis.widget import TrellisWidget
 
             spec, _ = self._scene()
-            state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus}
+            state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus,
+                     "selection": self._selection}  # fmt: skip
             self._widget = TrellisWidget(self, state)
         return self._widget
 
@@ -397,6 +522,7 @@ class Trellis:
             "buffers": {k: base64.b64encode(v).decode("ascii") for k, v in buffers.data.items()},
             "renderer": self.renderer,
             "focus": self.focused,
+            "selection": self._current_selection(),
         }
         data = json.dumps(payload).replace("</", "<\\/")
         name = html.escape(title or self.title or "anytrellis")
@@ -526,6 +652,14 @@ class Trellis:
         yd = domains(extents["y"], yg, y_kind, band_size=len(y_levels or []), zero_base=zero)
         x_origin = _origin(xd, x_kind)
         y_origin = _origin(yd, y_kind)
+        self._axes = {"x": (x_kind, x_levels, x_origin), "y": (y_kind, y_levels, y_origin)}
+        self._keys = {}
+        if self._link:
+            mark_entries = [(lr, tb) for lr, tb, g in built if g is not None]
+            keys = link_keys([tb for _, tb in mark_entries], self._link)
+            if all(k is None for k in keys):
+                raise ValueError(f"link={list(self._link)}: no layer's data has these columns")
+            self._keys = {id(lr): k for (lr, _), k in zip(mark_entries, keys, strict=True)}
         buffers = Buffers()
         layers_spec = []
         plain = 0  # layers drawn in a default colour so far
@@ -534,9 +668,14 @@ class Trellis:
                 origin = x_origin if layer.axis == "x" else y_origin
                 layers_spec.append(_rule_spec(layer, rule_values[layer.name], origin))
                 continue
-            layers_spec.append(
-                _layer_spec(layer, geom, npanels, buffers, colors, x_origin, y_origin, plain)
+            spec_layer = _layer_spec(
+                layer, geom, npanels, buffers, colors, x_origin, y_origin, plain
             )
+            keys = self._keys.get(id(layer))
+            spec_layer["link"] = (
+                None if keys is None else buffers.add(keys[geom.rows].astype(np.uint32), "uint32")
+            )
+            layers_spec.append(spec_layer)
             plain += layer.color is None and layer.facet != "exclude"
         first = marks[0] if marks else None
         x_title = self.x_title if self.x_title is not None else (first.x or "" if first else "")

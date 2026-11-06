@@ -2,6 +2,7 @@
 // work without a kernel. Any number per page: <div class="anytrellis-embed"> holding a
 // <script type="application/json"> with {spec, buffers (id → base64), renderer}.
 
+import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
 import type { RendererPreference, TrellisSpec } from "./core/types";
 import { TrellisView } from "./core/view";
@@ -12,6 +13,7 @@ interface Payload {
   renderer: RendererPreference;
   /** The panel opened in Python (Trellis.open), or null. */
   focus?: string | null;
+  selection?: Brush | null;
 }
 
 declare global {
@@ -33,6 +35,7 @@ async function start(host: HTMLElement): Promise<void> {
     const view = new TrellisView(host, { source: embeddedSource(payload.buffers), renderer });
     (window.anytrellisViews ??= []).push(view);
     if (payload.focus) view.setFocusName(payload.focus);
+    if (payload.selection) view.setSelection(payload.selection);
     await view.setSpec(payload.spec);
     // two frames: the first draw happens on the next animation frame
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));

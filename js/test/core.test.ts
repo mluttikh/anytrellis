@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { layout } from "../src/core/layout";
 import { type Scene, pick, yExtent } from "../src/core/scene";
+import { FADED, select, selectionColors } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT } from "../src/core/renderers/renderer";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatNumber, formatValue, niceStep, ticks } from "../src/core/ticks";
@@ -159,6 +160,7 @@ function layer(type: MarkLayerSpec["type"], coords: number[], kind: number, half
     starts: new Uint32Array([0, n]),
     set: { key: "k", version: 1, count: n, coords: new Float32Array(coords), colors: new Uint8Array(n * 4) },
     codes: null,
+    link: null as Uint32Array | null,
     kind,
     halfWidth,
   };
@@ -198,6 +200,52 @@ describe("yExtent", () => {
     const context = layer("points", [5, 100, 5, 100], KIND_CAPSULE, 3, true);
     const scene = { layers: [bars, context] } as unknown as Scene;
     expect(yExtent(scene, 0, 3, 7)).toEqual({ lo: 0, hi: 3, baseLo: true, baseHi: false });
+  });
+});
+
+describe("select", () => {
+  it("selects points inside, segments with an end inside, bars overlapping", () => {
+    const points = layer("points", [1, 1, 1, 1, 5, 5, 5, 5], KIND_CAPSULE, 2);
+    const line = layer("line", [0, 0, 2, 2, 2, 2, 9, 9], KIND_CAPSULE, 1);
+    const bars = layer("bars", [3, 0, 4, 8], KIND_RECT, 0);
+    const scene = { layers: [points, line, bars] } as unknown as Scene;
+    const s = select(scene, { x: [0.5, 3.5], y: null });
+    expect([...s.masks[0]!]).toEqual([1, 0]);
+    expect([...s.masks[1]!]).toEqual([1, 1]); // the second segment starts at x = 2
+    expect([...s.masks[2]!]).toEqual([1]);
+    expect(s.selected).toBe(4);
+    expect(s.total).toBe(5);
+    expect(select(scene, { x: [6, 7], y: [6, 7] }).selected).toBe(0);
+  });
+
+  it("grows by link keys across layers, and skips context", () => {
+    const a = { ...layer("points", [1, 1, 1, 1, 5, 5, 5, 5], KIND_CAPSULE, 2), link: new Uint32Array([7, 8]) };
+    const b = { ...layer("points", [9, 9, 9, 9], KIND_CAPSULE, 2), link: new Uint32Array([7]) };
+    const context = layer("points", [1, 1, 1, 1], KIND_CAPSULE, 2, true);
+    const scene = { layers: [a, b, context] } as unknown as Scene;
+    const s = select(scene, { x: [0, 2], y: null });
+    expect([...s.masks[0]!]).toEqual([1, 0]);
+    expect([...s.masks[1]!]).toEqual([1]); // key 7, far from the brush
+    expect(s.masks[2]).toBeNull();
+  });
+
+  it("in one panel, selects there and the link follows the keys into the others", () => {
+    // panel 0: keys 7 (x 1) and 8 (x 5); panel 1: keys 7 (x 1) and 8 (x 9)
+    const l = { ...layer("points", [1, 1, 1, 1, 5, 5, 5, 5, 1, 1, 1, 1, 9, 9, 9, 9], KIND_CAPSULE, 2), link: new Uint32Array([7, 8, 7, 8]) };
+    l.starts = new Uint32Array([0, 2, 4]);
+    const scene = { layers: [l] } as unknown as Scene;
+    expect([...select(scene, { x: [4, 10], y: null, panel: 1 }).masks[0]!]).toEqual([0, 1, 0, 1]);
+    expect([...select(scene, { x: [4, 10], y: null }).masks[0]!]).toEqual([0, 1, 0, 1]);
+    const unlinked = { ...l, link: null };
+    expect([...select({ layers: [unlinked] } as unknown as Scene, { x: [4, 10], y: null, panel: 1 }).masks[0]!]).toEqual([0, 0, 0, 1]);
+  });
+
+  it("fades the rest and draws the selected on top", () => {
+    const l = layer("points", [1, 1, 1, 1, 5, 5, 5, 5], KIND_CAPSULE, 2);
+    l.set.colors.set([10, 20, 30, 200, 40, 50, 60, 255]);
+    const { dim, hi } = selectionColors(l as never, new Uint8Array([0, 1]), null);
+    expect(dim[3]).toBe(Math.round(200 * FADED));
+    expect([...hi]).toEqual([0, 0, 0, 0, 40, 50, 60, 255]);
   });
 });
 

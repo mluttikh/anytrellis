@@ -31,7 +31,7 @@ const check = (ok, what) => {
 const state = () =>
   page.evaluate(() => {
     const v = window.anytrellisViews[0];
-    return { x: v.views.map((w) => [...w.x]), y: v.views.map((w) => [...w.y]), fit: v.fitY, box: v.boxMode, ghosts: v.front_.ghosts.length };
+    return { x: v.views.map((w) => [...w.x]), y: v.views.map((w) => [...w.y]), fit: v.fitY, box: v.mode === "zoom", ghosts: v.front_.ghosts.length };
   });
 const layout = await page.evaluate(() => window.anytrellisViews[0].lay.panels);
 const stage = await (await page.$(".atr-stage")).boundingBox();

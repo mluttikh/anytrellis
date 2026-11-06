@@ -63,6 +63,14 @@ class Table:
             self._cache[name] = _read(self._frame, name)
         return self._cache[name]
 
+    def take(self, rows: np.ndarray) -> Any:
+        """These rows (indices), as the same kind of table as the data given."""
+        if isinstance(self._frame, Mapping):
+            return {k: np.asarray(v)[rows] for k, v in self._frame.items()}
+        import narwhals as nw
+
+        return nw.to_native(self._frame[rows])
+
     def raw(self, name: str) -> np.ndarray:
         """A column's values as they are (for tooltips)."""
         if isinstance(self._frame, Mapping):

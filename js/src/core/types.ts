@@ -74,8 +74,11 @@ export interface MarkLayerSpec {
   opacity: number;
   /** Python has tooltip columns for this layer. */
   tooltip: boolean;
-  /** Context (the other panels' data): not hovered. */
+  /** Context (the other panels' data): not hovered, not selected. */
   context: boolean;
+  /** Per instance, its row's key of the link columns (uint32): a selection grows to every
+   * mark sharing a key. Absent: not linked. */
+  link?: BufferRef | null;
 }
 
 export interface RuleLayerSpec {

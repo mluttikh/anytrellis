@@ -15,6 +15,8 @@ export interface LayerData {
   starts: Uint32Array;
   set: InstanceSet;
   codes: Uint16Array | null;
+  /** Each instance's link key, or null: the layer is not linked. */
+  link: Uint32Array | null;
   kind: number;
   /** Half the line width or point size (px); 0 for bars. */
   halfWidth: number;
@@ -37,6 +39,7 @@ export function bufferIds(spec: TrellisSpec): string[] {
     ids.push(l.coords.id, l.starts.id);
     if (l.color.rgba) ids.push(l.color.rgba.id);
     if (l.color.codes) ids.push(l.color.codes.id);
+    if (l.link) ids.push(l.link.id);
   }
   return ids;
 }
@@ -101,6 +104,7 @@ export function buildScene(spec: TrellisSpec, source: DataSource): Scene {
       starts,
       set: { key: `${l.coords.id}:${l.color.rgba?.id ?? l.color.solid?.join(",")}`, version: nextVersion++, count: n, coords: f32, colors },
       codes: l.color.codes ? (view(source, l.color.codes) as Uint16Array) : null,
+      link: l.link ? (view(source, l.link) as Uint32Array) : null,
       kind,
       halfWidth,
     });

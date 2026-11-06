@@ -111,6 +111,8 @@ export interface FrontState {
   /** A zoom box being dragged (px), and where it will zoom the panels linked to it. */
   box: Rect | null;
   ghosts: Rect[];
+  /** The selection's brush, where it shows in each panel (px). */
+  brushes: Rect[];
 }
 
 export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layout: Layout, views: PanelView[], theme: Theme, state: FrontState): void {
@@ -242,6 +244,15 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.restore();
   }
 
+  for (const b of state.brushes) {
+    ctx.fillStyle = theme.accent;
+    ctx.globalAlpha = 0.07;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = theme.accent;
+    ctx.strokeRect(Math.round(b.x) + 0.5, Math.round(b.y) + 0.5, Math.round(b.w) - 1, Math.round(b.h) - 1);
+    ctx.globalAlpha = 1;
+  }
   for (const g of state.ghosts) {
     ctx.fillStyle = theme.accent;
     ctx.globalAlpha = 0.06;

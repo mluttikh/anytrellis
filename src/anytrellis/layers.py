@@ -64,6 +64,8 @@ class Geometry:
     """Per instance RGBA bytes (a colour column), or None (one colour)."""
     codes: np.ndarray | None = None
     """Per instance level of a category colour column (for tooltips)."""
+    rows_end: np.ndarray | None = None
+    """A line segment's end row (``rows`` is its start); None for points and bars."""
 
     @property
     def count(self) -> int:
@@ -79,6 +81,7 @@ class Geometry:
             self.rows[order],
             None if self.rgba is None else self.rgba[order],
             None if self.codes is None else self.codes[order],
+            None if self.rows_end is None else self.rows_end[order],
         )  # fmt: skip
 
 
@@ -136,7 +139,8 @@ def line_geometry(
     dots = np.flatnonzero(valid & ~touched)
     first = np.concatenate([pairs, dots])
     second = np.concatenate([pairs + 1, dots])
-    geom = Geometry(panel[first], xs[first], ys[first], xs[second], ys[second], rows[first])
+    geom = Geometry(panel[first], xs[first], ys[first], xs[second], ys[second], rows[first],
+                    rows_end=rows[second])  # fmt: skip
     return geom.take(np.argsort(geom.panel, kind="stable"))
 
 

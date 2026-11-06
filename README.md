@@ -70,6 +70,26 @@ Zooming y by hand stops it. `Trellis(..., fit_y=True)` starts with it on.
 
 `u` (or Cmd/Ctrl+Z) undoes a zoom, one step at a time.
 
+**Selecting.** `s` (or the toolbar) makes drag a brush, shaped like a zoom box: x, y or
+both. It selects the marks it meets, in every panel, and the rest fade: the same range
+compared across panels. Drag the brush to move it; a click or Esc clears it.
+
+With `Trellis(..., link="country")` the brush selects in the panel you draw it in, and
+then every row sharing its link values, in all panels and layers that have the column:
+brush countries in 1955 and follow them through the years. From Python:
+
+```python
+t.select(x=(2, 4), y=(60, 80))          # a time axis: dates; a category axis: categories
+t.select(x=(0, 3), panel="1955")        # in one panel (with link: then followed)
+t.selection                             # the brush: {"x": (2, 4), "y": (60, 80), "panel": None}
+t.selected()                            # the selected rows, as the table you gave
+t.select()                              # clear
+```
+
+A brush drawn in the browser reaches Python when you let go, so `t.selected()` in the next
+cell gives its rows. A point is selected inside the brush, a line segment with either end
+inside, a bar overlapping it; grey context is never selected.
+
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the
 same zoom, and Backspace, Esc, a double-click or *All panels* goes back. The zoom stays
@@ -88,9 +108,11 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | `u`, Cmd/Ctrl+Z | undo the last zoom |
 | `z` | drag draws a zoom box, and back (Shift+drag: the other) |
 | `y` | fit y to the data in view, and stop |
+| `s` | drag draws a selection brush, and back |
+| Esc | clear the selection (else: back to all panels) |
 | Enter | open the panel under the pointer |
 | Page Up / Page Down | previous / next panel |
-| Backspace, Esc | back to all panels |
+| Backspace | back to all panels |
 
 These keys stay in the plot, so JupyterLab's own shortcuts don't also act on them.
 
@@ -108,7 +130,7 @@ Notebooks in [`examples/jupyter`](examples/jupyter) (JupyterLab, VS Code) and th
 | notebook | what it shows |
 |---|---|
 | `01_getting_started` | wrap, grid, free scales, layers and context, `rule`, `order`, `save_html` |
-| `02_lattice_and_cleveland` | Cleveland's barley dot plot, Anscombe's quartet, conditioning on two variables, small multiples instead of an animation |
+| `02_lattice_and_cleveland` | Cleveland's barley dot plot, Anscombe's quartet, conditioning on two variables, small multiples instead of an animation, following countries with linked brushing |
 | `03_ggplot2_style` | `facet_wrap`, `facet_grid`, gghighlight, `scales = "free_y"`, stacked and dodged bars |
 | `04_seaborn_style` | `relplot` (scatter and line, `col_wrap`), `FacetGrid` histograms, `catplot(kind="bar")` |
 | `05_vega_lite_style` | `row` / `column` / `facet` channels, `resolve_scale`, a trellis of grouped bars |
@@ -129,6 +151,7 @@ npm run build                              # after changing js/src
 node test/visual.mjs <dir of save_html pages>      # screenshots per backend
 node test/interact.mjs <page.html>                 # hover, linked zoom, pan, reset, dark
 node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, undo
+node test/select.mjs <page.html> [dir] [renderer]  # brushing, moving, clearing
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
 ```
 

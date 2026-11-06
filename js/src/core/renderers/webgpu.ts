@@ -79,6 +79,8 @@ interface Cached {
   version: number;
   coords: GPUBuffer;
   colors: GPUBuffer;
+  /** The coordinates uploaded: a new version with the same array only re-sends colours. */
+  source: Float32Array;
 }
 
 export class WebGPURenderer implements Renderer {
@@ -131,6 +133,13 @@ export class WebGPURenderer implements Renderer {
     const dev = this.s.device;
     let c = this.cache.get(set.key);
     if (c && c.version === set.version) return c;
+    const colors = set.colors.byteLength % 4 === 0 ? set.colors : padded(set.colors);
+    if (c && c.source === set.coords && c.colors.size >= Math.max(16, colors.byteLength)) {
+      // only the colours changed (a selection): the coordinates stay on the GPU
+      if (colors.byteLength) dev.queue.writeBuffer(c.colors, 0, colors.buffer, colors.byteOffset, colors.byteLength);
+      c.version = set.version;
+      return c;
+    }
     if (c) {
       c.coords.destroy();
       c.colors.destroy();
@@ -141,8 +150,7 @@ export class WebGPURenderer implements Renderer {
       if (data.byteLength) dev.queue.writeBuffer(b, 0, data.buffer, data.byteOffset, Math.floor(data.byteLength / 4) * 4);
       return b;
     };
-    const colors = set.colors.byteLength % 4 === 0 ? set.colors : padded(set.colors);
-    c = { version: set.version, coords: make(set.coords), colors: make(colors) };
+    c = { version: set.version, coords: make(set.coords), colors: make(colors), source: set.coords };
     this.cache.set(set.key, c);
     return c;
   }

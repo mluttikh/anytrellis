@@ -8,6 +8,8 @@ buffers, drawn in the browser. This module is the protocol between them.
   messages, each with one binary chunk of at most ``CHUNK_BYTES``; an id Python does not
   have is answered ``{"type": "missing", "id"}``.
 * ``open_panel`` (synced both ways): the name of the panel shown alone, or None.
+* ``selection`` (synced both ways): the brush, ``{"x": [lo, hi] | None, "y": ...}`` in axis
+  units relative to the spec's origins, or None (the browser sends it on release).
 * ``{"type": "tooltip", "request", "layer", "index"}`` asks for the tooltip columns of one
   instance of a layer; Python answers ``{"type": "answer", "request", "rows"}``.
 
@@ -41,12 +43,18 @@ class TrellisWidget(anywidget.AnyWidget):
     renderer = traitlets.Unicode("auto").tag(sync=True)
     #: The opened panel's name (``Trellis.open``, or a double-click in the browser), or None.
     open_panel = traitlets.Unicode(None, allow_none=True).tag(sync=True)
+    #: The selection's brush (``Trellis.select``, or one drawn in the browser), or None.
+    selection = traitlets.Dict(None, allow_none=True).tag(sync=True)
 
     def __init__(self, plot: Trellis, state: dict[str, Any]) -> None:
         self._plot = plot
         super().__init__(**state)
         self.on_msg(self._on_msg)
         self.observe(self._on_focus, names="open_panel")
+        self.observe(self._on_selection, names="selection")
+
+    def _on_selection(self, change: dict[str, Any]) -> None:
+        self._plot._selection = change["new"]  # drawn in the browser: save_html keeps it
 
     def _on_focus(self, change: dict[str, Any]) -> None:
         self._plot._focus = change["new"]  # opened in the browser: save_html keeps it
