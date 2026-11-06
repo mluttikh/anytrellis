@@ -161,6 +161,8 @@ function layer(type: MarkLayerSpec["type"], coords: number[], kind: number, half
     set: { key: "k", version: 1, count: n, coords: new Float32Array(coords), colors: new Uint8Array(n * 4) },
     codes: null,
     link: null as Uint32Array | null,
+    groups: null as Uint32Array | null,
+    tipRows: null as Uint32Array | null,
     base: null as Float64Array | null,
     kind,
     halfWidth,
@@ -239,6 +241,21 @@ describe("select", () => {
     expect([...select(scene, { x: [4, 10], y: null }).masks[0]!]).toEqual([0, 1, 0, 1]);
     const unlinked = { ...l, link: null };
     expect([...select({ layers: [unlinked] } as unknown as Scene, { x: [4, 10], y: null, panel: 1 }).masks[0]!]).toEqual([0, 0, 0, 1]);
+  });
+
+  it("selects a box whole: what meets its body selects its lines, in its family only", () => {
+    // two boxes: bodies at x 0..1 and 2..3; their whiskers (lines) above, at x 0.5 and 2.5
+    const body = { ...layer("rect", [0, 1, 1, 2, 2, 1, 3, 2], KIND_RECT, 0), groups: new Uint32Array([0, 1]) };
+    body.spec = { ...body.spec, family: 4 };
+    const lines = { ...layer("line", [0.5, 2, 0.5, 5, 2.5, 2, 2.5, 5], KIND_CAPSULE, 1), groups: new Uint32Array([0, 1]) };
+    lines.spec = { ...lines.spec, family: 4 };
+    const other = { ...layer("line", [2.5, 4, 2.5, 5], KIND_CAPSULE, 1), groups: new Uint32Array([0]) };
+    other.spec = { ...other.spec, family: 9 };
+    const scene = { layers: [body, lines, other] } as unknown as Scene;
+    const s = select(scene, { x: [2.2, 2.8], y: [1.2, 1.5] }); // inside the second body only
+    expect([...s.masks[0]!]).toEqual([0, 1]);
+    expect([...s.masks[1]!]).toEqual([0, 1]); // its whisker, though no end is in the brush
+    expect([...s.masks[2]!]).toEqual([0]); // another family's group 0: not selected
   });
 
   it("fades the rest and draws the selected on top", () => {

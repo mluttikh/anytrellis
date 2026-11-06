@@ -19,8 +19,8 @@ def _(mo):
     A trellis (small multiples, facets) draws the same plot once per group of a table, on
     scales that are the same everywhere, so the panels can be compared at a glance. With
     anytrellis you say which columns split the table into panels (`wrap=`, or `row=` and
-    `col=`) and which layers each panel draws (`line`, `points`, `bars`, `rule`). Every panel
-    is drawn on the GPU in one canvas, so millions of marks stay smooth.
+    `col=`) and which layers each panel draws (`line`, `points`, `bars`, `hist`, `box`, ...).
+    Every panel is drawn on the GPU in one canvas, so millions of marks stay smooth.
 
     **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y; over an axis:
     that axis), drag to pan, Shift+drag to zoom to a box, `u` to undo and `r` to reset. Panels

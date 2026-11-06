@@ -1092,14 +1092,24 @@ export class TrellisView {
     const keys = spec.panels[p].keys.join(" · ");
     // a bar's or a stacked area's own value: from its base
     const isBar = layer.spec.type === "bars" || layer.spec.type === "area";
-    rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels)]);
-    rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels)]);
+    const hide = layer.spec.hide ?? [];
+    if (!hide.includes("x")) rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels)]);
+    if (!hide.includes("y")) rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels)]);
     const legend = layer.spec.color.legend;
     if (layer.codes && legend !== null) {
       const lg = spec.legends[legend];
       rows.push([lg.title, lg.labels?.[layer.codes[hit.instance]] ?? ""]);
     }
     const key = `${layer.index}:${hit.instance}`;
+    const tips = layer.spec.tips;
+    if (tips && layer.tipRows) {
+      // given with the spec: no need to ask Python
+      const values = tips.values[layer.tipRows[hit.instance]] ?? [];
+      this.renderTip(keys, layer, rows, tips.names.map((n, k) => [n, values[k] ?? ""]));
+      this.placeTip(px, py);
+      this.hoverKey = key;
+      return;
+    }
     this.renderTip(keys, layer, rows, []);
     this.placeTip(px, py);
     if (key === this.hoverKey) return;
@@ -1117,7 +1127,7 @@ export class TrellisView {
   }
 
   private renderTip(title: string, layer: LayerData, rows: [string, string][], extra: string[][]): void {
-    const multi = (this.spec?.layers.length ?? 0) > 1;
+    const multi = new Set(this.spec?.layers.map((l) => l.name)).size > 1; // a box's parts: one
     const head = [title, multi ? layer.spec.name : ""].filter(Boolean).join(" — ");
     const all = [...rows, ...extra.map(([k, v]) => [k, v] as [string, string])];
     this.tip.replaceChildren();

@@ -81,6 +81,17 @@ export interface MarkLayerSpec {
   link?: BufferRef | null;
   /** Areas: the base's y at each end of an instance (float64, 2 per instance). */
   base?: BufferRef | null;
+  /** Axes the tooltip leaves out (a box: its numbers come from Python instead). */
+  hide?: ("x" | "y")[];
+  /** The parts of one summary mark drawing the same rows (a box's body and lines) share a
+   * family: an instance selected selects every instance of its group (uint32 per
+   * instance) in the family. */
+  family?: number | null;
+  groups?: BufferRef | null;
+  /** Tooltip rows given with the spec (a summary's, which are few): per row of its table,
+   * a value for each name; `tip_rows`: each instance's row. */
+  tips?: { names: string[]; values: string[][] } | null;
+  tip_rows?: BufferRef | null;
 }
 
 export interface RuleLayerSpec {

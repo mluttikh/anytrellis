@@ -19,7 +19,8 @@ import numpy as np
 
 from anytrellis.data import Column, Table
 
-Mark = Literal["line", "points", "bars", "area", "rect", "text", "rule"]
+Mark = Literal["line", "points", "bars", "area", "rect", "text", "rule", "hist", "box", "density"]
+SUMMARIES = ("hist", "box", "density")
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "dodge", "identity"]
 
@@ -53,6 +54,9 @@ class Layer:
     align: Literal["left", "center", "right"] = "center"
     dx: float = 0.0
     dy: float = 0.0
+    # summaries (hist, box, density): their options; on a drawn part, the summary's mark
+    stat_args: dict[str, Any] = field(default_factory=dict)
+    stat: str | None = None
     # rules: constant positions
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
@@ -106,9 +110,9 @@ def axis_values(column: Column, levels: list[str] | None) -> np.ndarray:
     if column.kind != "category":
         return column.values
     lookup = {v: float(i) for i, v in enumerate(levels or [])}
-    uniq, inverse = np.unique(column.values.astype(str), return_inverse=True)
-    mapped = np.array([lookup.get(u, np.nan) for u in uniq], dtype=np.float64)
-    return mapped[inverse.ravel()]
+    # the column's own levels to the axis's, then each row by its code
+    mapped = np.array([lookup.get(lv, np.nan) for lv in column.levels] + [np.nan])
+    return mapped[column.level_codes()]  # a code of -1: the NaN at the end
 
 
 def expand(

@@ -58,8 +58,8 @@ notebook(
 A trellis (small multiples, facets) draws the same plot once per group of a table, on
 scales that are the same everywhere, so the panels can be compared at a glance. With
 anytrellis you say which columns split the table into panels (`wrap=`, or `row=` and
-`col=`) and which layers each panel draws (`line`, `points`, `bars`, `rule`). Every panel
-is drawn on the GPU in one canvas, so millions of marks stay smooth.
+`col=`) and which layers each panel draws (`line`, `points`, `bars`, `hist`, `box`, ...).
+Every panel is drawn on the GPU in one canvas, so millions of marks stay smooth.
 
 """
         + HOW_TO_USE
@@ -248,6 +248,34 @@ conditioned = (
 conditioned
 """),
     md("""
+## `bwplot` and `densityplot`
+
+```r
+bwplot(factor(cylinders) ~ mpg | origin, data = cars, layout = c(3, 1))
+densityplot(~ mpg | origin, groups = cylinders, data = cars, plot.points = FALSE)
+```
+
+Box plots go sideways when y is the category. Python computes the quartiles (and the
+densities) in each panel; hover a box for its numbers. Brush it (`s`, then drag) and
+`selected()` gives the cars it stands for.
+"""),
+    py("""
+by_cylinders = cars.with_columns(cyl=pl.col("cylinders").cast(pl.String))
+
+boxes = (
+    Trellis(by_cylinders, wrap="origin", cols=3, panel_height=150, title="Fuel use")
+    .box(x="mpg", y="cyl", tooltip=["name"])
+)
+boxes
+"""),
+    py("""
+fuel_density = (
+    Trellis(by_cylinders, wrap="origin", cols=3, panel_height=150)
+    .density(x="mpg", color="cyl", fill=True)
+)
+fuel_density
+"""),
+    md("""
 ## Small multiples instead of an animation
 
 Hans Rosling's famous animation of fertility against life expectancy, as one panel per
@@ -307,6 +335,7 @@ For those who know ggplot2's faceting:
 | `scales = "free_y"` / `"free"`           | `share_y=False` / `share_x=False, share_y=False` |
 | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()`        |
 | `geom_hline()`, `geom_vline()`           | `.rule(y=...)`, `.rule(x=...)`              |
+| `geom_histogram()`, `geom_boxplot()`, `geom_density()` | `.hist()`, `.box()`, `.density()` |
 | `position = "dodge"`                     | `.bars(position="dodge")`                   |
 | `gghighlight()`                          | a layer with `facet="exclude"`              |
 | `fct_reorder(f, x, median)`              | `.order("f", by="median", of="x")`          |
@@ -429,6 +458,26 @@ dodged = (
 dodged
 """),
     md("""
+## `geom_histogram` with the other panels behind
+
+```r
+ggplot(penguins, aes(flipper_length_mm)) +
+  geom_histogram(data = select(penguins, -species), fill = "grey85", binwidth = 2) +
+  geom_histogram(aes(fill = species), binwidth = 2) + facet_wrap(~ species)
+```
+
+`facet="exclude"` counts the other panels' rows: each species against the rest. The bins
+are the same in every panel.
+"""),
+    py("""
+flippers = (
+    Trellis(penguins, wrap="species", cols=3, panel_height=200, title="Flipper length")
+    .hist(x="flipper_length_mm", binwidth=2, facet="exclude", name="others")
+    .hist(x="flipper_length_mm", binwidth=2, color="species")
+)
+flippers
+"""),
+    md("""
 ## `geom_area`
 
 ```r
@@ -536,21 +585,50 @@ g = sns.FacetGrid(penguins, row="sex", col="species")
 g.map(sns.histplot, "flipper_length_mm", binwidth=5)
 ```
 
-Bin the values (here with Polars), then draw the counts as bars a whole bin wide.
+The bins are shared by every panel; `stat="percent"` or `"density"` scales each panel's
+counts.
 """),
     py("""
-binned = (
-    penguins.drop_nulls("sex")
-    .with_columns(bin=(pl.col("flipper_length_mm") // 5) * 5 + 2.5)
-    .group_by("sex", "species", "bin")
-    .agg(count=pl.len())
-)
+known = penguins.drop_nulls("sex")
 
 histograms = (
-    Trellis(binned, row="sex", col="species", panel_height=140, x_title="flipper length (mm)")
-    .bars(x="bin", y="count", width=1.0)
+    Trellis(known, row="sex", col="species", panel_height=140)
+    .hist(x="flipper_length_mm", binwidth=5)
 )
 histograms
+"""),
+    md("""
+## `displot(kind="kde")`
+
+```python
+sns.displot(data=penguins, x="bill_length_mm", hue="sex", col="species", kind="kde", fill=True)
+```
+
+Each curve covers an area of 1, on x values every panel shares; `bw_adjust=` scales the
+bandwidth as in seaborn.
+"""),
+    py("""
+bills = (
+    Trellis(known, col="species", panel_height=220)
+    .density(x="bill_length_mm", color="sex", fill=True)
+)
+bills
+"""),
+    md("""
+## `catplot(kind="box")`
+
+```python
+sns.catplot(data=penguins, x="species", y="body_mass_g", hue="sex", col="island", kind="box")
+```
+
+The boxes of each colour side by side; the points beyond the whiskers are the outliers.
+"""),
+    py("""
+masses = (
+    Trellis(known, col="island", panel_height=240)
+    .box(x="species", y="body_mass_g", color="sex")
+)
+masses
 """),
     md("""
 ## `catplot(kind="bar")`

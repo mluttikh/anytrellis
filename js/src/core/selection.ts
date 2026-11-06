@@ -7,6 +7,8 @@
 //
 // A mark meets the brush: a point inside it; a line segment with either end inside; a bar
 // or rect overlapping it (an area: like a line). Grey context layers are never selected.
+// A summary mark drawn as several layers (a box: body, lines, outliers) selects a box
+// whole: what meets its body or its lines.
 
 import { KIND_RECT } from "./renderers/renderer";
 import type { LayerData, Scene } from "./scene";
@@ -70,6 +72,23 @@ export function select(scene: Scene, brush: Brush): Selection {
       for (let i = 0; i < mask.length; i++) if (keys.has(layer.link[i])) mask[i] = 1;
     });
   }
+  // a summary's parts (a box's body and lines): a group selected in one, in all of them
+  const families = new Map<number, Set<number>>();
+  scene.layers.forEach((layer, li) => {
+    const mask = masks[li];
+    const f = layer.spec.family;
+    if (!mask || f === null || f === undefined || !layer.groups) return;
+    const set = families.get(f) ?? new Set<number>();
+    for (let i = 0; i < mask.length; i++) if (mask[i]) set.add(layer.groups[i]);
+    families.set(f, set);
+  });
+  scene.layers.forEach((layer, li) => {
+    const mask = masks[li];
+    const f = layer.spec.family;
+    const set = f === null || f === undefined ? undefined : families.get(f);
+    if (!mask || !set?.size || !layer.groups) return;
+    for (let i = 0; i < mask.length; i++) if (set.has(layer.groups[i])) mask[i] = 1;
+  });
   let selected = 0;
   let total = 0;
   for (const m of masks) {

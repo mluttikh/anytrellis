@@ -104,25 +104,70 @@ def _(mo):
     g.map(sns.histplot, "flipper_length_mm", binwidth=5)
     ```
 
-    Bin the values (here with Polars), then draw the counts as bars a whole bin wide.
+    The bins are shared by every panel; `stat="percent"` or `"density"` scales each panel's
+    counts.
     """)
     return
 
 
 @app.cell
-def _(Trellis, penguins, pl):
-    binned = (
-        penguins.drop_nulls("sex")
-        .with_columns(bin=(pl.col("flipper_length_mm") // 5) * 5 + 2.5)
-        .group_by("sex", "species", "bin")
-        .agg(count=pl.len())
-    )
+def _(Trellis, penguins):
+    known = penguins.drop_nulls("sex")
 
     histograms = (
-        Trellis(binned, row="sex", col="species", panel_height=140, x_title="flipper length (mm)")
-        .bars(x="bin", y="count", width=1.0)
+        Trellis(known, row="sex", col="species", panel_height=140)
+        .hist(x="flipper_length_mm", binwidth=5)
     )
     histograms
+    return (known,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `displot(kind="kde")`
+
+    ```python
+    sns.displot(data=penguins, x="bill_length_mm", hue="sex", col="species", kind="kde", fill=True)
+    ```
+
+    Each curve covers an area of 1, on x values every panel shares; `bw_adjust=` scales the
+    bandwidth as in seaborn.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, known):
+    bills = (
+        Trellis(known, col="species", panel_height=220)
+        .density(x="bill_length_mm", color="sex", fill=True)
+    )
+    bills
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `catplot(kind="box")`
+
+    ```python
+    sns.catplot(data=penguins, x="species", y="body_mass_g", hue="sex", col="island", kind="box")
+    ```
+
+    The boxes of each colour side by side; the points beyond the whiskers are the outliers.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, known):
+    masses = (
+        Trellis(known, col="island", panel_height=240)
+        .box(x="species", y="body_mass_g", color="sex")
+    )
+    masses
     return
 
 

@@ -587,3 +587,168 @@ def test_text_sends_labels_as_utf8():
     assert labels == ["Zürich", "Oslo"]
     with pytest.raises(ValueError, match="align must be"):
         Trellis(data).text(x="x", y="y", text="name", align="middle")
+
+
+# ---- summaries: hist, box, density -----------------------------------------------------------
+
+RNG = np.random.default_rng(7)
+DIST = {
+    "g": ["a"] * 200 + ["b"] * 100,
+    "c": (["p", "q"] * 150),
+    "v": np.r_[RNG.normal(10, 2, 200), RNG.normal(14, 1, 100)],
+}
+
+
+def test_hist_shares_round_bins_across_panels():
+    t = Trellis(DIST, wrap="g").hist(x="v", bins=10)
+    c = coords(t)
+    widths = np.round(c[:, 2] - c[:, 0], 9)
+    assert len(set(widths)) == 1  # one width everywhere
+    w = widths[0]
+    assert w / 10 ** np.floor(np.log10(w)) in (1, 2, 2.5, 5)
+    assert np.allclose(np.round(c[:, 0] / w), c[:, 0] / w)  # edges at multiples of it
+    spec, _ = scene(t)
+    assert spec["layers"][0]["type"] == "bars"
+    assert spec["y"]["title"] == "count"
+    counts = c[:, 3] - c[:, 1]
+    st = starts(t)
+    assert counts[st[0] : st[1]].sum() == 200
+    assert counts[st[1] : st[2]].sum() == 100
+
+
+def test_hist_stacks_colours_and_normalises_per_panel():
+    t = Trellis(DIST, wrap="g").hist(x="v", color="c", bins=8, stat="percent")
+    c = coords(t)
+    st = starts(t)
+    heights = c[:, 3] - c[:, 1]
+    assert np.isclose(heights[st[0] : st[1]].sum(), 100)
+    assert np.isclose(heights[st[1] : st[2]].sum(), 100)
+    # stacked: at each bin, the second colour starts where the first ends
+    first = c[st[0] : st[1]]
+    for x0 in np.unique(first[:, 0]):
+        here = first[first[:, 0] == x0]
+        if len(here) == 2:
+            assert np.isclose(here[:, 1].max(), here[:, 3].min())
+    d = Trellis(DIST, wrap="g").hist(x="v", bins=8, stat="density")
+    dc = coords(d)
+    area = ((dc[:, 2] - dc[:, 0]) * (dc[:, 3] - dc[:, 1]))[: starts(d)[1]].sum()
+    assert np.isclose(area, 1)
+
+
+def test_hist_binwidth_edges_and_categories():
+    data = {"v": [0.0, 0.1, 0.9, 1.0, 2.5]}
+    c = coords(Trellis(data).hist(x="v", binwidth=1))
+    assert c[:, 0].tolist() == [0.0, 1.0, 2.0]  # the 1.0 counts in [1, 2)
+    assert (c[:, 3] - c[:, 1]).tolist() == [3.0, 1.0, 1.0]
+    c = coords(Trellis(data).hist(x="v", bins=[0, 1, 3]))
+    assert (c[:, 3] - c[:, 1]).tolist() == [3.0, 2.0]  # the last edge is in the last bin
+    cats = {"k": ["x", "y", "y", "z", "z", "z"]}
+    t = Trellis(cats).hist(x="k")
+    spec, _ = scene(t)
+    assert spec["x"]["kind"] == "band"
+    c = coords(t)
+    assert (c[:, 3] - c[:, 1]).tolist() == [1.0, 2.0, 3.0]
+    assert np.allclose(c[:, 2] - c[:, 0], 0.8)
+    with pytest.raises(ValueError, match="category column"):
+        Trellis(DIST).hist(x="v", color="v")._scene()
+
+
+def test_hist_context_counts_the_other_panels():
+    t = Trellis(DIST, wrap="g").hist(x="v", facet="exclude", bins=10).hist(x="v", bins=10)
+    spec, _ = scene(t)
+    assert spec["layers"][0]["context"] is True
+    c = coords(t, 0)
+    st = starts(t, 0)
+    assert (c[st[0] : st[1], 3] - c[st[0] : st[1], 1]).sum() == 100  # in a: b's rows
+
+
+def test_hist_tooltip_and_selection_are_of_bins_and_their_rows():
+    data = {"v": [0.0, 0.5, 1.5, 2.5, 2.6], "name": list("abcde")}
+    t = Trellis(data).hist(x="v", binwidth=1)
+    spec, _ = scene(t)
+    layer = spec["layers"][0]
+    assert layer["hide"] == ["x", "y"]
+    assert layer["tips"]["names"] == ["bin", "count"]
+    assert layer["tips"]["values"][0] == ["0 – 1", "2"]
+    t.select(x=(2.2, 2.4))  # meets the bin [2, 3)
+    assert list(t.selected()["name"]) == ["d", "e"]
+
+
+def test_box_quartiles_whiskers_and_outliers():
+    values = np.r_[np.arange(1.0, 12.0), 40.0]  # 40: beyond the whiskers
+    data = {"k": ["a"] * len(values), "v": values, "id": [f"r{i}" for i in range(len(values))]}
+    t = Trellis(data).box(x="k", y="v", tooltip=["id"])
+    spec, _ = scene(t)
+    assert [lr["type"] for lr in spec["layers"]] == ["rect", "line", "points"]
+    q1, med, q3 = np.percentile(values, [25, 50, 75])
+    body = coords(t, 0)[0]
+    assert np.allclose([body[1], body[3]], [q1, q3])
+    assert np.allclose(body[2] - body[0], 0.8)
+    segments = coords(t, 1)
+    assert len(segments) == 7
+    assert np.isclose(segments[:, [1, 3]].max(), 11.0)  # the upper whisker: the furthest inside
+    assert any(np.allclose(s[[1, 3]], [med, med]) for s in segments)  # the median
+    points = coords(t, 2)
+    assert points[:, 1].tolist() == [40.0]
+    assert t._tooltip(2, 0) == [["id", "r11"]]
+    tips = spec["layers"][0]["tips"]
+    assert tips["names"] == ["k", "n", "median", "q1", "q3", "whiskers"]
+    assert tips["values"][0][:3] == ["a", "12", "6.5"]
+
+
+def test_box_dodges_colours_and_goes_horizontal():
+    t = Trellis(DIST).box(x="g", y="v", color="c")
+    body = coords(t, 0)
+    assert len(body) == 4  # 2 positions x 2 colours
+    centres = np.sort((body[:, 0] + body[:, 2]) / 2)
+    assert np.allclose(centres, [-0.2, 0.2, 0.8, 1.2])
+    h = Trellis(DIST).box(x="v", y="g")
+    spec, _ = scene(h)
+    assert spec["y"]["kind"] == "band"
+    assert spec["x"]["kind"] == "number"
+    hb = coords(h, 0)
+    assert np.allclose(hb[:, 3] - hb[:, 1], 0.8)  # the width is along y
+    with pytest.raises(ValueError, match="must be numbers"):
+        Trellis(DIST).box(x="g", y="c")._scene()
+
+
+def test_box_selects_whole_boxes_and_their_rows():
+    t = Trellis(DIST).box(x="g", y="v")
+    spec, _ = scene(t)
+    assert spec["layers"][0]["family"] == spec["layers"][1]["family"] == 0
+    assert spec["layers"][2]["family"] is None
+    t.select(x=["b"])
+    rows = t.selected()
+    assert set(rows["g"]) == {"b"}
+    assert len(rows["g"]) == 100  # the box's rows, not one per box
+
+
+def test_density_integrates_to_one_on_a_shared_grid():
+    t = Trellis(DIST, wrap="g").density(x="v", fill=True)
+    spec, _ = scene(t)
+    assert [lr["type"] for lr in spec["layers"]] == ["area", "line"]
+    assert spec["y"]["title"] == "density"
+    assert spec["panels"][0]["y"][0] == 0.0  # from zero
+    c = coords(t, 1)
+    st = starts(t, 1)
+    for p in range(2):
+        seg = c[st[p] : st[p + 1]]
+        area = ((seg[:, 2] - seg[:, 0]) * (seg[:, 1] + seg[:, 3]) / 2).sum()
+        assert abs(area - 1) < 0.01
+    step_a = np.diff(np.unique(c[st[0] : st[1], 0]))[0]
+    step_b = np.diff(np.unique(c[st[1] : st[2], 0]))[0]
+    assert np.isclose(step_a, step_b)  # one grid
+    assert np.allclose(base_of(t, 0), 0)
+    t.select(x=(9.0, 9.5), panel="a")
+    rows = t.selected()
+    assert set(rows["g"]) == {"a"}
+    assert np.min(rows["v"]) >= 8.9
+    assert np.max(rows["v"]) <= 9.7
+
+
+def test_density_bandwidth_and_errors():
+    narrow = coords(Trellis(DIST).density(x="v", bw_adjust=0.3))[:, 1].max()
+    wide = coords(Trellis(DIST).density(x="v", bw_adjust=3))[:, 1].max()
+    assert narrow > wide
+    with pytest.raises(ValueError, match="numbers or times"):
+        Trellis(DIST).density(x="g")._scene()

@@ -36,6 +36,19 @@ class Column:
     kind: Kind
     values: np.ndarray
     levels: tuple[str, ...] = ()
+    codes: np.ndarray | None = None
+    """A category column's index of each row's value in ``levels`` (computed if not given)."""
+
+    def level_codes(self) -> np.ndarray:
+        """Each row's index in ``levels`` (−1: not one of them)."""
+        if self.codes is not None:
+            return self.codes
+        distinct, codes = _labels(self.values)
+        position = {lv: i for i, lv in enumerate(self.levels)}
+        level_of = np.array([position.get(t, -1) for t in distinct], dtype=np.int64)
+        out = level_of[codes] if len(codes) else codes
+        object.__setattr__(self, "codes", out)
+        return out
 
     def __len__(self) -> int:
         return len(self.values)
@@ -167,15 +180,40 @@ def _from_array(name: str, values: Any) -> Column:
 
 
 def _categories(name: str, values: np.ndarray, levels: list[str] | None) -> Column:
-    text = np.array([_label(v) for v in values], dtype=object)
+    distinct, codes = _labels(values)
+    seen = set(distinct[np.unique(codes)]) if len(codes) else set()
     if levels is None:
-        present = sorted({t for t in text if t != MISSING_LABEL}, key=_natural)
+        present = sorted((t for t in seen if t != MISSING_LABEL), key=_natural)
     else:
-        seen = set(text)
         present = [lv for lv in levels if lv in seen]
-    if MISSING_LABEL in set(text):
+    if MISSING_LABEL in seen:
         present.append(MISSING_LABEL)
-    return Column(name, "category", text, tuple(present))
+    position = {lv: i for i, lv in enumerate(present)}
+    level_of = np.array([position.get(t, -1) for t in distinct], dtype=np.int64)
+    return Column(name, "category", distinct[codes], tuple(present), level_of[codes])
+
+
+def _labels(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The distinct labels, and each value's index among them; each distinct value is
+    labelled once, so a million rows of a few categories cost a lookup each."""
+    arr = np.asarray(values).ravel()
+    try:
+        if arr.dtype.kind in "US":
+            uniq, inverse = np.unique(arr, return_inverse=True)
+            codes = inverse.ravel().astype(np.int64)
+        else:
+            index: dict[Any, int] = {}
+            codes = np.fromiter((index.setdefault(v, len(index)) for v in arr),
+                                dtype=np.int64, count=arr.size)  # fmt: skip
+            uniq = list(index)
+    except TypeError:  # unhashable values: one by one
+        uniq, codes = [_label(v) for v in arr], np.arange(arr.size, dtype=np.int64)
+    labels = [_label(u) for u in uniq]
+    # values with one label (1 and "1", or NaN objects): one index
+    first: dict[str, int] = {}
+    remap = np.array([first.setdefault(t, len(first)) for t in labels], dtype=np.int64)
+    distinct = np.array(list(first) or [""], dtype=object)
+    return distinct, remap[codes] if len(remap) else codes
 
 
 def _label(value: Any) -> str:

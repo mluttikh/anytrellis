@@ -25,6 +25,7 @@ def _(mo):
     | `scales = "free_y"` / `"free"`           | `share_y=False` / `share_x=False, share_y=False` |
     | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()`        |
     | `geom_hline()`, `geom_vline()`           | `.rule(y=...)`, `.rule(x=...)`              |
+    | `geom_histogram()`, `geom_boxplot()`, `geom_density()` | `.hist()`, `.box()`, `.density()` |
     | `position = "dodge"`                     | `.bars(position="dodge")`                   |
     | `gghighlight()`                          | a layer with `facet="exclude"`              |
     | `fct_reorder(f, x, median)`              | `.order("f", by="median", of="x")`          |
@@ -207,6 +208,34 @@ def _(Trellis, known, pl):
         .bars(x="species", y="mass", color="sex", position="dodge")
     )
     dodged
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `geom_histogram` with the other panels behind
+
+    ```r
+    ggplot(penguins, aes(flipper_length_mm)) +
+      geom_histogram(data = select(penguins, -species), fill = "grey85", binwidth = 2) +
+      geom_histogram(aes(fill = species), binwidth = 2) + facet_wrap(~ species)
+    ```
+
+    `facet="exclude"` counts the other panels' rows: each species against the rest. The bins
+    are the same in every panel.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, penguins):
+    flippers = (
+        Trellis(penguins, wrap="species", cols=3, panel_height=200, title="Flipper length")
+        .hist(x="flipper_length_mm", binwidth=2, facet="exclude", name="others")
+        .hist(x="flipper_length_mm", binwidth=2, color="species")
+    )
+    flippers
     return
 
 

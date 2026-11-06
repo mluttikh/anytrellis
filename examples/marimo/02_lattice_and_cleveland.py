@@ -133,6 +133,45 @@ def _(Trellis, load, pl):
         .points(x="horsepower", y="mpg", color="year", size=5, tooltip=["name"])
     )
     conditioned
+    return (cars,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `bwplot` and `densityplot`
+
+    ```r
+    bwplot(factor(cylinders) ~ mpg | origin, data = cars, layout = c(3, 1))
+    densityplot(~ mpg | origin, groups = cylinders, data = cars, plot.points = FALSE)
+    ```
+
+    Box plots go sideways when y is the category. Python computes the quartiles (and the
+    densities) in each panel; hover a box for its numbers. Brush it (`s`, then drag) and
+    `selected()` gives the cars it stands for.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, cars, pl):
+    by_cylinders = cars.with_columns(cyl=pl.col("cylinders").cast(pl.String))
+
+    boxes = (
+        Trellis(by_cylinders, wrap="origin", cols=3, panel_height=150, title="Fuel use")
+        .box(x="mpg", y="cyl", tooltip=["name"])
+    )
+    boxes
+    return (by_cylinders,)
+
+
+@app.cell
+def _(Trellis, by_cylinders):
+    fuel_density = (
+        Trellis(by_cylinders, wrap="origin", cols=3, panel_height=150)
+        .density(x="mpg", color="cyl", fill=True)
+    )
+    fuel_density
     return
 
 

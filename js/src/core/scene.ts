@@ -19,6 +19,10 @@ export interface LayerData {
   base: Float64Array | null;
   /** Each instance's link key, or null: the layer is not linked. */
   link: Uint32Array | null;
+  /** Each instance's group in its family (spec.family), or null. */
+  groups: Uint32Array | null;
+  /** Each instance's row in spec.tips, or null. */
+  tipRows: Uint32Array | null;
   kind: number;
   /** Half the line width or point size (px); 0 for bars. */
   halfWidth: number;
@@ -57,6 +61,8 @@ export function bufferIds(spec: TrellisSpec): string[] {
     if (l.color.codes) ids.push(l.color.codes.id);
     if (l.link) ids.push(l.link.id);
     if (l.base) ids.push(l.base.id);
+    if (l.groups) ids.push(l.groups.id);
+    if (l.tip_rows) ids.push(l.tip_rows.id);
   }
   return ids;
 }
@@ -130,9 +136,12 @@ export function buildScene(spec: TrellisSpec, source: DataSource): Scene {
       index,
       coords,
       starts,
-      set: { key: `${l.coords.id}:${l.color.rgba?.id ?? l.color.solid?.join(",")}`, version: nextVersion++, count: n, coords: f32, colors, base },
+      // the layer's index too: two layers can draw the same data (a density's fill and line)
+      set: { key: `${index}:${l.coords.id}:${l.color.rgba?.id ?? l.color.solid?.join(",")}`, version: nextVersion++, count: n, coords: f32, colors, base },
       codes: l.color.codes ? (view(source, l.color.codes) as Uint16Array) : null,
       link: l.link ? (view(source, l.link) as Uint32Array) : null,
+      groups: l.groups ? (view(source, l.groups) as Uint32Array) : null,
+      tipRows: l.tip_rows ? (view(source, l.tip_rows) as Uint32Array) : null,
       base: b64,
       kind,
       halfWidth,

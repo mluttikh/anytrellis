@@ -8,7 +8,8 @@ pip install anytrellis
 ```
 
 Status: early development (0.1). One panel per level of the facet columns, every panel
-drawn with the same layers (lines, points, bars, areas, rects, text, reference rules), on shared scales unless
+drawn with the same layers (lines, points, bars, areas, rects, text, histograms, box plots,
+densities, reference rules), on shared scales unless
 told otherwise. Every panel goes into one canvas, so a grid of hundreds of panels and
 millions of marks stays interactive.
 
@@ -44,12 +45,24 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `rect(x, y, color, width=1, height=1)` / `rect(x, y, x2=, y2=)` | a cell per row (a heatmap), or a box between two corners |
 | `text(x, y, text, color, size, align, dx, dy)` | a label per row |
 | `rule(x=..., y=...)` | reference lines across every panel |
+| `hist(x, color, bins=30 \| binwidth=, stat="count"\|"percent"\|"density")` | a histogram per panel, stacked by colour |
+| `box(x, y, color, whis=1.5)` | box plots per position (and colour, side by side); sideways when y is the category |
+| `density(x, color, fill=False, bw_adjust=1)` | a kernel density curve per panel and colour |
 
 A number column as `color` gets a continuous scale (and a gradient legend); text gets a
 palette. On a category axis a rect is one band wide by default. A text label's `dx`/`dy`
 are pixels, so labels keep their distance while zooming, and a label that would run past
-the panel's edge goes to the other side of its point. Every mark but `text` and `rule`
-takes `tooltip=[...]` columns and can be selected.
+the panel's edge goes to the other side of its point. `tooltip=[...]` adds columns to
+what hovering shows (a box: to its outliers'); every mark but `text` and `rule` can be
+selected.
+
+`hist`, `box` and `density` summarise each panel's rows in Python, and are drawn as bars,
+boxes, lines and points. A histogram's bins are the same in every panel (round widths
+by default), and so are a density's x values, so the panels compare. `stat="percent"`
+and `"density"` scale each panel's counts. With `facet="exclude"` a summary covers the
+other panels' rows, in grey: each panel against the rest. Hovering a box shows its
+quartiles, its count and its whiskers' reach. Brushing selects whole bins and boxes, and
+`t.selected("hist")` gives the rows they stand for.
 
 ## Facets and scales
 
@@ -108,7 +121,8 @@ t.select()                              # clear
 
 A brush drawn in the browser reaches Python when you let go, so `t.selected()` in the next
 cell gives its rows. A point is selected inside the brush, a line or area segment with
-either end inside, a bar or rect overlapping it; grey context is never selected.
+either end inside, a bar or rect overlapping it, a box when its body or lines are met;
+grey context is never selected.
 
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the
