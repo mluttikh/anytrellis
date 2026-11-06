@@ -1,0 +1,351 @@
+.atr-root {
+  --atr-bg: #ffffff;
+  --atr-text: #1b2430;
+  --atr-muted: #5e6875;
+  --atr-grid: #e3e7ec;
+  --atr-panel: #f6f7f9;
+  --atr-strip: #e9ecf0;
+  --atr-strip-text: #2b3440;
+  --atr-axis: #a3abb5;
+  --atr-accent: #1f77b4;
+  --atr-border: #dde1e6;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  background: var(--atr-bg);
+  color: var(--atr-text);
+  font: 12px / 1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  border-radius: 4px;
+  user-select: none;
+  outline: none;
+  touch-action: manipulation;
+}
+.atr-root:focus-within {
+  box-shadow: 0 0 0 1px var(--atr-border);
+  touch-action: none;
+}
+
+/* JupyterLab dark theme, VS Code, marimo / other dark hosts, or OS dark mode outside them */
+body[data-jp-theme-light="false"] .atr-root,
+body.vscode-dark .atr-root,
+body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
+.dark .atr-root,
+[data-theme="dark"] .atr-root,
+[data-md-color-scheme="slate"] .atr-root {
+  --atr-bg: #12171d;
+  --atr-text: #e5e9ed;
+  --atr-muted: #98a3af;
+  --atr-grid: #232b34;
+  --atr-panel: #171d24;
+  --atr-strip: #222a33;
+  --atr-strip-text: #d5dbe1;
+  --atr-axis: #4a5562;
+  --atr-accent: #4dabf7;
+  --atr-border: #2b3440;
+}
+@media (prefers-color-scheme: dark) {
+  body:not([data-jp-theme-light]):not(.light):not(.vscode-light):not(.vscode-high-contrast-light):not([data-theme="light"]):not([data-md-color-scheme="default"]) .atr-root {
+    --atr-bg: #12171d;
+    --atr-text: #e5e9ed;
+    --atr-muted: #98a3af;
+    --atr-grid: #232b34;
+    --atr-panel: #171d24;
+    --atr-strip: #222a33;
+    --atr-strip-text: #d5dbe1;
+    --atr-axis: #4a5562;
+    --atr-accent: #4dabf7;
+    --atr-border: #2b3440;
+  }
+}
+
+.atr-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.atr-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+.atr-front {
+  cursor: crosshair;
+}
+
+.atr-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 2px 8px 6px;
+  color: var(--atr-muted);
+}
+.atr-legend-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+}
+.atr-legend-title {
+  color: var(--atr-text);
+  font-weight: 600;
+}
+.atr-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+/* in a wrap's empty cells: a list (or, when it is long, rows), in the middle of the space */
+.atr-legend.atr-inset {
+  position: absolute;
+  box-sizing: border-box;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 4px;
+  overflow: hidden;
+}
+.atr-inset .atr-legend-cat {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 3px;
+}
+.atr-inset.atr-inset-rows .atr-legend-cat {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.atr-inset .atr-legend-title {
+  margin-bottom: 1px;
+}
+.atr-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.atr-gradient {
+  width: 90px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.atr-tip {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 2;
+  max-width: 320px;
+  padding: 5px 8px;
+  background: var(--atr-bg);
+  color: var(--atr-text);
+  border: 1px solid var(--atr-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+.atr-tip-head {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.atr-tip table {
+  border-collapse: collapse;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.atr-tip th,
+.atr-tip td {
+  padding: 0 0 0 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  font: inherit;
+}
+.atr-tip th {
+  color: var(--atr-muted);
+  font-weight: normal;
+  padding-right: 10px;
+}
+.atr-tip td {
+  font-variant-numeric: tabular-nums;
+}
+
+.atr-status {
+  position: absolute;
+  display: none;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  padding: 6px 10px;
+  border: 1px solid var(--atr-border);
+  border-radius: 4px;
+  background: var(--atr-bg);
+  color: var(--atr-muted);
+  z-index: 3;
+}
+.atr-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 2px;
+  font-size: 10px;
+  color: var(--atr-muted);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.atr-root:hover .atr-badge {
+  opacity: 0.7;
+}
+
+/* header: the title, the way back from an opened panel, and the toolbar */
+.atr-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 4px 0 8px;
+  box-sizing: border-box;
+}
+.atr-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.atr-title {
+  font-weight: 600;
+  font-size: 1.15em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.atr-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--atr-muted);
+  min-width: 0;
+}
+.atr-sep {
+  padding: 0 4px;
+}
+.atr-panel-name {
+  color: var(--atr-text);
+  font-weight: 600;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.atr-link {
+  border: none;
+  background: none;
+  padding: 2px 2px;
+  font: inherit;
+  color: var(--atr-accent);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.atr-link:hover {
+  text-decoration: underline;
+}
+.atr-toolbar {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+.atr-root:hover .atr-toolbar,
+.atr-root:focus-within .atr-toolbar,
+.atr-root.atr-fullscreen .atr-toolbar,
+.atr-root.atr-open .atr-toolbar {
+  opacity: 1;
+}
+/* buttons: 24 px squares (WCAG 2.2 target size) */
+.atr-button {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--atr-muted);
+  cursor: pointer;
+}
+.atr-button[hidden] {
+  display: none;
+}
+.atr-button:hover:not(:disabled) {
+  color: var(--atr-text);
+  border-color: var(--atr-border);
+  background: var(--atr-panel);
+}
+.atr-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.atr-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.atr-button:focus-visible,
+.atr-link:focus-visible {
+  outline: 2px solid var(--atr-accent);
+  outline-offset: 1px;
+}
+
+/* a short message over the plot (stepping panels, what a key needs) */
+.atr-notice {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: var(--atr-text);
+  color: var(--atr-bg);
+  pointer-events: none;
+  z-index: 3;
+  white-space: nowrap;
+}
+.atr-notice[hidden] {
+  display: none;
+}
+
+/* full screen: the plot fills the screen (its height set by the view) */
+.atr-root.atr-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  padding: 10px 14px;
+  border-radius: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  touch-action: none;
+}
+.atr-root:fullscreen {
+  background: var(--atr-bg);
+}
+.atr-root::backdrop {
+  background: var(--atr-bg, #fff);
+}

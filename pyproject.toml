@@ -1,0 +1,112 @@
+[project]
+name = "anytrellis"
+version = "0.1.0"
+description = "GPU-accelerated trellis, facet and small-multiple plots for notebooks"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "mluttikh", email = "mluttikhof@gmail.com" }]
+keywords = [
+    "trellis", "facet", "small multiples", "lattice", "visualization",
+    "jupyter", "marimo", "anywidget", "webgpu",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: Jupyter",
+    "Framework :: Jupyter :: JupyterLab",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "numpy>=1.24",
+    "anywidget>=0.9.13",
+    "narwhals>=1.30",
+]
+
+[dependency-groups]
+dev = [
+    "jupyterlab>=4",
+    "marimo>=0.20",
+    "pytest>=8",
+    "ruff>=0.6",
+    "ty>=0.0.84",
+    "pandas>=2.3",
+    "polars>=1.30",
+    "pyarrow>=20",
+    "hypothesis>=6.100",
+]
+
+[build-system]
+# hatchling 1.30+ writes Metadata-Version 2.5, which PyPI and twine 6 do not accept yet
+requires = ["hatchling>=1.27,<1.30", "hatch-jupyter-builder>=0.9"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# the JavaScript bundle is built, not committed; include it anyway
+artifacts = ["src/anytrellis/static/*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anytrellis"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "js", "tests", "pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md"]
+exclude = ["js/node_modules", "js/test-results"]
+
+# Builds js/ into src/anytrellis/static during wheel builds (needs Node.js; end users get the
+# pre-built wheel). Skipped when the bundle already exists, e.g. after `npm run dev`.
+[tool.hatch.build.hooks.jupyter-builder]
+dependencies = ["hatch-jupyter-builder>=0.9"]
+build-function = "hatch_jupyter_builder.npm_builder"
+ensured-targets = [
+    "src/anytrellis/static/widget.js",
+    "src/anytrellis/static/widget.css",
+    "src/anytrellis/static/standalone.js",
+]
+skip-if-exists = ["src/anytrellis/static/widget.js"]
+
+[tool.hatch.build.hooks.jupyter-builder.build-kwargs]
+path = "js"
+build_cmd = "build"
+npm = ["npm"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["_scratch"]
+
+[tool.ruff.format]
+exclude = ["*.md", "*.ipynb"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "B", "UP", "NPY", "ANN",
+    "C4", "SIM", "PIE", "PERF", "FURB", "RUF",
+    "PT", "PLE", "PLW", "ISC", "PGH", "T10", "T20", "PTH", "RSE", "FLY", "RET", "DTZ",
+]
+ignore = [
+    "ANN401",  # Any is the honest type for "any table" and for traitlets callbacks
+    "RUF001", "RUF002", "RUF003",  # µ, ×, − in text are meant
+]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["B018", "ANN", "T20"]
+"tests/*" = ["ANN"]
+"scripts/*" = ["ANN", "T20"]
+
+[tool.ty.src]
+include = ["src", "tests", "scripts"]
+
+[tool.ty.environment]
+python-version = "3.12"

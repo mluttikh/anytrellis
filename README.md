@@ -1,0 +1,117 @@
+# anytrellis
+
+Trellis, facet and small-multiple plots for Jupyter and marimo notebooks, drawn on the GPU
+(WebGPU, WebGL2, or Canvas 2D on machines without a usable GPU).
+
+```bash
+pip install anytrellis
+```
+
+Status: early development (0.1). One panel per level of the facet columns, every panel
+drawn with the same layers (lines, points, bars, reference rules), on shared scales unless
+told otherwise. Every panel goes into one canvas, so a grid of hundreds of panels and
+millions of marks stays interactive.
+
+```python
+from anytrellis import Trellis
+from anytrellis.synthetic import sensors
+
+df = sensors()  # a dict of columns; any Polars, pandas or PyArrow table works too
+t = Trellis(df, wrap="station")
+t.line(x="time", y="temp", color="sensor")
+t.rule(y=0)
+t  # click it, then scroll to zoom; panels that share a scale zoom together
+```
+
+A grid crosses two facet columns, and keeps empty cells so rows and columns stay aligned:
+
+```python
+from anytrellis.synthetic import sales
+
+Trellis(sales(), row="store", col="product").bars(x="month", y="units")
+```
+
+## Facets and scales
+
+- `Trellis(df, row=..., col=...)`: a grid; `Trellis(df, wrap=..., cols=4)`: a wrap. Each
+  takes one column or several (their combinations are the levels).
+- `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),
+  `"row"`, `"col"` or `False` (each panel its own). Axes are drawn only where a panel's
+  scale differs from its neighbour's.
+- `t.order("site", by="median", of="yield")`: panels ordered by a summary of each level.
+- `t.order("month", ["Jan", "Feb", ...])`: any category column in the given order: panels,
+  bands on an axis and colours. Text is sorted otherwise; a pandas Categorical or a
+  Polars Enum keeps its declared order.
+- `line(..., group=["station", "sensor"])`: one line per combination of the columns.
+- A layer whose data lacks the facet columns is drawn in every panel; `facet="exclude"`
+  draws, in each panel, the other panels' data (grey context behind it).
+
+A wrap whose last row is not full shows its legend in the empty cells there when it fits,
+and under the plot otherwise (also while one panel is open); `Trellis(..., legend="bottom")`
+keeps it under the plot.
+
+## Interaction
+
+Click the plot, then: scroll to zoom x (Shift + scroll: y), drag to pan, `r` to reset.
+Zoom and pan apply to every panel that shares the scale. Hovering shows the nearest mark's
+values and a crosshair across the panels that share x.
+
+**One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
+the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the
+same zoom, and Backspace, Esc, a double-click or *All panels* goes back. The zoom stays
+linked: back in the grid, the panels that share its scales show what the opened one
+showed. From Python: `t.open("station 3")` (a grid's panel: `t.open("north", "s1")`),
+`t.close()`, `t.focused`, and `t.panels()` lists the names.
+
+**Full screen.** The toolbar's button or `f` shows the plot on the whole screen (`f` or Esc
+leaves). Browsers allow it only from a click or a key, so not from Python; where a page
+forbids it (some notebook frames, iPhone Safari) the button is not shown.
+
+| key | |
+|---|---|
+| `f` | full screen, and back |
+| `r`, `0` | reset the zoom |
+| Enter | open the panel under the pointer |
+| Page Up / Page Down | previous / next panel |
+| Backspace, Esc | back to all panels |
+
+These keys stay in the plot, so JupyterLab's own shortcuts don't also act on them.
+
+## Sharing
+
+`t.save_html("plot.html")` writes a page with the data inside, which opens without Python.
+
+Licence: MIT.
+
+## Examples
+
+Notebooks in [`examples/jupyter`](examples/jupyter) (JupyterLab, VS Code) and the same in
+[`examples/marimo`](examples/marimo) (`marimo edit examples/marimo/01_getting_started.py`):
+
+| notebook | what it shows |
+|---|---|
+| `01_getting_started` | wrap, grid, free scales, layers and context, `rule`, `order`, `save_html` |
+| `02_lattice_and_cleveland` | Cleveland's barley dot plot, Anscombe's quartet, conditioning on two variables, small multiples instead of an animation |
+| `03_ggplot2_style` | `facet_wrap`, `facet_grid`, gghighlight, `scales = "free_y"`, stacked and dodged bars |
+| `04_seaborn_style` | `relplot` (scatter and line, `col_wrap`), `FacetGrid` histograms, `catplot(kind="bar")` |
+| `05_vega_lite_style` | `row` / `column` / `facet` channels, `resolve_scale`, a trellis of grouped bars |
+| `06_large_data` | a million points, a year of hourly readings, a hundred panels |
+
+Their data comes with the package: `from anytrellis.datasets import load; load("barley")`
+(anscombe, barley, cars, gapminder, penguins, population, seattle_weather, stocks; from
+vega-datasets). The notebooks are written once in `scripts/build_examples.py`, which
+writes both sets: run `uv run python scripts/build_examples.py` after changing it.
+
+## Development
+
+```sh
+uv sync                                    # builds js/ into src/anytrellis/static
+uv run pytest                              # Python: spec, geometry, scales, protocol
+cd js && npm test && npm run typecheck     # TypeScript: ticks, layout, picking
+npm run build                              # after changing js/src
+node test/visual.mjs <dir of save_html pages>      # screenshots per backend
+node test/interact.mjs <page.html>                 # hover, linked zoom, pan, reset, dark
+node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
+```
+
+Pages force a backend with `?renderer=webgpu|webgl2|canvas2d` in their URL.
