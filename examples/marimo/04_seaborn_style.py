@@ -150,6 +150,31 @@ def _(Trellis, known):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## `lmplot`
+
+    ```python
+    sns.lmplot(data=penguins, x="flipper_length_mm", y="body_mass_g", hue="sex", col="species")
+    ```
+
+    A least-squares line per colour in each panel, with its 95% confidence band.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, known):
+    fits = (
+        Trellis(known, col="species", panel_height=240)
+        .points(x="flipper_length_mm", y="body_mass_g", color="sex", size=5)
+        .smooth(x="flipper_length_mm", y="body_mass_g", color="sex", method="linear")
+    )
+    fits
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## `catplot(kind="box")`
 
     ```python

@@ -207,26 +207,17 @@ dots
 ## Anscombe's quartet
 
 Four datasets with the same means, variances, correlation and least-squares line (1973),
-and four very different pictures. Each panel draws its points and the line fitted to
-them: a second table with the `dataset` column lands in its own panels.
+and four very different pictures. Each panel draws its points and the least-squares line
+fitted to them (lattice's `type = c("p", "r")`), with its 95% confidence band;
+`fullrange=True` draws every line across the whole x axis.
 """),
     py("""
 quartet = load("anscombe")
-fitted = (
-    quartet.group_by("dataset")
-    .agg(
-        slope=pl.cov("x", "y") / pl.col("x").var(),
-        mx=pl.col("x").mean(),
-        my=pl.col("y").mean(),
-    )
-    .join(pl.DataFrame({"x": [3.0, 20.0]}), how="cross")
-    .with_columns(y=pl.col("my") + pl.col("slope") * (pl.col("x") - pl.col("mx")))
-)
 
 anscombe = (
     Trellis(quartet, wrap="dataset", title="Anscombe's quartet")
     .points(x="x", y="y", size=8)
-    .line(fitted, x="x", y="y", color="#d62728", name="least squares")
+    .smooth(x="x", y="y", method="linear", fullrange=True, color="#d62728")
 )
 anscombe
 """),
@@ -336,6 +327,8 @@ For those who know ggplot2's faceting:
 | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()`        |
 | `geom_hline()`, `geom_vline()`           | `.rule(y=...)`, `.rule(x=...)`              |
 | `geom_histogram()`, `geom_boxplot()`, `geom_density()` | `.hist()`, `.box()`, `.density()` |
+| `geom_smooth()`, `geom_ribbon()`         | `.smooth()`, `.band()`                      |
+| `scale_y_log10()`                        | `Trellis(..., y_scale="log")`               |
 | `position = "dodge"`                     | `.bars(position="dodge")`                   |
 | `gghighlight()`                          | a layer with `facet="exclude"`              |
 | `fct_reorder(f, x, median)`              | `.order("f", by="median", of="x")`          |
@@ -405,7 +398,8 @@ highlighted
 ## `scales = "free_y"`
 
 Population differs by orders of magnitude between regions: free y scales show each
-region's trend (and the tick labels say how far apart they are).
+region's trend (and the tick labels say how far apart they are). A log scale, next, keeps
+the panels comparable.
 """),
     py("""
 population = (
@@ -413,6 +407,60 @@ population = (
     .line(x="year", y="pop", group="country", width=1, tooltip=["country"])
 )
 population
+"""),
+    md("""
+## `scale_y_log10()`
+
+On a log scale equal distances are equal ratios: every country's growth reads the same
+way, from a hundred thousand people to a billion, in shared panels.
+"""),
+    py("""
+log_population = (
+    Trellis(gapminder, wrap="region", cols=3, y_scale="log", title="Population (log scale)")
+    .line(x="year", y="pop", group="country", width=1, tooltip=["country"])
+)
+log_population
+"""),
+    md("""
+## `geom_smooth`
+
+```r
+ggplot(cars, aes(horsepower, mpg)) + geom_point() + geom_smooth() + facet_wrap(~ origin)
+```
+
+Loess by default (`method="linear"` for least squares), with a 95% confidence band;
+`span=` sets how local the fit is. Brush the line and `selected()` gives the cars under
+it.
+"""),
+    py("""
+cars = load("cars")
+
+smoothed = (
+    Trellis(cars, wrap="origin", cols=3, title="Fuel use and power")
+    .points(x="horsepower", y="mpg", size=4, opacity=0.5, tooltip=["name"])
+    .smooth(x="horsepower", y="mpg")
+)
+smoothed
+"""),
+    md("""
+## `geom_ribbon`
+
+```r
+ggplot(weather, aes(date)) + geom_ribbon(aes(ymin = temp_min, ymax = temp_max)) +
+  facet_wrap(~ year, scales = "free_x")
+```
+
+`band()` fills between two columns: each day's low to its high.
+"""),
+    py("""
+days = load("seattle_weather").with_columns(year=pl.col("date").dt.year())
+
+ranges = (
+    Trellis(days, wrap="year", cols=2, share_x=False, panel_height=150,
+            title="Seattle: each day's low to high", y_title="°C")
+    .band(x="date", ymin="temp_min", ymax="temp_max", color="#d62728", opacity=0.35)
+)
+ranges
 """),
     md("""
 ## `geom_col` with stacked categories
@@ -613,6 +661,23 @@ bills = (
     .density(x="bill_length_mm", color="sex", fill=True)
 )
 bills
+"""),
+    md("""
+## `lmplot`
+
+```python
+sns.lmplot(data=penguins, x="flipper_length_mm", y="body_mass_g", hue="sex", col="species")
+```
+
+A least-squares line per colour in each panel, with its 95% confidence band.
+"""),
+    py("""
+fits = (
+    Trellis(known, col="species", panel_height=240)
+    .points(x="flipper_length_mm", y="body_mass_g", color="sex", size=5)
+    .smooth(x="flipper_length_mm", y="body_mass_g", color="sex", method="linear")
+)
+fits
 """),
     md("""
 ## `catplot(kind="box")`

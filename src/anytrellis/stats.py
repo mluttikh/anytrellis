@@ -1,7 +1,7 @@
-"""Summary marks: histograms, box plots and densities, computed from a layer's rows in each
-panel (and for each colour), and drawn as the plain marks: bars, rects, line segments,
-areas and points. So they zoom, hover and brush like any other layer, and a brush over
-them selects the rows they summarise (``Trellis.selected``).
+"""Summary marks: histograms, box plots, densities and smooth fits, computed from a
+layer's rows in each panel (and for each colour), and drawn as the plain marks: bars,
+rects, line segments, areas, bands and points. So they zoom, hover and brush like any
+other layer, and a brush over them selects the rows they summarise (``Trellis.selected``).
 
 Every panel's summary uses the same bins (a histogram) or the same grid of x values (a
 density), set from all the rows, so the panels compare at a glance.
@@ -81,6 +81,8 @@ def parts(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int)
         return box(layer, table, panel_of, npanels)
     if layer.mark == "density":
         return density(layer, table, panel_of, npanels)
+    if layer.mark == "smooth":
+        return smooth(layer, table, panel_of, npanels)
     raise ValueError(f"{layer.mark!r} is not a summary mark")
 
 
@@ -138,7 +140,8 @@ def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) 
         cols.append(Column(col.name, col.kind, lo))
         if col.kind == "time":
             extra[col.name] = _times(lo)
-        extra["bin"] = _ranges(lo, hi, col.kind)
+        shown_lo, shown_hi = _shown(col, lo, hi)
+        extra["bin"] = _ranges(shown_lo, shown_hi, col.kind)
     cols.append(Column(stat, "number", value))
     if color is not None:
         cols.append(Column(color.name, "category", labels[ci], color.levels))
@@ -175,6 +178,11 @@ def bin_edges(col: Column, bins: Any, binwidth: Any) -> np.ndarray:
     (aligned to multiples of it), or ``bins`` equal bins over the values' range."""
     if isinstance(bins, Sequence | np.ndarray) and not isinstance(bins, str):
         edges = np.array([_value(b, col.kind) for b in bins], dtype=np.float64)
+        if col.log:  # edges as values: on the axis, their logs
+            with np.errstate(divide="ignore", invalid="ignore"):
+                edges = np.where(edges > 0, np.log10(edges), np.nan)
+            if not np.isfinite(edges).all():
+                raise ValueError("bins= edges on a log axis must be above 0")
         if len(edges) < 2 or not np.all(np.diff(edges) > 0):
             raise ValueError("bins= edges must be at least two values, increasing")
         return edges
@@ -277,19 +285,22 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
 
     def raw_position(index: np.ndarray) -> np.ndarray:
         values = puniq[index]
+        if pos.log:
+            return 10.0 ** values.astype(np.float64)
         return _times(values) if pos.kind == "time" else values
 
     boxes_cols = [Column(PANEL, "number", gp.astype(np.float64)), position_column(gpos),
                   Column(val.name, "number", med)]  # fmt: skip
     if color is not None:
         boxes_cols.append(Column(color.name, "category", labels[gc], color.levels))
+    shown_med, shown_q1, shown_q3, shown_lo, shown_hi = _shown(val, med, q1, q3, wlo, whi)
     stats_text = {
         pos.name: raw_position(gpos),
         "n": counts,
-        "median": med,
-        "q1": q1,
-        "q3": q3,
-        "whiskers": _ranges(wlo, whi, "number"),
+        "median": shown_med,
+        "q1": shown_q1,
+        "q3": shown_q3,
+        "whiskers": _ranges(shown_lo, shown_hi, "number"),
     }
     boxes = _table(boxes_cols, stats_text)
     out_mask = ~inside
@@ -436,6 +447,189 @@ def density(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: in
     ]
 
 
+# ---- smooth fits ---------------------------------------------------------------------------
+
+
+def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+    """A fit of y on x per (panel, colour), at ``n`` points over its x range (or every
+    panel's, ``fullrange``), with a confidence band for the mean: least squares, or loess
+    (local linear fits with tricube weights over a ``span`` share of the points)."""
+    assert layer.x is not None
+    assert layer.y is not None
+    args = layer.stat_args
+    xc, yc = table.column(layer.x), table.column(layer.y)
+    for c in (xc, yc):
+        if c.kind == "category":
+            raise ValueError(
+                f"smooth(): x and y must be numbers or times; {c.name!r} holds categories"
+            )
+    color = _color(layer, table)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    xv, yv = xc.values[rows], yc.values[rows]
+    keep = np.isfinite(xv) & np.isfinite(yv)
+    rows, panel, xv, yv = rows[keep], panel[keep], xv[keep], yv[keep]
+    labels, c = _color_codes(color, rows)
+    nc = len(labels)
+    guniq, ginv = _codes(panel * nc + c)
+    order = np.lexsort((xv, ginv))
+    sx, sy, sg, srows = xv[order], yv[order], ginv[order], rows[order]
+    starts = np.r_[0, np.cumsum(np.bincount(sg, minlength=len(guniq)))].astype(np.int64)
+    full = (float(sx.min()), float(sx.max())) if args["fullrange"] and len(sx) else None
+    n = int(args["n"])
+    p_hi = 1 - (1 - float(args["level"])) / 2
+    pieces: dict[str, list[np.ndarray]] = {k: [] for k in ("x", "fit", "lo", "hi", "p", "c", "k")}
+    sample_of = np.full(len(sx), -1, dtype=np.int64)
+    at = 0
+    for k in range(len(guniq)):
+        a, b = starts[k], starts[k + 1]
+        gx, gy = sx[a:b], sy[a:b]
+        if gx[-1] <= gx[0]:  # fewer than two distinct x
+            continue
+        lo, hi = full or (float(gx[0]), float(gx[-1]))
+        grid = np.linspace(lo, hi, n)
+        mid, scale = float(gx.mean()), float(gx.std()) or 1.0
+        u, u0 = (gx - mid) / scale, (grid - mid) / scale
+        if args["method"] == "linear":
+            fit, se, df = _linear(u, gy, u0)
+        else:
+            fit, se, df = _loess(u, gy, u0, float(args["span"]))
+        half = _t_quantile(p_hi, df) * se if args["se"] and df >= 1 else np.full(n, np.nan)
+        pieces["x"].append(grid)
+        pieces["fit"].append(fit)
+        pieces["lo"].append(fit - half)
+        pieces["hi"].append(fit + half)
+        pieces["p"].append(np.full(n, guniq[k] // nc))
+        pieces["c"].append(np.full(n, guniq[k] % nc))
+        pieces["k"].append(np.full(n, k))
+        idx = np.clip(np.searchsorted(grid, gx, side="right") - 1, 0, n - 1)
+        sample_of[a:b] = at + idx
+        at += n
+    cat = {k: np.concatenate(v) if v else np.zeros(0) for k, v in pieces.items()}
+    x, fit, lower, upper = cat["x"], cat["fit"], cat["lo"], cat["hi"]
+    p, ci, curve = (cat[k].astype(np.int64) for k in ("p", "c", "k"))
+    interval = f"{float(args['level']):.0%} interval"
+    shown_lo, shown_hi = _shown(yc, lower, upper)
+    text = _ranges(shown_lo, shown_hi, "number", digits=4)
+    text[~np.isfinite(lower)] = ""
+    cols = [Column(PANEL, "number", p.astype(np.float64)), Column(xc.name, xc.kind, x),
+            Column(yc.name, "number", fit)]  # fmt: skip
+    if color is not None:
+        cols.append(Column(color.name, "category", labels[ci], color.levels))
+    extra: dict[str, np.ndarray] = {interval: text}
+    if xc.kind == "time":
+        extra[xc.name] = _times(x)
+    out = _table(cols, extra)
+    counted = sample_of >= 0
+    members = Members.grouped(sample_of[counted], srows[counted], len(x))
+    pair = np.flatnonzero(curve[1:] == curve[:-1]) if len(curve) else np.zeros(0, np.int64)
+
+    def build_line(_x: Any, _y: Any, _c: Any) -> Geometry:
+        a, b = pair, pair + 1
+        return _sorted(Geometry(p[a], x[a], fit[a], x[b], fit[b], a, rows_end=b))
+
+    def build_band(_x: Any, _y: Any, _c: Any) -> Geometry:
+        a = pair[np.isfinite(lower[pair]) & np.isfinite(lower[pair + 1])]
+        b = a + 1
+        g = Geometry(p[a], x[a], upper[a], x[b], upper[b], a, rows_end=b)
+        g.base0, g.base1 = lower[a], lower[b]
+        return _sorted(g)
+
+    has_band = bool(args["se"]) and bool(np.isfinite(lower).any())
+    line = replace(layer, mark="line", tooltip=[interval] if has_band else [])
+    if not has_band:
+        return [Part(line, out, build_line, members)]
+    band = replace(layer, mark="band", opacity=layer.opacity * 0.25, tooltip=[interval])
+    return [
+        Part(band, out, build_band, members, hide=("y",), family=True),
+        Part(line, out, build_line, members, family=True),
+    ]
+
+
+def _linear(u: np.ndarray, y: np.ndarray, at: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
+    """Least squares: the fit at ``at``, its standard error, and the residual degrees of
+    freedom."""
+    n = len(u)
+    ub, yb = u.mean(), y.mean()
+    suu = float(((u - ub) ** 2).sum())
+    slope = float(((u - ub) * (y - yb)).sum()) / suu
+    fit = yb + slope * (at - ub)
+    df = n - 2
+    if df < 1:
+        return fit, np.full(len(at), np.nan), float(df)
+    sigma = np.sqrt(float(((y - (yb + slope * (u - ub))) ** 2).sum()) / df)
+    return fit, sigma * np.sqrt(1 / n + (at - ub) ** 2 / suu), float(df)
+
+
+def _loess(u: np.ndarray, y: np.ndarray, at: np.ndarray, span: float
+           ) -> tuple[np.ndarray, np.ndarray, float]:  # fmt: skip
+    """Loess (degree 1): at each point, a line fitted by weighted least squares to the
+    ``span`` share of the points nearest it, weighted by the tricube of their distance.
+    The fit is linear in y (``l @ y``), so its standard error is sigma * |l|; sigma from
+    the residuals, its degrees of freedom n minus the fit's (the leverages' sum, from the
+    leverage of the point nearest each place along the line)."""
+    n = len(u)
+    q = min(n, max(int(np.ceil(span * n)), 3))
+    fit, norm, leverage = np.zeros(len(at)), np.zeros(len(at)), np.zeros(len(at))
+    for i, x0 in enumerate(at):
+        du = u - x0
+        d = np.abs(du)
+        reach = np.partition(d, q - 1)[q - 1] * max(span, 1.0)
+        reach = max(reach, 1e-12)
+        w = np.clip(1 - (d / reach) ** 3, 0, None) ** 3
+        s0, s1, s2 = w.sum(), (w * du).sum(), (w * du * du).sum()
+        det = s0 * s2 - s1 * s1
+        # (the points all at one x: their weighted mean)
+        line = det > 1e-12 * max(s0 * s2, 1e-300)
+        weights = w * (s2 - s1 * du) / det if line else w / s0
+        fit[i] = weights @ y
+        norm[i] = np.sqrt((weights * weights).sum())
+        leverage[i] = weights[int(np.argmin(d))]
+    trace = float(np.clip(leverage.mean() * n, 1.0, n - 1.0)) if n > 2 else float(n)
+    df = n - trace
+    if df < 1:
+        return fit, np.full(len(at), np.nan), df
+    resid = y - np.interp(u, at, fit)
+    sigma = np.sqrt(float((resid**2).sum()) / df)
+    return fit, sigma * norm, df
+
+
+def _t_quantile(p: float, df: float) -> float:
+    """Student's t quantile: exact for 1 and 2 degrees of freedom, else the Cornish-Fisher
+    expansion around the normal quantile (within 0.2% from 3 on)."""
+    if df <= 1:
+        return float(np.tan(np.pi * (p - 0.5)))
+    if df <= 2:
+        return float((2 * p - 1) / np.sqrt(2 * p * (1 - p)))
+    z = _normal_quantile(p)
+    g1 = (z**3 + z) / 4
+    g2 = (5 * z**5 + 16 * z**3 + 3 * z) / 96
+    g3 = (3 * z**7 + 19 * z**5 + 17 * z**3 - 15 * z) / 384
+    g4 = (79 * z**9 + 776 * z**7 + 1482 * z**5 - 1920 * z**3 - 945 * z) / 92160
+    return float(z + g1 / df + g2 / df**2 + g3 / df**3 + g4 / df**4)
+
+
+def _normal_quantile(p: float) -> float:
+    """The standard normal quantile (Acklam's rational approximation, to about 1e-9)."""
+    a = (-3.969683028665376e01, 2.209460984245205e02, -2.759285104469687e02,
+         1.383577518672690e02, -3.066479806614716e01, 2.506628277459239e00)  # fmt: skip
+    b = (-5.447609879822406e01, 1.615858368580409e02, -1.556989798598866e02,
+         6.680131188771972e01, -1.328068155288572e01)  # fmt: skip
+    c = (-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e00,
+         -2.549732539343734e00, 4.374664141464968e00, 2.938163982698783e00)  # fmt: skip
+    d = (7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e00,
+         3.754408661907416e00)  # fmt: skip
+    if p < 0.02425 or p > 1 - 0.02425:
+        q = np.sqrt(-2 * np.log(min(p, 1 - p)))
+        x = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / (
+            (((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1
+        )
+        return float(x if p < 0.5 else -x)
+    q = p - 0.5
+    r = q * q
+    num = (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
+    return float(num / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1))
+
+
 def _kde(values: np.ndarray, at: np.ndarray, bw: float) -> np.ndarray:
     """A Gaussian KDE of ``values`` at ``at``: exact, or, for many values, from their
     counts in fine bins (each bin a small fraction of the bandwidth)."""
@@ -497,13 +691,19 @@ def _times(ms: np.ndarray) -> np.ndarray:
     return np.round(ms).astype(np.int64).astype("datetime64[ms]")
 
 
-def _ranges(lo: np.ndarray, hi: np.ndarray, kind: str) -> np.ndarray:
+def _shown(col: Column, *values: np.ndarray) -> tuple[np.ndarray, ...]:
+    """Values on ``col``'s axis as the data's own (a log axis: 10 to their power)."""
+    return tuple(10.0**v if col.log else v for v in values)
+
+
+def _ranges(lo: np.ndarray, hi: np.ndarray, kind: str, digits: int = 6) -> np.ndarray:
     """``"lo – hi"`` labels."""
     if kind == "time":
         a = np.datetime_as_string(_times(np.r_[lo, hi]), unit="auto")
         return np.array([f"{x} – {y}" for x, y in zip(a[: len(lo)], a[len(lo) :], strict=True)],
                         dtype=object)  # fmt: skip
-    return np.array([f"{x:.6g} – {y:.6g}" for x, y in zip(lo, hi, strict=True)], dtype=object)
+    return np.array([f"{x:.{digits}g} – {y:.{digits}g}" for x, y in zip(lo, hi, strict=True)],
+                    dtype=object)  # fmt: skip
 
 
 def _value(value: Any, kind: str) -> float:

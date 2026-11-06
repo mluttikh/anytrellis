@@ -19,8 +19,11 @@ import numpy as np
 
 from anytrellis.data import Column, Table
 
-Mark = Literal["line", "points", "bars", "area", "rect", "text", "rule", "hist", "box", "density"]
-SUMMARIES = ("hist", "box", "density")
+Mark = Literal[
+    "line", "points", "bars", "area", "band", "rect", "text", "rule", "hist", "box", "density",
+    "smooth",
+]  # fmt: skip
+SUMMARIES = ("hist", "box", "density", "smooth")
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "dodge", "identity"]
 
@@ -179,7 +182,26 @@ def area_geometry(
         order = np.lexsort((ss, xs, panel))
         rows, panel, xs, ys, ss = rows[order], panel[order], xs[order], ys[order], ss[order]
         base, top = _stack(panel, xs, ys)
-    # segments between consecutive points of a series, in x
+    return _trapezoids(rows, panel, xs, ss, top, base)
+
+
+def band_geometry(
+    rows: np.ndarray, panel: np.ndarray, x: np.ndarray, lower: np.ndarray, upper: np.ndarray,
+    series: np.ndarray,
+) -> Geometry:  # fmt: skip
+    """A band between two lines per series: a trapezoid per segment from the upper line
+    down to the lower (its base), split where they cross."""
+    xs, lo, hi, ss = x[rows], lower[rows], upper[rows], series[rows]
+    keep = np.isfinite(xs) & np.isfinite(lo) & np.isfinite(hi)
+    return _trapezoids(rows[keep], panel[keep], xs[keep], ss[keep], hi[keep], lo[keep])
+
+
+def _trapezoids(
+    rows: np.ndarray, panel: np.ndarray, xs: np.ndarray, ss: np.ndarray, top: np.ndarray,
+    base: np.ndarray,
+) -> Geometry:  # fmt: skip
+    """Between consecutive points of each series (in x): a trapezoid from its top down to
+    its base, as two where they cross."""
     order = np.lexsort((xs, ss, panel))
     rows, panel, xs, ss, base, top = (a[order] for a in (rows, panel, xs, ss, base, top))
     pair = np.flatnonzero((panel[1:] == panel[:-1]) & (ss[1:] == ss[:-1]))
@@ -187,7 +209,7 @@ def area_geometry(
     x0, x1 = xs[a], xs[b]
     t0, t1, b0, b1 = top[a], top[b], base[a], base[b]
     r0, r1, pn = rows[a], rows[b], panel[a]
-    # where the line crosses its base, two trapezoids meeting there
+    # where the top crosses its base, two trapezoids meeting there
     d0, d1 = t0 - b0, t1 - b1
     cross = (d0 * d1) < 0
     if cross.any():

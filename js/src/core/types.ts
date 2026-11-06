@@ -11,7 +11,9 @@ export interface BufferRef {
   byteLength: number;
 }
 
-export type AxisKind = "number" | "time" | "band";
+/** `log`: numbers in log10 units (a log scale): zoomed and panned like numbers, labelled
+ * as the values. */
+export type AxisKind = "number" | "time" | "band" | "log";
 export type Share = "all" | "row" | "col" | "none";
 
 export interface AxisSpec {
@@ -59,7 +61,8 @@ export interface ColorSpec {
 }
 
 export interface MarkLayerSpec {
-  type: "line" | "points" | "bars" | "area" | "rect";
+  /** `band`: an area between two lines (ymin, ymax): drawn as an area, its base not zero. */
+  type: "line" | "points" | "bars" | "area" | "rect" | "band";
   name: string;
   count: number;
   /** x0, y0, x1, y1 per instance (float64, relative to the axis origins), sorted by panel. */

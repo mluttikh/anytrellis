@@ -42,12 +42,14 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `points(x, y, color, size)` | a point per row |
 | `bars(x, y, color, position="stack"\|"dodge"\|"identity")` | a bar per row, from zero |
 | `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |
+| `band(x, ymin, ymax, color, group)` | a band between two lines (a range, an interval) |
 | `rect(x, y, color, width=1, height=1)` / `rect(x, y, x2=, y2=)` | a cell per row (a heatmap), or a box between two corners |
 | `text(x, y, text, color, size, align, dx, dy)` | a label per row |
 | `rule(x=..., y=...)` | reference lines across every panel |
 | `hist(x, color, bins=30 \| binwidth=, stat="count"\|"percent"\|"density")` | a histogram per panel, stacked by colour |
 | `box(x, y, color, whis=1.5)` | box plots per position (and colour, side by side); sideways when y is the category |
 | `density(x, color, fill=False, bw_adjust=1)` | a kernel density curve per panel and colour |
+| `smooth(x, y, color, method="loess"\|"linear", se=True)` | a fitted line per panel and colour, with a confidence band |
 
 A number column as `color` gets a continuous scale (and a gradient legend); text gets a
 palette. On a category axis a rect is one band wide by default. A text label's `dx`/`dy`
@@ -56,12 +58,14 @@ the panel's edge goes to the other side of its point. `tooltip=[...]` adds colum
 what hovering shows (a box: to its outliers'); every mark but `text` and `rule` can be
 selected.
 
-`hist`, `box` and `density` summarise each panel's rows in Python, and are drawn as bars,
-boxes, lines and points. A histogram's bins are the same in every panel (round widths
+`hist`, `box`, `density` and `smooth` summarise each panel's rows in Python, and are drawn
+as bars, boxes, lines, bands and points. A histogram's bins are the same in every panel (round widths
 by default), and so are a density's x values, so the panels compare. `stat="percent"`
 and `"density"` scale each panel's counts. With `facet="exclude"` a summary covers the
 other panels' rows, in grey: each panel against the rest. Hovering a box shows its
-quartiles, its count and its whiskers' reach. Brushing selects whole bins and boxes, and
+quartiles, its count and its whiskers' reach; a smooth line, its confidence interval.
+`smooth` fits loess (local lines with tricube weights over a `span` share of the points)
+or least squares, and its band is the `level` (95%) interval for the mean. Brushing selects whole bins and boxes, and
 `t.selected("hist")` gives the rows they stand for.
 
 ## Facets and scales
@@ -71,6 +75,10 @@ quartiles, its count and its whiskers' reach. Brushing selects whole bins and bo
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),
   `"row"`, `"col"` or `False` (each panel its own). Axes are drawn only where a panel's
   scale differs from its neighbour's.
+- `x_scale="log"` / `y_scale="log"` (or `t.scale(y="log")`): a log10 scale, with ticks at
+  decades (and 2 and 5 between when they fit). Values of 0 or less are left out; marks
+  drawn from zero (bars, areas, histograms, densities) don't go on a log y. Summaries are
+  computed on the log scale, as in ggplot2: a histogram's bins are equally wide on it.
 - `t.order("site", by="median", of="yield")`: panels ordered by a summary of each level.
 - `t.order("month", ["Jan", "Feb", ...])`: any category column in the given order: panels,
   bands on an axis and colours. Text is sorted otherwise; a pandas Categorical or a

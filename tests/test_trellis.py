@@ -752,3 +752,124 @@ def test_density_bandwidth_and_errors():
     assert narrow > wide
     with pytest.raises(ValueError, match="numbers or times"):
         Trellis(DIST).density(x="g")._scene()
+
+
+# ---- log scales -----------------------------------------------------------------------------
+
+
+def test_log_axis_sends_log10_values_and_leaves_out_non_positive():
+    data = {"x": [1.0, 2.0, 3.0, 4.0], "y": [1.0, 100.0, 0.0, -5.0], "name": list("abcd")}
+    t = Trellis(data, y_scale="log").points(x="x", y="y", tooltip=["name"])
+    spec, _ = scene(t)
+    assert spec["y"]["kind"] == "log"
+    assert spec["x"]["kind"] == "number"
+    c = coords(t)
+    assert c[:, 1].tolist() == [0.0, 2.0]  # 0 and -5 left out
+    assert t._tooltip(0, 1) == [["name", "b"]]
+    t.select(y=(50, 200))  # values, not logs
+    assert list(t.selected()["name"]) == ["b"]
+    lo, hi = t.selection["y"]  # ty: ignore[not-subscriptable]
+    assert np.isclose(lo, 50)
+    assert np.isclose(hi, 200)
+
+
+def test_log_scale_method_rules_and_errors():
+    data = {"x": [1.0, 10.0, 1000.0], "y": [1.0, 2.0, 3.0]}
+    t = Trellis(data).line(x="x", y="y").rule(x=100).scale(x="log")
+    spec, _ = scene(t)
+    assert spec["x"]["kind"] == "log"
+    assert spec["layers"][1]["values"] == [2.0]
+    assert spec["panels"][0]["x"][0] < 0 < 3 < spec["panels"][0]["x"][1]
+    with pytest.raises(ValueError, match="draws from zero"):
+        Trellis(data, y_scale="log").bars(x="x", y="y")._scene()
+    with pytest.raises(ValueError, match="needs numbers"):
+        Trellis({"x": ["a", "b"], "y": [1.0, 2.0]}, x_scale="log").points(x="x", y="y")._scene()
+    with pytest.raises(ValueError, match="scale is one of"):
+        Trellis(data, x_scale="sqrt")
+    with pytest.raises(ValueError, match="not on a log axis"):
+        Trellis(data, x_scale="log").points(x="x", y="y").rule(x=0)._scene()
+
+
+def test_summaries_on_a_log_axis_are_computed_on_it():
+    data = {"g": ["a"] * 4, "v": [1.0, 10.0, 100.0, 1000.0]}
+    t = Trellis(data, x_scale="log").hist(x="v", binwidth=1)  # a decade per bin
+    c = coords(t)
+    assert c[:, 0].tolist() == [0.0, 1.0, 2.0]
+    assert (c[:, 3] - c[:, 1]).tolist() == [1.0, 1.0, 2.0]
+    spec, _ = scene(t)
+    assert spec["layers"][0]["tips"]["values"][0][0] == "1 – 10"
+    b = Trellis(data, y_scale="log").box(x="g", y="v")
+    body = coords(b, 0)[0]
+    assert np.allclose([body[1], body[3]], [0.75, 2.25])  # quartiles of the logs
+    tips = scene(b)[0]["layers"][0]["tips"]["values"][0]
+    assert tips[2] == f"{10**1.5:.6g}"  # the median as a value
+
+
+# ---- bands and smooth fits -------------------------------------------------------------------
+
+
+def test_band_draws_between_two_lines_and_splits_where_they_cross():
+    data = {"x": [0.0, 1.0, 2.0], "lo": [0.0, 1.0, 3.0], "hi": [2.0, 3.0, 1.0], "k": list("abc")}
+    t = Trellis(data).band(x="x", ymin="lo", ymax="hi", tooltip=["k"])
+    spec, _ = scene(t)
+    layer = spec["layers"][0]
+    assert layer["type"] == "band"
+    assert layer["hide"] == ["y"]
+    c = coords(t)
+    base = base_of(t)
+    assert len(c) == 3  # the second segment crosses at x = 1.5
+    assert c[0].tolist() == [0.0, 2.0, 1.0, 3.0]
+    assert base[0].tolist() == [0.0, 1.0]
+    assert np.isclose(c[1, 2], 1.5)
+    assert t._tooltip(0, 0) == [["lo", "0"], ["hi", "2"], ["k", "a"]]
+    assert spec["panels"][0]["y"][0] < 0  # padded, not from zero
+    t.select(x=(0.2, 0.4), y=(1.5, 1.6))  # inside the band, away from both lines
+    assert list(t.selected()["k"]) == ["a", "b"]
+
+
+def test_smooth_linear_matches_least_squares_with_a_t_band():
+    rng = np.random.default_rng(3)
+    x = np.linspace(0, 10, 40)
+    y = 2 + 0.5 * x + rng.normal(0, 1, 40)
+    t = Trellis({"x": x, "y": y}).smooth(x="x", y="y", method="linear", n=11)
+    spec, _ = scene(t)
+    assert [lr["type"] for lr in spec["layers"]] == ["band", "line"]
+    line = coords(t, 1)
+    slope, intercept = np.polyfit(x, y, 1)
+    assert np.allclose(line[:, 1], intercept + slope * line[:, 0])
+    band, base = coords(t, 0), base_of(t, 0)
+    resid = y - (intercept + slope * x)
+    sigma = np.sqrt((resid**2).sum() / 38)
+    se = sigma * np.sqrt(1 / 40 + (0 - x.mean()) ** 2 / ((x - x.mean()) ** 2).sum())
+    assert np.isclose(band[0, 1] - line[0, 1], 2.0244 * se, rtol=1e-3)  # t(0.975, 38)
+    assert np.isclose(line[0, 1] - base[0, 0], 2.0244 * se, rtol=1e-3)
+    assert spec["layers"][1]["tips"]["names"] == ["95% interval"]
+
+
+def test_smooth_loess_follows_a_curve_and_selects_its_rows():
+    x = np.linspace(0, 2 * np.pi, 200)
+    data = {"g": ["a"] * 200, "x": x, "y": np.sin(x)}
+    t = Trellis(data, wrap="g").smooth(x="x", y="y", span=0.2, se=False)
+    spec, _ = scene(t)
+    assert [lr["type"] for lr in spec["layers"]] == ["line"]
+    c = coords(t)
+    assert np.abs(c[:, 1] - np.sin(c[:, 0])).max() < 0.04  # a local line flattens the crests
+    t.select(x=(1.0, 1.2))
+    rows = t.selected()
+    assert rows["x"].min() >= 0.9
+    assert rows["x"].max() <= 1.4
+    with pytest.raises(ValueError, match="numbers or times"):
+        Trellis({"x": ["a", "b"], "y": [1.0, 2.0]}).smooth(x="x", y="y")._scene()
+
+
+def test_smooth_per_colour_fullrange_and_on_a_log_axis():
+    data = {"x": [1.0, 2, 3, 1, 2, 3, 10], "y": [1.0, 2, 3, 3, 2, 1, 0.5], "c": list("aaabbbb")}
+    t = Trellis(data).smooth(x="x", y="y", color="c", method="linear", fullrange=True, n=5)
+    line = coords(t, 1)
+    assert len(line) == 8  # two lines of 4 segments
+    assert line[:, 0].min() == 1.0
+    assert line[:, 2].max() == 10.0  # the colour a's line too
+    lg = Trellis({"x": [1.0, 10, 100, 1000], "y": [1.0, 2, 3, 4]}, x_scale="log")
+    lg.smooth(x="x", y="y", method="linear", se=False)
+    c = coords(lg)
+    assert np.allclose(np.diff(c[:, 3]) / np.diff(c[:, 2]), 1.0)  # a line in log10(x)

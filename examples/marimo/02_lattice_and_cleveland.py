@@ -82,30 +82,21 @@ def _(mo):
     ## Anscombe's quartet
 
     Four datasets with the same means, variances, correlation and least-squares line (1973),
-    and four very different pictures. Each panel draws its points and the line fitted to
-    them: a second table with the `dataset` column lands in its own panels.
+    and four very different pictures. Each panel draws its points and the least-squares line
+    fitted to them (lattice's `type = c("p", "r")`), with its 95% confidence band;
+    `fullrange=True` draws every line across the whole x axis.
     """)
     return
 
 
 @app.cell
-def _(Trellis, load, pl):
+def _(Trellis, load):
     quartet = load("anscombe")
-    fitted = (
-        quartet.group_by("dataset")
-        .agg(
-            slope=pl.cov("x", "y") / pl.col("x").var(),
-            mx=pl.col("x").mean(),
-            my=pl.col("y").mean(),
-        )
-        .join(pl.DataFrame({"x": [3.0, 20.0]}), how="cross")
-        .with_columns(y=pl.col("my") + pl.col("slope") * (pl.col("x") - pl.col("mx")))
-    )
 
     anscombe = (
         Trellis(quartet, wrap="dataset", title="Anscombe's quartet")
         .points(x="x", y="y", size=8)
-        .line(fitted, x="x", y="y", color="#d62728", name="least squares")
+        .smooth(x="x", y="y", method="linear", fullrange=True, color="#d62728")
     )
     anscombe
     return

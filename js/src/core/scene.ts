@@ -129,7 +129,7 @@ export function buildScene(spec: TrellisSpec, source: DataSource): Scene {
         }
       }
     }
-    const kind = l.type === "bars" || l.type === "rect" ? KIND_RECT : l.type === "area" ? KIND_TRAP : KIND_CAPSULE;
+    const kind = l.type === "bars" || l.type === "rect" ? KIND_RECT : l.type === "area" || l.type === "band" ? KIND_TRAP : KIND_CAPSULE;
     const halfWidth = l.type === "line" ? l.width / 2 : l.type === "points" ? l.size / 2 : 0;
     layers.push({
       spec: l,
@@ -232,7 +232,7 @@ export function hitPoint(hit: Hit, map: PanelMap, px: number, py: number): { x: 
   if (hit.layer.kind === KIND_RECT) return { x: (c[i * 4] + c[i * 4 + 2]) / 2, y: c[i * 4 + 3], y0: c[i * 4 + 1] };
   // y0: an area's base there (its value is y - y0); 0 otherwise
   const base = hit.layer.base;
-  if (type === "line" || type === "area") {
+  if (type === "line" || type === "area" || type === "band") {
     const da = Math.hypot(px - (map.ox + c[i * 4] * map.sx), py - (map.oy + c[i * 4 + 1] * map.sy));
     const db = Math.hypot(px - (map.ox + c[i * 4 + 2] * map.sx), py - (map.oy + c[i * 4 + 3] * map.sy));
     if (db < da) return { x: c[i * 4 + 2], y: c[i * 4 + 3], y0: base ? base[i * 2 + 1] : 0 };
@@ -275,9 +275,10 @@ export function yExtent(scene: Scene, p: number, x0: number, x1: number): { lo: 
       }
       const base = layer.set.base;
       if (base) {
-        // an area's base (relative to the panel's): kept unpadded
-        add(base[i * 2] + scene.baseY[p], true);
-        add(base[i * 2 + 1] + scene.baseY[p], true);
+        // an area's base (relative to the panel's): kept unpadded; a band's lower line: padded
+        const area = layer.spec.type === "area";
+        add(base[i * 2] + scene.baseY[p], area);
+        add(base[i * 2 + 1] + scene.baseY[p], area);
       }
       if (ax !== bx) {
         // clip the segment to [x0, x1]

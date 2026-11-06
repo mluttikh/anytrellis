@@ -30,6 +30,7 @@ from anytrellis.layers import (
     Position,
     area_geometry,
     axis_values,
+    band_geometry,
     bar_geometry,
     expand,
     line_geometry,
@@ -85,6 +86,10 @@ class Trellis:
         share_x: Share the x scale: ``True`` (all panels), ``"row"``, ``"col"`` or
             ``False`` (each panel its own).
         share_y: The same for y.
+        x_scale: ``"linear"`` or ``"log"`` (log10: values of 0 or less are left out; a
+            histogram's bins and a density are computed on the log scale).
+        y_scale: The same for y (not with marks drawn from zero: bars, areas, histograms,
+            densities).
         height: The plot's height in CSS pixels (default: from ``panel_height``).
         panel_height: Each panel's height in CSS pixels (default: from its width).
         title: A title over the plot.
@@ -112,6 +117,8 @@ class Trellis:
         cols: int | None = None,
         share_x: bool | str = True,
         share_y: bool | str = True,
+        x_scale: str = "linear",
+        y_scale: str = "linear",
         height: int | None = None,
         panel_height: int | None = None,
         title: str = "",
@@ -133,6 +140,7 @@ class Trellis:
             raise ValueError("cols must be at least 1")
         self._cols = cols
         self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
+        self._scales: dict[str, str] = {"x": _scale(x_scale), "y": _scale(y_scale)}
         self._orders: dict[str, Order] = {}
         self._layers: list[Layer] = []
         self._tables: dict[int, Table] = {}
@@ -297,6 +305,91 @@ class Trellis:
         return self._add(Layer("area", name or self._name("area"), data, x, y, color,
                                _names(group), facet, opacity=opacity, position=position,
                                tooltip=list(tooltip)))  # fmt: skip
+
+    def band(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        ymin: str,
+        ymax: str,
+        color: str | None = None,
+        group: str | Sequence[str] | None = None,
+        opacity: float = 0.3,
+        facet: FacetMode = "auto",
+        tooltip: Sequence[str] = (),
+        name: str | None = None,
+    ) -> Self:
+        """A band between two lines: from ``ymin`` to ``ymax`` along x (a range, an
+        interval, an envelope), one per group (and colour).
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column.
+            ymin: The lower line's column.
+            ymax: The upper line's column.
+            color: A colour column or one colour.
+            group: Column(s) splitting the rows into separate bands.
+            opacity: 0 to 1.
+            facet: As for ``line``.
+            tooltip: Columns shown on hover, besides x, ymin and ymax.
+            name: The layer's name.
+        """
+        return self._add(Layer("band", name or self._name("band"), data, x, ymin, color,
+                               _names(group), facet, opacity=opacity, y2=ymax,
+                               tooltip=list(tooltip)))  # fmt: skip
+
+    def smooth(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        color: str | None = None,
+        method: str = "loess",
+        se: bool = True,
+        level: float = 0.95,
+        span: float = 0.75,
+        n: int = 80,
+        fullrange: bool = False,
+        width: float = 1.5,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        name: str | None = None,
+    ) -> Self:
+        """A smooth line through each panel's points (and each colour's), with a
+        confidence band for its mean.
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column (numbers or times).
+            y: The y column.
+            color: A category column (a fit per category) or one colour.
+            method: ``"loess"`` (local linear regression, tricube weights) or
+                ``"linear"`` (least squares).
+            se: Draw the confidence band.
+            level: The band's confidence level.
+            span: Loess: the share of the points each local fit uses.
+            n: Points along each line.
+            fullrange: Draw each line over every panel's x range, not its own data's.
+            width: Line width in CSS pixels.
+            opacity: 0 to 1 (the band is lighter).
+            facet: As for ``line``.
+            name: The layer's name.
+        """
+        if method not in ("loess", "linear"):
+            raise ValueError(f"method must be 'loess' or 'linear', got {method!r}")
+        if not 0 < level < 1:
+            raise ValueError("level must be between 0 and 1")
+        if not span > 0:
+            raise ValueError("span must be positive")
+        if n < 2:
+            raise ValueError("n must be at least 2")
+        args = {"method": method, "se": se, "level": level, "span": span, "n": n,
+                "fullrange": fullrange}  # fmt: skip
+        return self._add(Layer("smooth", name or self._name("smooth"), data, x, y, color, (),
+                               facet, width=width, opacity=opacity,
+                               stat_args=args))  # fmt: skip
 
     def rect(
         self,
@@ -548,6 +641,14 @@ class Trellis:
             self._share["x"] = share_mode(x)
         if y is not None:
             self._share["y"] = share_mode(y)
+        return self._changed()
+
+    def scale(self, x: str | None = None, y: str | None = None) -> Self:
+        """The axes' scales: ``"linear"`` or ``"log"`` (as ``Trellis(x_scale=...)``)."""
+        if x is not None:
+            self._scales["x"] = _scale(x)
+        if y is not None:
+            self._scales["y"] = _scale(y)
         return self._changed()
 
     def order(
@@ -841,7 +942,7 @@ class Trellis:
             table = self._data if layer.data is None else Table(layer.data)
             if table is None:
                 raise ValueError(f"{layer.mark}() needs data: give the plot or the layer a table")
-            for name in [layer.x, layer.y, *layer.group, *layer.tooltip]:
+            for name in [layer.x, layer.y, layer.x2, layer.y2, *layer.group, *layer.tooltip]:
                 if name is not None:
                     table.column(name)
             if layer.color is not None and layer.color not in table and not is_color(layer.color):
@@ -890,12 +991,15 @@ class Trellis:
         given = self._given_orders(tables)
         # every layer as the plain layers it draws: a summary (hist, box, ...) as its parts
         drawn: list[_Drawn] = []
+        logs = [axis for axis in ("x", "y") if self._scales[axis] == "log"]
         for layer in self._layers:
+            if layer.mark == "rule":
+                drawn.append(_Drawn(layer, layer, self._data or Table({}), None))
+                continue
+            table = _scaled(layer, self._table(layer), logs)
             if layer.mark not in SUMMARIES:
-                table = self._table(layer) if layer.mark != "rule" else self._data or Table({})
                 drawn.append(_Drawn(layer, layer, table, None))
                 continue
-            table = self._table(layer)
             for part in summary_parts(layer, table, grid.assign(table), npanels):
                 part.layer.stat = layer.mark
                 drawn.append(_Drawn(layer, part.layer, part.table, part))
@@ -904,18 +1008,22 @@ class Trellis:
         shown = [d.layer for d in drawn if d.layer.mark != "rule"]
         x_kind, x_levels = _axis(shown, lambda lr: table_of(id(lr)), "x", given)
         y_kind, y_levels = _axis(shown, lambda lr: table_of(id(lr)), "y", given)
+        if "x" in logs:
+            x_kind = "log"
+        if "y" in logs:
+            y_kind = "log"
         colors = _ColorScales(shown, lambda lr: table_of(id(lr)), self.palette, given)
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
         plain = [lr for lr in marks if lr.mark not in SUMMARIES]
-        bars_step = step_of([axis_values(self._table(lr).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
+        bars_step = step_of([axis_values(table_of(id(lr)).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
                              for lr in plain if lr.mark == "bars"])  # fmt: skip
         steps = {
             "bars": bars_step,
             "rect_x": 1.0 if x_levels is not None else step_of(
-                [axis_values(self._table(lr).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
+                [axis_values(table_of(id(lr)).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
                  for lr in plain if lr.mark == "rect" and lr.x2 is None]),
             "rect_y": 1.0 if y_levels is not None else step_of(
-                [axis_values(self._table(lr).column(lr.y), y_levels)  # ty: ignore[invalid-argument-type]
+                [axis_values(table_of(id(lr)).column(lr.y), y_levels)  # ty: ignore[invalid-argument-type]
                  for lr in plain if lr.mark == "rect" and lr.y2 is None]),
         }  # fmt: skip
         built: list[tuple[Layer, Table, Geometry | None]] = []
@@ -985,7 +1093,9 @@ class Trellis:
                 None if keys is None else buffers.add(keys[geom.rows].astype(np.uint32), "uint32")
             )
             part = d.part
-            spec_layer["hide"] = list(part.hide) if part is not None else []
+            spec_layer["hide"] = (
+                list(part.hide) if part is not None else ["y"] if layer.mark == "band" else []
+            )  # a band's y: its ymin and ymax, from Python
             family = part is not None and part.family
             # a summary's parts drawing the same rows (a box's body and lines) select together
             spec_layer["family"] = self._layers.index(d.user) if family else None
@@ -1038,6 +1148,31 @@ class Trellis:
 
 
 # ---- helpers ------------------------------------------------------------------------------
+
+SCALES = ("linear", "log")
+FROM_ZERO = ("bars", "area", "hist", "density")
+"""Marks drawn from zero up, which a log y axis has no place for."""
+
+
+def _scale(value: str) -> str:
+    if value not in SCALES:
+        raise ValueError(f"a scale is one of {SCALES}, got {value!r}")
+    return value
+
+
+def _scaled(layer: Layer, table: Table, logs: list[str]) -> Table:
+    """A layer's table with its columns on log axes in log10 units."""
+    if "y" in logs and layer.mark in FROM_ZERO:
+        raise ValueError(
+            f"{layer.mark}() draws from zero, which a log y axis has no place for; use "
+            "points or lines, or a linear y"
+        )
+    names = set()
+    if "x" in logs:
+        names |= {n for n in (layer.x, layer.x2) if n is not None}
+    if "y" in logs:
+        names |= {n for n in (layer.y, layer.y2) if n is not None}
+    return table.log_scaled(names) if names else table
 
 
 @dataclass
@@ -1095,7 +1230,12 @@ def _axis(
 
 
 def _scalar(value: Any, kind: AxisKind, levels: list[str] | None) -> float:
-    """A rule's position in axis units."""
+    """A value (a rule's position, a selection's end) in axis units."""
+    if kind == "log":
+        v = float(value)
+        if not v > 0:
+            raise ValueError(f"{value!r} is not on a log axis (it holds values above 0)")
+        return float(np.log10(v))
     if kind == "band":
         lookup = {v: i for i, v in enumerate(levels or [])}
         if str(value) not in lookup:
@@ -1210,6 +1350,13 @@ def _geometry(
             extra.append(color_col.name)
         geom = area_geometry(rows, panel, x, y, series_codes(table, extra),
                              stack=layer.position == "stack")  # fmt: skip
+    elif layer.mark == "band":
+        assert layer.y2 is not None
+        upper = axis_values(table.column(layer.y2), y_levels)
+        extra = list(layer.group)
+        if color_col is not None and color_col.kind == "category":
+            extra.append(color_col.name)
+        geom = band_geometry(rows, panel, x, y, upper, series_codes(table, extra))
     elif layer.mark in ("points", "text"):
         geom = point_geometry(rows, panel, x, y)
     elif layer.mark == "rect":
@@ -1306,6 +1453,8 @@ def _inline_tips(layer: Layer, table: Table, geom: Geometry, buffers: Buffers) -
 def _tooltip_columns(layer: Layer, table: Table) -> list[str]:
     """A layer's tooltip columns: those asked for, and a number colour column."""
     names = list(layer.tooltip)
+    if layer.mark == "band" and layer.stat is None:
+        names = [n for n in (layer.y, layer.y2) if n is not None] + names
     color = layer.color
     if color is not None and color in table and color not in names:
         names += [color] if table.column(color).kind == "number" else []

@@ -44,6 +44,18 @@ describe("ticks", () => {
     expect(ticks("band", -0.5, 11.5, 0, 4, levels).map((t) => t.label)).toEqual(["L0", "L3", "L6", "L9"]);
   });
 
+  it("puts log ticks on decades, with 2 and 5 between when they fit", () => {
+    const labels = (lo: number, hi: number, count: number) => ticks("log", lo, hi, 0, count).map((t) => t.label);
+    expect(labels(0, 3, 5)).toEqual(["1", "10", "100", "1000"]);
+    expect(labels(0, 1, 6)).toEqual(["1", "2", "5", "10"]);
+    expect(labels(-2, 0, 6)).toEqual(["0.01", "0.02", "0.05", "0.1", "0.2", "0.5", "1"]);
+    expect(labels(0, 8, 4)).toEqual(["1", "100", "10000", "1M", "100M"]);
+    expect(labels(Math.log10(20), Math.log10(60), 4)).toEqual(["20", "30", "40", "50", "60"]);
+    for (const t of ticks("log", Math.log10(20), Math.log10(60), 0, 4)) expect(Number.isFinite(t.value)).toBe(true);
+    expect(formatValue("log", 2, 0, 3)).toBe("100");
+    expect(formatValue("log", Math.log10(1234.5), 0, 0.5)).toBe("1235");
+  });
+
   it("formats values at the precision of the view", () => {
     expect(formatValue("band", 2, 0, 1, ["a", "b", "c"])).toBe("c");
     expect(formatValue("time", DAY / 2, Date.UTC(2026, 0, 1), DAY)).toBe("2026-01-01 12:00");

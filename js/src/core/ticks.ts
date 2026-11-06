@@ -1,5 +1,6 @@
 // Axis ticks and their labels: numbers (1-2-5 steps), times (calendar steps in UTC, the
-// wall-clock time Python sent), and bands (one tick per category, thinned to fit).
+// wall-clock time Python sent), bands (one tick per category, thinned to fit), and log
+// scales (decades, with 2 and 5 between when there is room; within a decade, round values).
 
 import type { AxisKind } from "./types";
 
@@ -15,6 +16,7 @@ export function ticks(kind: AxisKind, lo: number, hi: number, origin: number, co
   count = Math.max(1, count);
   if (kind === "band") return bandTicks(lo, hi, levels ?? [], count);
   if (kind === "time") return timeTicks(lo + origin, hi + origin, count).map((t) => ({ value: t.value - origin, label: t.label }));
+  if (kind === "log") return logTicks(lo + origin, hi + origin, count).map((t) => ({ value: t.value - origin, label: t.label }));
   const step = niceStep(hi - lo, count);
   const first = Math.ceil(lo / step - 1e-9);
   const last = Math.floor(hi / step + 1e-9);
@@ -51,9 +53,45 @@ export function formatNumber(v: number, step: number, decimals: number): string 
 export function formatValue(kind: AxisKind, v: number, origin: number, span: number, levels: string[] | null = null): string {
   if (kind === "band") return levels?.[Math.round(v)] ?? "";
   if (kind === "time") return formatTime(v + origin, span / 200);
+  if (kind === "log") {
+    // the value, as precise as a 200th of the view's (log) span there
+    const value = Math.pow(10, v + origin);
+    const step = value * (Math.pow(10, span / 200) - 1) || value * 1e-6;
+    const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+    return formatNumber(value, step, Math.min(decimals, 12));
+  }
   const step = span / 1000 || 1;
   const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
   return formatNumber(v + origin, step, Math.min(decimals, 6));
+}
+
+/** Log ticks over [lo, hi] (log10 units): decades (every few when there are many), with
+ * 2 and 5 between when they fit; less than a decade: round values, evenly spaced. */
+function logTicks(lo: number, hi: number, count: number): Tick[] {
+  const out: Tick[] = [];
+  const label = (v: number): string => formatNumber(v, v, Math.max(0, -Math.floor(Math.log10(v) + 1e-9)));
+  if (hi - lo < 1) {
+    const a = Math.pow(10, lo);
+    const b = Math.pow(10, hi);
+    const step = niceStep(b - a, count);
+    const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+    for (let i = Math.ceil(a / step - 1e-9); i * step <= b * (1 + 1e-12) && out.length < 1000; i++) {
+      const v = i * step;
+      if (v > 0) out.push({ value: Math.log10(v), label: formatNumber(v, step, decimals) });
+    }
+    return out;
+  }
+  const decades = hi - lo;
+  const every = Math.max(1, Math.ceil(decades / count));
+  const mults = every === 1 && decades * 3 <= count * 1.5 ? [1, 2, 5] : [1];
+  for (let e = Math.floor(lo); e <= Math.ceil(hi) && out.length < 1000; e++) {
+    if (e % every !== 0) continue;
+    for (const m of mults) {
+      const value = Math.log10(m) + e;
+      if (value >= lo - 1e-9 && value <= hi + 1e-9) out.push({ value, label: label(m * Math.pow(10, e)) });
+    }
+  }
+  return out;
 }
 
 function bandTicks(lo: number, hi: number, levels: string[], count: number): Tick[] {

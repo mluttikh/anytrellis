@@ -38,6 +38,8 @@ class Column:
     levels: tuple[str, ...] = ()
     codes: np.ndarray | None = None
     """A category column's index of each row's value in ``levels`` (computed if not given)."""
+    log: bool = False
+    """Numbers in log10 units, for a log axis (the data's own values: ``10 ** values``)."""
 
     def level_codes(self) -> np.ndarray:
         """Each row's index in ``levels`` (−1: not one of them)."""
@@ -75,6 +77,22 @@ class Table:
                 raise NotFoundError(f"column {name!r} not found; available: {self.names}")
             self._cache[name] = _read(self._frame, name)
         return self._cache[name]
+
+    def log_scaled(self, names: set[str]) -> Table:
+        """This table with the columns ``names`` in log10 units, for a log axis: values of 0
+        or less are missing. Raw values (tooltips) and rows (``take``) are as they were."""
+        import copy
+
+        out = copy.copy(self)
+        out._cache = dict(self._cache)
+        for name in sorted(names):
+            col = self.column(name)
+            if col.kind != "number":
+                raise ValueError(f"a log scale needs numbers; {name!r} holds {col.kind}s")
+            with np.errstate(divide="ignore", invalid="ignore"):
+                values = np.where(col.values > 0, np.log10(col.values), np.nan)
+            out._cache[name] = Column(name, "number", values, log=True)
+        return out
 
     def take(self, rows: np.ndarray) -> Any:
         """These rows (indices), as the same kind of table as the data given."""

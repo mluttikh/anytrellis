@@ -6,7 +6,8 @@
 // selected one, in all panels: brush some countries in 1955 and follow them in every year.
 //
 // A mark meets the brush: a point inside it; a line segment with either end inside; a bar
-// or rect overlapping it (an area: like a line). Grey context layers are never selected.
+// or rect overlapping it (an area: like a line; a band: overlapping it). Grey context layers
+// are never selected.
 // A summary mark drawn as several layers (a box: body, lines, outliers) selects a box
 // whole: what meets its body or its lines.
 
@@ -46,6 +47,7 @@ export function select(scene: Scene, brush: Brush): Selection {
     const n = layer.set.count;
     const mask = new Uint8Array(n);
     const rect = layer.kind === KIND_RECT;
+    const band = layer.spec.type === "band" ? layer.base : null;
     const p = brush.panel ?? null;
     const from = p === null ? 0 : (layer.starts[p] ?? 0);
     const to = p === null ? n : (layer.starts[p + 1] ?? 0);
@@ -54,9 +56,15 @@ export function select(scene: Scene, brush: Brush): Selection {
       const ay = c[i * 4 + 1];
       const bx = c[i * 4 + 2];
       const by = c[i * 4 + 3];
-      const hit = rect
-        ? Math.max(ax, bx) >= x0 && Math.min(ax, bx) <= x1 && Math.max(ay, by) >= y0 && Math.min(ay, by) <= y1
-        : inside(ax, ay) || inside(bx, by);
+      let hit: boolean;
+      if (band) {
+        // a piece of band: overlapping it, from its lower line to its upper
+        const lo = Math.min(ay, by, band[i * 2], band[i * 2 + 1]);
+        const hi = Math.max(ay, by, band[i * 2], band[i * 2 + 1]);
+        hit = Math.max(ax, bx) >= x0 && Math.min(ax, bx) <= x1 && hi >= y0 && lo <= y1;
+      } else if (rect) {
+        hit = Math.max(ax, bx) >= x0 && Math.min(ax, bx) <= x1 && Math.max(ay, by) >= y0 && Math.min(ay, by) <= y1;
+      } else hit = inside(ax, ay) || inside(bx, by);
       if (hit) mask[i] = 1;
     }
     if (layer.link) {

@@ -30,6 +30,15 @@ def row_mask(mark: str, geom: Geometry, n: int, x: tuple[float, float] | None,
     y0, y1 = sorted(y) if y is not None else (-np.inf, np.inf)
     rows = np.zeros(n, dtype=bool)
     here = np.ones(geom.count, dtype=bool) if panel is None else geom.panel == panel
+    if mark == "band" and geom.base0 is not None and geom.base1 is not None:
+        lo = np.minimum.reduce([geom.y0, geom.y1, geom.base0, geom.base1])
+        hi = np.maximum.reduce([geom.y0, geom.y1, geom.base0, geom.base1])
+        hit = here & (np.maximum(geom.x0, geom.x1) >= x0) & (np.minimum(geom.x0, geom.x1) <= x1)
+        hit &= (hi >= y0) & (lo <= y1)
+        rows[geom.rows[hit]] = True
+        if geom.rows_end is not None:
+            rows[geom.rows_end[hit]] = True
+        return rows
     if mark in ("bars", "rect"):
         hit = here & (
             (np.maximum(geom.x0, geom.x1) >= x0) & (np.minimum(geom.x0, geom.x1) <= x1)
@@ -107,4 +116,6 @@ def range_out(r: list[float] | None, kind: str, levels: list[str] | None, origin
         return [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
     if kind == "time":
         return (np.datetime64(round(lo), "ms"), np.datetime64(round(hi), "ms"))
+    if kind == "log":
+        return (10.0**lo, 10.0**hi)
     return (lo, hi)

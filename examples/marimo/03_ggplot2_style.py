@@ -26,6 +26,8 @@ def _(mo):
     | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()`        |
     | `geom_hline()`, `geom_vline()`           | `.rule(y=...)`, `.rule(x=...)`              |
     | `geom_histogram()`, `geom_boxplot()`, `geom_density()` | `.hist()`, `.box()`, `.density()` |
+    | `geom_smooth()`, `geom_ribbon()`         | `.smooth()`, `.band()`                      |
+    | `scale_y_log10()`                        | `Trellis(..., y_scale="log")`               |
     | `position = "dodge"`                     | `.bars(position="dodge")`                   |
     | `gghighlight()`                          | a layer with `facet="exclude"`              |
     | `fct_reorder(f, x, median)`              | `.order("f", by="median", of="x")`          |
@@ -137,7 +139,8 @@ def _(mo):
     ## `scales = "free_y"`
 
     Population differs by orders of magnitude between regions: free y scales show each
-    region's trend (and the tick labels say how far apart they are).
+    region's trend (and the tick labels say how far apart they are). A log scale, next, keeps
+    the panels comparable.
     """)
     return
 
@@ -149,6 +152,84 @@ def _(Trellis, gapminder):
         .line(x="year", y="pop", group="country", width=1, tooltip=["country"])
     )
     population
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `scale_y_log10()`
+
+    On a log scale equal distances are equal ratios: every country's growth reads the same
+    way, from a hundred thousand people to a billion, in shared panels.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, gapminder):
+    log_population = (
+        Trellis(gapminder, wrap="region", cols=3, y_scale="log", title="Population (log scale)")
+        .line(x="year", y="pop", group="country", width=1, tooltip=["country"])
+    )
+    log_population
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `geom_smooth`
+
+    ```r
+    ggplot(cars, aes(horsepower, mpg)) + geom_point() + geom_smooth() + facet_wrap(~ origin)
+    ```
+
+    Loess by default (`method="linear"` for least squares), with a 95% confidence band;
+    `span=` sets how local the fit is. Brush the line and `selected()` gives the cars under
+    it.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, load):
+    cars = load("cars")
+
+    smoothed = (
+        Trellis(cars, wrap="origin", cols=3, title="Fuel use and power")
+        .points(x="horsepower", y="mpg", size=4, opacity=0.5, tooltip=["name"])
+        .smooth(x="horsepower", y="mpg")
+    )
+    smoothed
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## `geom_ribbon`
+
+    ```r
+    ggplot(weather, aes(date)) + geom_ribbon(aes(ymin = temp_min, ymax = temp_max)) +
+      facet_wrap(~ year, scales = "free_x")
+    ```
+
+    `band()` fills between two columns: each day's low to its high.
+    """)
+    return
+
+
+@app.cell
+def _(Trellis, load, pl):
+    days = load("seattle_weather").with_columns(year=pl.col("date").dt.year())
+
+    ranges = (
+        Trellis(days, wrap="year", cols=2, share_x=False, panel_height=150,
+                title="Seattle: each day's low to high", y_title="°C")
+        .band(x="date", ymin="temp_min", ymax="temp_max", color="#d62728", opacity=0.35)
+    )
+    ranges
     return
 
 
