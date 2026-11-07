@@ -42,7 +42,7 @@ import { type Brush, type Highlight, type Selection, filled, highlighted, select
 export type { Highlight } from "./selection";
 import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { formatValue } from "./ticks";
-import type { DataSource, LegendSpec, Paging, RendererPreference, TrellisSpec } from "./types";
+import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type TrellisSpec, isMark } from "./types";
 
 /** Versions of the selected marks' sets: never used twice, as the renderers keep a set's
  * buffers by key and version (a selection cleared and made again under the same key must
@@ -52,8 +52,9 @@ let selectionVersion = 0;
 export interface ViewOptions {
   source: DataSource;
   renderer: RendererPreference;
-  /** Python's tooltip columns for one instance of a layer (absent: none). */
-  tooltip?: (layer: number, instance: number) => Promise<string[][]>;
+  /** Python's tooltip columns for one instance of a layer (absent: none); `of`: the id of
+   * the layer's coords as shown (a layer in detail). */
+  tooltip?: (layer: number, instance: number, of: string) => Promise<string[][]>;
   /** The reader opened a panel (its name) or went back to all of them (null). */
   onFocus?: (name: string | null) => void;
   /** The reader drew, moved or cleared the selection (on release). */
@@ -70,12 +71,25 @@ export interface ViewOptions {
   onView?: (view: ShownView) => void;
   /** The reader turned a page, sorted or filtered a paged wrap's panels. */
   onPaging?: (paging: Paging) => void;
+  /** Layers in detail were drawn (Python sends a highlight for them again). */
+  onDetail?: () => void;
+}
+
+/** A layer Python sends in more detail for the view shown (a long line thinned less, dense
+ * points as finer cells or points): spec layer `index` is drawn as `layer` while the spec's
+ * own has coords `of`. */
+export interface DetailLayer {
+  index: number;
+  of: string;
+  layer: MarkLayerSpec;
 }
 
 export interface ShownView {
   width: number;
   x: [number, [number, number]][];
   y: [number, [number, number]][];
+  /** The panels shown: index, width and height (CSS px). */
+  panels: [number, number, number][];
 }
 
 /** How long the view stays put before it is reported. */
@@ -162,6 +176,9 @@ export class TrellisView {
   private rendererReady: Promise<void>;
   private spec: TrellisSpec | null = null;
   private scene: Scene | null = null;
+  /** Layers drawn in more detail than the spec's (Python, for the view shown), by index. */
+  private readonly detail = new Map<number, MarkLayerSpec>();
+  private detailQueue: Promise<void> = Promise.resolve();
   private lay: Layout | null = null;
   private theme: Theme;
   private xView = new Map<number, Range>();
@@ -315,6 +332,7 @@ export class TrellisView {
     const old = this.spec;
     const openName = this.pendingFocus ?? (old && this.focused !== null ? panelName(old, this.focused) : null);
     this.spec = spec;
+    this.detail.clear(); // Python sends them again for the view shown
     this.scene = buildScene(spec, this.opts.source);
     this.renderer?.retain(new Set(this.scene.layers.map((l) => l.set.key)));
     // keep the zoom when only the layers changed (same domains)
@@ -336,6 +354,50 @@ export class TrellisView {
     this.setStatus(null);
     this.updateHeader();
     this.relayout();
+  }
+
+  /** Layers in more detail for the view shown (Python): drawn instead of the spec's, in the
+   * order sent, each once its buffers are here. One whose buffers Python no longer has was
+   * replaced by a later message. */
+  setDetail(layers: DetailLayer[]): Promise<void> {
+    this.detailQueue = this.detailQueue.then(() => this.applyDetail(layers)).catch((err) => console.warn("[anytrellis] detail:", err));
+    return this.detailQueue;
+  }
+
+  private async applyDetail(layers: DetailLayer[]): Promise<void> {
+    const spec = this.spec;
+    const ofSpec = (d: DetailLayer): boolean => {
+      const l = spec?.layers[d.index];
+      return !!l && isMark(l) && l.coords.id === d.of;
+    };
+    const fits = layers.filter(ofSpec);
+    if (!spec || !fits.length) return;
+    const ids = (d: DetailLayer): string[] => bufferIds({ ...spec, layers: [d.layer] });
+    await this.opts.source.ensure(fits.flatMap(ids));
+    if (this.spec !== spec || this.destroyed) return;
+    const source = this.opts.source;
+    const here = fits.filter((d) => ids(d).every((id) => source.has(id)));
+    if (!here.length) return;
+    for (const d of here) this.detail.set(d.index, d.layer);
+    this.scene = buildScene(this.shownSpec(spec), source, this.scene);
+    this.renderer?.retain(new Set(this.scene.layers.map((l) => l.set.key)));
+    this.selectionSets = [];
+    this.needSelect = false;
+    this.computeSelection();
+    this.clearHover();
+    this.request();
+    this.opts.onDetail?.();
+  }
+
+  /** The spec as drawn: with the layers in detail. */
+  private shownSpec(spec: TrellisSpec): TrellisSpec {
+    if (!this.detail.size) return spec;
+    return { ...spec, layers: spec.layers.map((l, i) => this.detail.get(i) ?? l) };
+  }
+
+  /** The buffers the plot draws now. */
+  shownBufferIds(): string[] {
+    return this.spec ? bufferIds(this.shownSpec(this.spec)) : [];
   }
 
   /** Open the panel named `name` (Python: Trellis.open), or none. */
@@ -940,7 +1002,8 @@ export class TrellisView {
   private reportView(): void {
     if (!this.opts.onView || !this.spec) return;
     const ranges = (views: Map<number, Range>): [number, Range][] => [...views].map(([g, r]) => [g, [r[0], r[1]]]);
-    const view: ShownView = { width: this.width, x: ranges(this.xView), y: ranges(this.yView) };
+    const panels = this.views.map((v): [number, number, number] => [v.panel, Math.round(v.rect.w), Math.round(v.rect.h)]);
+    const view: ShownView = { width: this.width, x: ranges(this.xView), y: ranges(this.yView), panels };
     const json = JSON.stringify(view);
     if (json === this.reportedView) return;
     clearTimeout(this.viewTimer);
@@ -1347,7 +1410,7 @@ export class TrellisView {
       const lg = spec.legends[legend];
       rows.push([lg.title, lg.labels?.[layer.codes[hit.instance]] ?? ""]);
     }
-    const key = `${layer.index}:${hit.instance}`;
+    const key = `${layer.index}:${layer.spec.coords.id}:${hit.instance}`;
     const tips = layer.spec.tips;
     if (tips && layer.tipRows) {
       // given with the spec: no need to ask Python
@@ -1364,7 +1427,7 @@ export class TrellisView {
     if (layer.spec.tooltip && this.opts.tooltip) {
       const req = ++this.tipRequest;
       this.opts
-        .tooltip(layer.index, hit.instance)
+        .tooltip(layer.index, hit.instance, layer.spec.coords.id)
         .then((extra) => {
           if (req !== this.tipRequest || this.hoverKey !== key) return;
           this.renderTip(keys, layer, rows, extra);

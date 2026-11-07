@@ -20,7 +20,8 @@ Status: early development (0.2). One panel per level of the facet columns, every
 drawn with the same layers (lines, points, bars, areas, rects, text, histograms, box plots,
 violins, densities, error bars, reference rules), on shared scales unless told otherwise.
 Every panel goes into one canvas, so a grid of hundreds of panels and millions of marks
-stays interactive.
+stays interactive; long lines and dense points go to the browser at the level of detail
+its pixels need, and in more as you zoom in.
 
 ```python
 from anytrellis import Trellis
@@ -262,6 +263,7 @@ node test/export.mjs <page.html> [dir] [renderer]  # the Export menu: PNG, SVG, 
 node test/details.mjs <dir of pages> [dir] [renderer] # page styles, a partly selected histogram
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
 node test/linked.mjs <url of 07 in JupyterLab>     # linked plots: brushing across plots
+node test/live-detail.mjs <notebook url> [prefix] [chromium] # level of detail, live
 ```
 
 Pages force a backend with `?renderer=webgpu|webgl2|canvas2d` in their URL;

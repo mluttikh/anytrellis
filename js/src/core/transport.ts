@@ -91,6 +91,11 @@ export class BufferStore implements DataSource {
     this.watch();
   }
 
+  /** Forget the buffers loaded but not in `keep` (those requested stay requested). */
+  prune(keep: Set<string>): void {
+    for (const id of [...this.buffers.keys()]) if (!keep.has(id)) this.buffers.delete(id);
+  }
+
   /** Python has no buffer `id`: stop waiting. */
   missing(id: string): void {
     this.requested.delete(id);

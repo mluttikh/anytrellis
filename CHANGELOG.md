@@ -6,6 +6,24 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Level of detail: what goes to the browser grows with the pixels shown, not the rows. A
+  panel of more than 20,000 points of a line sends each series thinned (M4: per column,
+  its first, last, lowest and highest point), and a panel of more than 100,000 points is
+  drawn as cells, each in its points' colours mixed in proportion and more opaque the more
+  it holds; hovering one tells its points, of each colour. Zoomed in, in a notebook, Python
+  sends the panels shown in more detail: a line at two columns a pixel, finer cells, or
+  the points again. Four million points send about 1 MB instead of 128 MB, and their
+  `save_html` page shrinks from 171 MB to 1.4 MB. Selections still use every row;
+  `save_png` and `save_svg` draw the detail shown; a saved page shows the plot as it
+  starts.
+
+### Changed
+
+- Rects edge to edge (heatmap tiles, cells) show no seams between them in Canvas 2D, the
+  browser's image export, `save_png` and `save_svg`: their edges fall on whole pixels.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added

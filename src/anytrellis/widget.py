@@ -19,14 +19,21 @@ buffers, drawn in the browser. This module is the protocol between them.
   share) or None (drawn as it is); ``layers`` None: nothing.
   The browser asks for it with ``{"type": "ready"}`` when a view starts, and sends
   ``{"type": "clear"}`` for a click that clears the link's selection.
-* ``{"type": "tooltip", "request", "layer", "index"}`` asks for the tooltip columns of one
-  instance of a layer; Python answers ``{"type": "answer", "request", "rows"}``.
+* ``{"type": "tooltip", "request", "layer", "index", "of"}`` asks for the tooltip columns of
+  one instance of a layer (``of``: the id of its coords as shown); Python answers
+  ``{"type": "answer", "request", "rows"}``.
 * ``{"type": "save", "request", "name"}`` with the file's bytes as its buffer: an image from
   the Export menu, saved in Python's working folder (the notebook's, usually) without
   overwriting; Python answers ``{"type": "answer", "request", "path"}``.
-* ``{"type": "view", "width", "x": [[group, [lo, hi]], ...], "y": ...}``: the plot's width
-  and each scale group's range as shown (relative to the origins), sent a moment after
-  they change; ``Trellis.save_png`` and ``save_svg`` draw that view.
+* ``{"type": "view", "width", "x": [[group, [lo, hi]], ...], "y": ..., "panels": [[index,
+  width, height], ...]}``: the plot's width, each scale group's range as shown (relative to
+  the origins) and the panels shown (their size in CSS px), sent a moment after they
+  change; ``Trellis.save_png`` and ``save_svg`` draw that view.
+* ``{"type": "detail", "layers": [{"index", "of", "layer"}, ...]}`` (Python to the browser):
+  layers of many rows (``anytrellis.detail``) for the view reported, in more detail where it
+  is zoomed in: spec layer ``index`` is drawn as ``layer`` instead, while the spec's has
+  coords ``of``. Its buffers come as any others do. A ``highlight``'s layer has the coords
+  it is for (``of``).
 
 Bulk data never goes into synced traits, so it is not saved into the notebook and only sent
 to views that ask for it.
@@ -94,7 +101,9 @@ class TrellisWidget(anywidget.AnyWidget):
         elif kind == "tooltip":
             answer: dict[str, Any] = {"type": "answer", "request": content.get("request")}
             try:
-                answer["rows"] = self._plot._tooltip(int(content["layer"]), int(content["index"]))
+                of = content.get("of")
+                answer["rows"] = self._plot._tooltip(int(content["layer"]), int(content["index"]),
+                                                     None if of is None else str(of))  # fmt: skip
             except Exception as err:  # the browser shows what it has; the kernel carries on
                 answer["error"] = str(err)
             self.send(answer)
@@ -106,7 +115,8 @@ class TrellisWidget(anywidget.AnyWidget):
                 answer["error"] = str(err)
             self.send(answer)
         elif kind == "view":  # what the browser shows: save_png and save_svg draw it
-            self._plot._view = {k: content.get(k) for k in ("width", "x", "y")}
+            self._plot._view = {k: content.get(k) for k in ("width", "x", "y", "panels")}
+            self._plot._send_detail()  # and its layers in more detail, zoomed in
         elif kind == "ready":  # a view started: what a link highlights in it
             self._plot._send_highlight()
         elif kind == "clear":  # a click in a linked plot with no brush of its own
@@ -115,6 +125,8 @@ class TrellisWidget(anywidget.AnyWidget):
     def _send_buffer(self, buffer_id: str) -> None:
         _, buffers = self._plot._scene()
         data = buffers.data.get(buffer_id)
+        if data is None:  # a layer in detail
+            data = self._plot._detail_buffers.data.get(buffer_id)
         if data is None:
             self.send({"type": "missing", "id": buffer_id})
             return

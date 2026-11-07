@@ -7,6 +7,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 
 import anytrellis
@@ -41,6 +42,19 @@ def main(out: Path) -> None:
                     title="150 stations")  # fmt: skip
     paged.line(x="time", y="temp", width=1).save_html(out / "paged.html")
     many_plots(out / "many.html", gapminder)
+    dense_points(out / "dense.html")
+
+
+def dense_points(path: Path, n: int = 150_000) -> None:
+    """Two panels of more points than anytrellis.detail.DENSE: drawn as cells."""
+    rng = np.random.default_rng(3)
+    cloud = {
+        "x": rng.normal(size=2 * n),
+        "y": rng.normal(size=2 * n),
+        "kind": rng.choice(["a", "b"], 2 * n, p=[0.7, 0.3]),
+        "half": np.repeat(["left", "right"], n),
+    }
+    Trellis(cloud, wrap="half", title="Dense").points(x="x", y="y", color="kind").save_html(path)
 
 
 def many_plots(path: Path, gapminder: pl.DataFrame, count: int = 20) -> None:

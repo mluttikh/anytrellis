@@ -3,7 +3,8 @@ import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/
 import { crowdedRight } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
 import { pageCount, panelOrder } from "../src/core/pages";
-import { type Scene, hitPoint, pick, yExtent } from "../src/core/scene";
+import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
+import { BufferStore } from "../src/core/transport";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { drawMarks } from "../src/core/renderers/canvas2d";
@@ -379,6 +380,64 @@ describe("a linked plot's highlight", () => {
     const scene = { layers: [points] } as unknown as Scene;
     expect(highlighted(scene, { layers: [{ mask: new Uint8Array([1, 1, 1]) }] })).toBeNull();
     expect(highlighted(scene, { layers: [null] })).toBeNull();
+  });
+
+  it("leaves a layer in detail alone when the mask is for other data", () => {
+    const points = layer("points", [1, 1, 1, 1], KIND_CAPSULE, 2);
+    points.spec = { ...points.spec, coords: { id: "detail" } } as MarkLayerSpec;
+    const scene = { layers: [points] } as unknown as Scene;
+    expect(highlighted(scene, { layers: [{ mask: new Uint8Array([1]), of: "start" }] })).toBeNull();
+    expect(highlighted(scene, { layers: [{ mask: new Uint8Array([1]), of: "detail" }] })!.selection.selected).toBe(1);
+  });
+});
+
+describe("layers in detail", () => {
+  const ref = (id: string, dtype: "float64" | "uint32", count: number, components = 1) => ({ id, dtype, count, components, byteLength: 0 });
+  const line = (id: string, n: number): MarkLayerSpec =>
+    ({
+      type: "line",
+      name: "line",
+      count: n,
+      coords: ref(id, "float64", n, 4),
+      starts: ref(`${id}-starts`, "uint32", 2),
+      color: { rgba: null, solid: [0, 0, 0, 255], codes: null, legend: null },
+      width: 1,
+      size: 1,
+      opacity: 1,
+      tooltip: false,
+      context: false,
+    }) as MarkLayerSpec;
+  const source = (layers: MarkLayerSpec[]) => {
+    const data = new Map<string, ArrayBuffer>();
+    for (const l of layers) {
+      data.set(l.coords.id, new Float64Array(l.count * 4).fill(1).buffer);
+      data.set(l.starts.id, new Uint32Array([0, l.count]).buffer);
+    }
+    return { has: (id: string) => data.has(id), get: (id: string) => data.get(id)!, ensure: async () => {} };
+  };
+  const spec = (layers: MarkLayerSpec[]) => ({ panels: [{ ...panel(0, 0), x: [0, 1], y: [0, 1] }], layers }) as unknown as TrellisSpec;
+
+  it("rebuilds only the layers that changed", () => {
+    const a = line("a", 3);
+    const b = line("b", 5);
+    const first = buildScene(spec([a, b]), source([a, b]));
+    const b2 = line("b2", 2);
+    const next = buildScene(spec([a, b2]), source([a, b, b2]), first);
+    expect(next.layers[0]).toBe(first.layers[0]);
+    expect(next.layers[1]).not.toBe(first.layers[1]);
+    expect(next.layers[1].set.count).toBe(2);
+  });
+
+  it("forgets the buffers drawn no more, not those on their way", () => {
+    const store = new BufferStore(() => {});
+    const put = (id: string) => store.receive({ type: "put", id, chunk: 0, chunks: 1, offset: 0, byteLength: 4 }, new Uint8Array(4));
+    put("old");
+    put("kept");
+    void store.ensure(["coming"]);
+    store.prune(new Set(["kept"]));
+    expect([store.has("old"), store.has("kept")]).toEqual([false, true]);
+    put("coming");
+    expect(store.has("coming")).toBe(true);
   });
 });
 

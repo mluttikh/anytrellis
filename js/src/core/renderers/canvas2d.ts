@@ -57,6 +57,9 @@ export function drawMarks(ctx: CanvasRenderingContext2D, draws: Draw[]): void {
     ctx.lineCap = "round";
     ctx.lineWidth = Math.max(0.5, d.halfWidth * 2);
     const { coords, colors, base } = d.set;
+    // device pixels a CSS pixel: rects snap to them, so tiles edge to edge show no seams
+    const s = typeof ctx.getTransform === "function" ? Math.abs(ctx.getTransform().a) || 1 : 1;
+    const snap = (v: number): number => Math.round(v * s) / s;
     let style = -1;
     let open = false;
     const flush = (): void => {
@@ -91,9 +94,11 @@ export function drawMarks(ctx: CanvasRenderingContext2D, draws: Draw[]): void {
         ctx.lineTo(ax, ba);
         ctx.closePath();
       } else if (d.kind === KIND_RECT) {
-        const x = Math.min(ax, bx);
-        const y = Math.min(ay, by);
-        ctx.rect(x, y, Math.max(1, Math.abs(bx - ax)), Math.max(1, Math.abs(by - ay)));
+        const x = snap(Math.min(ax, bx));
+        const y = snap(Math.min(ay, by));
+        const w = Math.max(1, snap(Math.max(ax, bx)) - x);
+        const h = Math.max(1, snap(Math.max(ay, by)) - y);
+        ctx.rect(x, y, w, h);
       } else {
         ctx.moveTo(ax, ay);
         // a zero-length segment draws nothing in some browsers: nudge it

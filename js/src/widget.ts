@@ -4,7 +4,7 @@ import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
 import type { Paging, RendererPreference, TrellisSpec } from "./core/types";
-import { type Highlight, TrellisView } from "./core/view";
+import { type DetailLayer, type Highlight, TrellisView } from "./core/view";
 
 interface AnyModel {
   get(key: string): any;
@@ -46,6 +46,9 @@ function stateFor(model: AnyModel): ModelState {
     else if (msg?.type === "answer") {
       state.pending.get(msg.request)?.(msg);
       state.pending.delete(msg.request);
+    } else if (msg?.type === "detail") {
+      const layers = msg.layers as DetailLayer[];
+      state.views.forEach((v) => void v.setDetail(layers));
     } else if (msg?.type === "highlight") {
       state.highlight = highlightOf(msg, buffers);
       state.views.forEach((v) => v.setHighlight(state.highlight));
@@ -67,14 +70,15 @@ function highlightOf(msg: any, buffers: (DataView | ArrayBuffer)[]): Highlight |
   };
   return {
     layers: msg.layers.map((l: any) => {
+      const of = typeof l?.of === "string" ? l.of : null;
       if (l && typeof l.mask === "number") {
         // a bit per instance, the first in the lowest bit
         const bits = bytes(l.mask);
         const mask = new Uint8Array(l.count ?? bits.length * 8);
         for (let i = 0; i < mask.length; i++) mask[i] = (bits[i >> 3] >> (i & 7)) & 1;
-        return { mask };
+        return { mask, of };
       }
-      if (l && typeof l.fraction === "number") return { fraction: new Float32Array(bytes(l.fraction).slice().buffer) };
+      if (l && typeof l.fraction === "number") return { fraction: new Float32Array(bytes(l.fraction).slice().buffer), of };
       return null;
     }),
   };
@@ -112,11 +116,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   const view = new TrellisView(el, {
     source: s.store,
     renderer: (model.get("renderer") ?? "auto") as RendererPreference,
-    tooltip: (layer, index) => {
-      const key = `${layer}:${index}`;
+    tooltip: (layer, index, of) => {
+      const key = `${layer}:${of}:${index}`;
       let p = s.tooltips.get(key);
       if (!p) {
-        p = ask(model, s, { type: "tooltip", layer, index }).then((msg) => msg.rows as string[][]);
+        p = ask(model, s, { type: "tooltip", layer, index, of }).then((msg) => msg.rows as string[][]);
         p.catch(() => s.tooltips.delete(key));
         s.tooltips.set(key, p);
       }
@@ -151,8 +155,15 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       model.set("paging", paging);
       model.save_changes();
     },
+    // layers in detail drawn: keep only the buffers drawn, and highlight them again
+    onDetail: () => {
+      const spec = model.get("_spec") as TrellisSpec;
+      s.store.prune(new Set([...(spec?.version ? bufferIds(spec) : []), ...[...s.views].flatMap((v) => v.shownBufferIds())]));
+      if (s.highlight) model.send({ type: "ready" });
+    },
   });
   s.views.add(view);
+  (window.anytrellisViews ??= []).push(view); // tests and debugging, as on saved pages
   view.setHighlight(s.highlight);
   const load = (): void => {
     const spec = model.get("_spec") as TrellisSpec;
@@ -183,6 +194,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     model.off("change:selection", onSelection);
     model.off("change:paging", onPaging);
     s.views.delete(view);
+    window.anytrellisViews = window.anytrellisViews?.filter((v) => v !== view);
     view.destroy();
   };
 }
