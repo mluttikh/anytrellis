@@ -11,8 +11,9 @@ Trellis(cars, wrap="origin", cols=2, panel_height=150,
 ```
 
 1. **Title**: `title=`.
-2. **Toolbar**: select, box zoom, fit y, reset and full screen. Each has a key; see
-   [Mouse and keys](reference/mouse-and-keys.md#the-toolbar).
+2. **Toolbar**: select, box zoom, fit y, reset, export and full screen. Each has a key;
+   see [Mouse and keys](reference/mouse-and-keys.md#the-toolbar). Export copies or saves
+   an image of the plot: see [Share a plot](how-to/share.md#images-for-slides-and-reports).
 3. **Strip**: the value of the facet column for the panel under it (`wrap=`, or `row=`
    and `col=` for a grid). With a panel opened, it holds *All panels* and the previous and
    next buttons. See [Choose a facet layout](how-to/layout.md).

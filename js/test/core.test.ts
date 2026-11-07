@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { layout } from "../src/core/layout";
 import { type Scene, pick, yExtent } from "../src/core/scene";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
+import { drawMarks } from "../src/core/renderers/canvas2d";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
 import type { MarkLayerSpec, PanelSpec, TrellisSpec } from "../src/core/types";
@@ -400,5 +402,114 @@ describe("an opened panel", () => {
     const full = layout(s, { ...opts, height: 900 });
     expect(full.panels[0].rect.h).toBeGreaterThan(small.panels[0].rect.h);
     expect(Math.abs(full.height - 900)).toBeLessThan(4);
+  });
+});
+
+describe("exported images", () => {
+  const measure = (text: string): number => text.length * 6;
+  const svg = (draw: (ctx: CanvasRenderingContext2D) => void): string => {
+    const rec = new SvgContext(200, 100, measure);
+    draw(rec.context);
+    return rec.toString("#ffffff");
+  };
+
+  it("takes colours apart into a paint and an opacity, as SVG readers want", () => {
+    expect(paint("rgba(31,119,180,0.5)")).toEqual(["rgb(31,119,180)", 0.5]);
+    expect(paint("rgb(1, 2, 3)")).toEqual(["rgb(1,2,3)", 1]);
+    expect(paint("#1f77b480")).toEqual(["#1f77b4", 128 / 255]);
+    expect(paint("#123")).toEqual(["#123", 1]);
+    expect(paint("transparent")[1]).toBe(0);
+  });
+
+  it("reads a canvas font into SVG font attributes", () => {
+    expect(fontAttributes("12px system-ui, sans-serif")).toBe('font-size="12" font-family="system-ui, sans-serif"');
+    expect(fontAttributes('600 14.4px "Segoe UI", Roboto')).toBe('font-size="14.4" font-family="&quot;Segoe UI&quot;, Roboto" font-weight="600"');
+    expect(fontAttributes("normal 400 12px serif")).toBe('font-size="12" font-family="serif"');
+  });
+
+  it("records fills, strokes and text as SVG elements", () => {
+    const out = svg((ctx) => {
+      ctx.fillStyle = "rgba(255,0,0,0.5)";
+      ctx.fillRect(10, 10, 20, 5);
+      ctx.strokeStyle = "#0000ff";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(50, 50);
+      ctx.stroke();
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#111111";
+      ctx.fillText("a < b & c", 100, 50);
+    });
+    expect(out).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" width="200" height="100" viewBox="0 0 200 100">/);
+    expect(out).toContain('<rect width="100%" height="100%" fill="#ffffff"/>');
+    expect(out).toContain('<path d="M10 10L30 10L30 15L10 15Z" fill="rgb(255,0,0)" fill-opacity="0.5"/>');
+    expect(out).toContain('<path d="M0 0L50 50" fill="none" stroke="#0000ff" stroke-width="2" stroke-dasharray="3 3"/>');
+    // middle baseline: about 0.35 em down from the alphabetic one
+    expect(out).toContain('<text x="100" y="54.2" font-size="12" font-family="sans-serif" text-anchor="middle" fill="#111111">a &lt; b &amp; c</text>');
+  });
+
+  it("applies translations and rotations, and globalAlpha", () => {
+    const out = svg((ctx) => {
+      ctx.save();
+      ctx.translate(20, 30);
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, 1, 1);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText("y", 0, 0);
+      ctx.restore();
+      ctx.fillRect(0, 0, 1, 1);
+    });
+    expect(out).toContain('<path d="M20 30L21 30L21 31L20 31Z" fill="#000000" fill-opacity="0.5"/>');
+    expect(out).toContain('<text transform="matrix(0 -1 1 0 20 30)" x="0" y="0"');
+    expect(out).toContain('<path d="M0 0L1 0L1 1L0 1Z" fill="#000"/>'); // restored
+  });
+
+  it("opens a clip only around what is drawn in it, and shares its path", () => {
+    const out = svg((ctx) => {
+      for (let i = 0; i < 2; i++) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, 50, 50);
+        ctx.clip();
+        if (i === 1) ctx.fillRect(5, 5, 10, 10);
+        ctx.restore();
+      }
+      ctx.fillRect(60, 60, 1, 1);
+    });
+    expect(out.match(/<clipPath/g)?.length).toBe(1);
+    expect(out.match(/<g clip-path/g)?.length).toBe(1);
+    expect(out).toMatch(/<g clip-path="url\(#c0\)"><path d="M5 5L15 5L15 15L5 15Z" fill="#000"\/><\/g><path d="M60 60/);
+  });
+
+  it("draws the marks of a renderer's draws: a run of one colour is one path", () => {
+    const set = {
+      key: "k",
+      version: 1,
+      count: 3,
+      // two points of one colour, a third of another (zero-length capsules)
+      coords: new Float32Array([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]),
+      colors: new Uint8Array([255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 128]),
+    };
+    const out = svg((ctx) =>
+      drawMarks(ctx, [{ set, start: 0, count: 3, clip: { x: 0, y: 0, w: 200, h: 100 }, sx: 10, ox: 0, sy: -10, oy: 100, kind: KIND_CAPSULE, halfWidth: 3, opacity: 0.85 }]),
+    );
+    const paths = out.match(/<path d="M[^"]*" fill="none"[^>]*>/g) ?? [];
+    expect(paths.length).toBe(2);
+    expect(paths[0]).toContain('d="M10 90L10.01 90M20 80L20.01 80"');
+    expect(paths[0]).toContain('stroke="rgb(255,0,0)" stroke-width="6" stroke-opacity="0.85" stroke-linecap="round"');
+    expect(paths[1]).toContain(`stroke-opacity="${Math.round((128 / 255) * 0.85 * 100) / 100}"`);
+  });
+
+  it("names files after the title and the opened panel", () => {
+    expect(fileName("Fuel use, by origin", null, "png")).toBe("Fuel-use-by-origin.png");
+    expect(fileName("Sales", "Oslo · tea", "svg")).toBe("Sales-Oslo-tea.svg");
+    expect(fileName("", null, "png")).toBe("anytrellis.png");
+    expect(svgMessage("Copied", 2_500_000)).toContain("large");
+    expect(svgMessage("Copied", 40_000)).toBe("Copied as SVG (40 kB)");
   });
 });

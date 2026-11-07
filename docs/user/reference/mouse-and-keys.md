@@ -36,12 +36,13 @@ scale: with `share_y="row"`, zooming the left axis of a row zooms that row.
 | ++enter++ | open the panel under the pointer |
 | ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom |
 | ++backspace++ | back to all panels |
+| ++e++ | the Export menu: copy, download or save an image |
 | ++f++ | full screen, and back |
 
 ## The toolbar
 
-The buttons at the top right do the same as keys: box zoom (++z++), select (++s++), fit y
-(++y++), reset (++r++) and full screen (++f++). With a panel opened, the strip over it has
+The buttons at the top right do the same as keys: select (++s++), box zoom (++z++), fit y
+(++y++), reset (++r++), export (++e++) and full screen (++f++). With a panel opened, the strip over it has
 *All panels* and the previous and next buttons.
 
 ## Selecting
@@ -60,6 +61,25 @@ both. It selects the marks it meets in every panel, and the rest fade.
 
 Drag the brush to move it; a click or ++esc++ clears it. With a legend colour chosen too,
 a mark must meet both.
+
+## Export
+
+The Export button (++e++) opens a menu. Each item makes an image of the plot as shown,
+with its zoom, selection, opened panel and theme. The toolbar, the tooltip and what the
+pointer points at are left out.
+
+| Item | Makes |
+| --- | --- |
+| Copy image | a PNG on the clipboard, to paste into slides or a chat |
+| Copy as vector | an SVG on the clipboard, with a PNG beside it for apps that don't read SVG (Chrome, Edge and VS Code) |
+| Download PNG | a PNG file, twice the plot's size on screen |
+| Download SVG | an SVG file: every mark, axis and label a vector element |
+| Save PNG / SVG next to the notebook | the file in the folder Python runs in (in JupyterLab, VS Code and marimo) |
+
+Copying needs a secure page (a notebook, `https://`, or a file opened from disk). A page
+that JupyterLab opens in a new browser tab is sandboxed and can't download: open the HTML
+file from disk instead. Files are named after the plot's title (and an opened panel), and
+saving next to the notebook never overwrites: a second `Sales.png` becomes `Sales-2.png`.
 
 ## Full screen
 

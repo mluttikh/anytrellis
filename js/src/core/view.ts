@@ -23,8 +23,15 @@
 // multiples, large singles", van den Elzen and van Wijk 2013); Page Up and Page Down step to
 // the previous and next panel, keeping the zoom. Full screen (f, the toolbar) uses the
 // browser's Fullscreen API on the plot's own element.
+//
+// Exporting (e, the toolbar): an image of the plot as shown, its zoom, selection, opened
+// panel and theme, without the toolbar or what the pointer points at. paint() draws it on a
+// 2D context: a canvas at PNG_SCALE for a PNG, or SvgContext for an SVG. It is copied, or
+// downloaded, or (in a notebook) saved by Python next to the notebook.
 
 import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readTheme } from "./drawing";
+import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fileName, NO_DOWNLOADS, PNG_SCALE, pageMeasure, paintHtml, SvgContext, svgMessage } from "./export";
+import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
@@ -53,7 +60,12 @@ export interface ViewOptions {
   onBrushing?: (brush: Brush | null) => void;
   /** The reader cleared a highlight (a click or Escape with no brush of their own). */
   onClear?: () => void;
+  /** Save an exported image where Python runs (a notebook's folder); resolves with its
+   * path. Absent (a saved page): the Export menu only copies and downloads. */
+  onSaveFile?: (name: string, data: Blob) => Promise<string>;
 }
+
+type ExportHow = "copy" | "copy-svg" | "png" | "svg" | "save-png" | "save-svg";
 
 
 type Range = [number, number];
@@ -102,6 +114,7 @@ const ICONS = {
   collapse: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" /></svg>',
   box: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" stroke-dasharray="2 1.6" /><path d="m10.5 10.5 3 3" /></svg>',
   select: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="7" rx="1" stroke-dasharray="2 1.6" /><path d="M6 8h4" /></svg>',
+  export: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M5 7l3 3 3-3M2.5 10.5v3h11v-3" /></svg>',
   fitY: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10M3 13.5h10M8 5v6M6 7l2-2 2 2M6 9l2 2 2-2" /></svg>',
 };
 
@@ -116,6 +129,9 @@ export class TrellisView {
   private readonly selectButton: HTMLButtonElement;
   private readonly fitButton: HTMLButtonElement;
   private readonly fullButton: HTMLButtonElement;
+  private readonly exportButton: HTMLButtonElement;
+  /** The Export menu: copy, download or save an image of the plot (e). */
+  private readonly exportMenu: HTMLDivElement;
   private readonly legend: HTMLDivElement;
   private readonly stage: HTMLDivElement;
   private readonly back: HTMLCanvasElement;
@@ -192,7 +208,13 @@ export class TrellisView {
     for (const b of [this.boxButton, this.fitButton]) b.setAttribute("aria-pressed", "false");
     this.fullButton = button(ICONS.expand, "Full screen (f)", () => this.toggleFullscreen());
     this.fullButton.hidden = !document.fullscreenEnabled; // in some frames (and iPhones): none
-    this.toolbar.append(this.backButton, this.selectButton, this.boxButton, this.fitButton, this.resetButton, this.fullButton);
+    this.exportButton = button(ICONS.export, "Export an image: copy or download a PNG or SVG (e)", () => this.toggleExport());
+    this.exportButton.setAttribute("aria-haspopup", "menu");
+    this.exportButton.setAttribute("aria-expanded", "false");
+    this.exportMenu = el("div", "atr-export");
+    this.exportMenu.setAttribute("role", "menu");
+    this.exportMenu.hidden = true;
+    this.toolbar.append(this.backButton, this.selectButton, this.boxButton, this.fitButton, this.resetButton, this.exportButton, this.fullButton);
     this.header.append(this.heading, this.toolbar);
     this.legend = el("div", "atr-legend");
     this.stage = el("div", "atr-stage");
@@ -204,7 +226,7 @@ export class TrellisView {
     this.notice.hidden = true;
     this.badge = el("div", "atr-badge");
     this.stage.append(this.back, this.front, this.tip, this.status, this.notice);
-    this.root.append(this.header, this.stage, this.legend, this.badge);
+    this.root.append(this.header, this.stage, this.legend, this.badge, this.exportMenu);
     host.append(this.root);
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
@@ -305,11 +327,11 @@ export class TrellisView {
   }
 
   /** A short message over the plot, for a moment. */
-  private notify(text: string): void {
+  private notify(text: string, ms = 1600): void {
     this.notice.textContent = text;
     this.notice.hidden = false;
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = setTimeout(() => (this.notice.hidden = true), 1600);
+    this.noticeTimer = setTimeout(() => (this.notice.hidden = true), ms);
   }
 
   private resetViews(): void {
@@ -773,42 +795,47 @@ export class TrellisView {
     back.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     back.clearRect(0, 0, this.width, this.lay.height);
     drawBack(back, this.spec, views, this.theme);
-    if (this.renderer) {
-      const draws: Draw[] = [];
-      // with a selection: every layer faded, then the selected marks on top
-      const passes: { layer: LayerData; set: InstanceSet }[] = [];
-      this.scene.layers.forEach((layer, i) => passes.push({ layer, set: this.selectionSets[i]?.dim ?? layer.set }));
-      if (this.selection) this.scene.layers.forEach((layer, i) => this.selectionSets[i] && passes.push({ layer, set: this.selectionSets[i]!.hi }));
-      for (const { layer, set } of passes) {
-        for (const v of views) {
-          const p = v.panel;
-          const start = layer.starts[p];
-          const count = layer.starts[p + 1] - start;
-          if (!count) continue;
-          const { map, rect } = v;
-          draws.push({
-            set,
-            start,
-            count,
-            clip: rect,
-            sx: map.sx,
-            ox: map.ox + this.scene.baseX[p] * map.sx,
-            sy: map.sy,
-            oy: map.oy + this.scene.baseY[p] * map.sy,
-            kind: layer.kind,
-            halfWidth: layer.halfWidth,
-            opacity: layer.spec.opacity,
-          });
-        }
-      }
-      this.renderer.render({ draws });
-    }
+    if (this.renderer) this.renderer.render({ draws: this.markDraws(views) });
     const front = this.front.getContext("2d")!;
     front.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     front.clearRect(0, 0, this.width, this.lay.height);
     this.front_.texts = this.scene.texts;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.theme, this.front_);
+  }
+
+  /** The marks of every layer in `views`, for a renderer: faded under a selection, the
+   * selected marks again on top. */
+  private markDraws(views: PanelView[]): Draw[] {
+    const scene = this.scene!;
+    const draws: Draw[] = [];
+    // with a selection: every layer faded, then the selected marks on top
+    const passes: { layer: LayerData; set: InstanceSet }[] = [];
+    scene.layers.forEach((layer, i) => passes.push({ layer, set: this.selectionSets[i]?.dim ?? layer.set }));
+    if (this.selection) scene.layers.forEach((layer, i) => this.selectionSets[i] && passes.push({ layer, set: this.selectionSets[i]!.hi }));
+    for (const { layer, set } of passes) {
+      for (const v of views) {
+        const p = v.panel;
+        const start = layer.starts[p];
+        const count = layer.starts[p + 1] - start;
+        if (!count) continue;
+        const { map, rect } = v;
+        draws.push({
+          set,
+          start,
+          count,
+          clip: rect,
+          sx: map.sx,
+          ox: map.ox + scene.baseX[p] * map.sx,
+          sy: map.sy,
+          oy: map.oy + scene.baseY[p] * map.sy,
+          kind: layer.kind,
+          halfWidth: layer.halfWidth,
+          opacity: layer.spec.opacity,
+        });
+      }
+    }
+    return draws;
   }
 
   // ---- input ----------------------------------------------------------------------------
@@ -838,6 +865,17 @@ export class TrellisView {
     const signal = this.abort.signal;
     // entering or leaving full screen (the button, f, Esc or the browser's own controls)
     document.addEventListener("fullscreenchange", () => this.fullscreenChanged(), { signal });
+    // a click outside the Export menu closes it (its path, not its target: in a shadow root,
+    // marimo's, the document sees the target as the shadow's host)
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (this.exportMenu.hidden) return;
+        const path = e.composedPath();
+        if (!path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
+      },
+      { signal, capture: true },
+    );
     stage.addEventListener(
       "wheel",
       (e) => {
@@ -1030,6 +1068,9 @@ export class TrellisView {
       case "f":
         this.toggleFullscreen();
         return true;
+      case "e":
+        this.toggleExport();
+        return true;
       case "r":
       case "0":
         this.resetZoom();
@@ -1056,6 +1097,10 @@ export class TrellisView {
         this.setFocus(this.pointerPanel, true);
         return true;
       case "Escape":
+        if (!this.exportMenu.hidden) {
+          this.toggleExport(false);
+          return true;
+        }
         if (this.brush) {
           this.setBrush(null, true);
           return true;
@@ -1283,19 +1328,131 @@ export class TrellisView {
     return this.spec && this.focused !== null ? panelName(this.spec, this.focused) : null;
   }
 
-  /** A PNG of the plot as shown: the three canvases composed. */
-  async snapshot(): Promise<Blob> {
-    const out = document.createElement("canvas");
-    out.width = this.back.width;
-    out.height = this.back.height;
-    const ctx = out.getContext("2d")!;
+  // ---- exporting ---------------------------------------------------------------------------
+
+  /** The size of an exported image (CSS px): the plot's, less nothing (the toolbar is left out,
+   * its place stays). */
+  private imageSize(): { width: number; height: number } {
+    const r = this.root.getBoundingClientRect();
+    return { width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) };
+  }
+
+  /**
+   * The plot as shown, painted on `ctx` in CSS pixels from its top left: the title, the
+   * panels with their marks, axes, strips and the selection, and the legend. Not the
+   * toolbar, tooltips, notices, or the crosshair and hovered mark.
+   */
+  paint(ctx: CanvasRenderingContext2D): void {
+    if (!this.spec || !this.scene || !this.lay) return;
+    const origin = this.root.getBoundingClientRect();
+    // the title; an opened panel's name is in its strip (the header's way back is left out)
+    for (const e of Array.from(this.heading.querySelectorAll(".atr-title"))) paintHtml(ctx, e, origin);
+    const stage = this.stage.getBoundingClientRect();
+    const views = this.panelViews();
+    ctx.save();
+    ctx.translate(stage.left - origin.left, stage.top - origin.top);
+    ctx.beginPath();
+    ctx.rect(0, 0, stage.width, stage.height);
+    ctx.clip();
+    drawBack(ctx, this.spec, views, this.theme);
+    drawMarks(ctx, this.markDraws(views));
+    const front: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts };
+    drawFront(ctx, this.spec, this.lay, views, this.theme, front);
+    ctx.restore();
+    if (this.spec.legends.length) paintHtml(ctx, this.legend, origin);
+  }
+
+  /** A PNG of the plot as shown, `scale` pixels per CSS pixel. */
+  async pngImage(scale = PNG_SCALE): Promise<Blob> {
+    const { width, height } = this.imageSize();
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(scale, scale);
     ctx.fillStyle = this.theme.bg;
-    ctx.fillRect(0, 0, out.width, out.height);
-    this.draw();
-    ctx.drawImage(this.back, 0, 0);
-    if (this.renderer) ctx.drawImage(this.renderer.canvas, 0, 0);
-    ctx.drawImage(this.front, 0, 0);
-    return new Promise((resolve, reject) => out.toBlob((b) => (b ? resolve(b) : reject(new Error("no image"))), "image/png"));
+    ctx.fillRect(0, 0, width, height);
+    this.paint(ctx);
+    return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("no image"))), "image/png"));
+  }
+
+  /** An SVG of the plot as shown: every mark, axis and label a vector element. */
+  svgImage(): string {
+    const { width, height } = this.imageSize();
+    const svg = new SvgContext(width, height, pageMeasure());
+    this.paint(svg.context);
+    return svg.toString(this.theme.bg);
+  }
+
+  /** Show or hide the Export menu (its toolbar button, e): what this page can do. */
+  private toggleExport(show = this.exportMenu.hidden): void {
+    this.exportMenu.hidden = !show;
+    this.exportButton.setAttribute("aria-expanded", String(show));
+    if (!show) return;
+    this.hideTip();
+    const actions: [string, string, ExportHow][] = [];
+    if (canCopyImages()) actions.push(["Copy image", "a PNG, to paste into slides", "copy"]);
+    if (canCopySvg()) actions.push(["Copy as vector", "an SVG, sharp at any size (and a PNG)", "copy-svg"]);
+    actions.push(["Download PNG", "an image file", "png"], ["Download SVG", "a vector image (PowerPoint, Word, Inkscape)", "svg"]);
+    if (this.opts.onSaveFile) {
+      actions.push(["Save PNG next to the notebook", "a file where Python runs", "save-png"], ["Save SVG next to the notebook", "a vector file where Python runs", "save-svg"]);
+    }
+    this.exportMenu.replaceChildren(
+      ...actions.map(([label, note, how]) => {
+        const b = el("button", "atr-export-item");
+        b.type = "button";
+        b.setAttribute("role", "menuitem");
+        b.dataset.export = how;
+        b.append(el("span", "", label), el("span", "atr-export-note", note));
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.toggleExport(false);
+          this.exportImage(how).catch(() => {}); // the plot says what went wrong
+        });
+        return b;
+      }),
+    );
+    (this.exportMenu.firstElementChild as HTMLElement | null)?.focus();
+  }
+
+  /** Export the plot as shown: to the clipboard, a download, or a file Python saves. */
+  exportImage(how: ExportHow): Promise<string> {
+    const name = (ext: string): string => fileName(this.spec?.title ?? "", this.focusName, ext);
+    // made on demand, once: each is a promise, so a copy claims the clipboard in the click
+    let svgText: Promise<string> | null = null;
+    let pngBlob: Promise<Blob> | null = null;
+    const svg = (): Promise<string> => (svgText ??= Promise.resolve().then(() => this.svgImage()));
+    const png = (): Promise<Blob> => (pngBlob ??= this.pngImage());
+    const svgBlob = (): Promise<Blob> => svg().then((t) => new Blob([t], { type: "image/svg+xml" }));
+    const save = this.opts.onSaveFile;
+    // the file's name (Python answers its whole path; logged, for finding it)
+    const saved = (path: string): string => {
+      console.info(`[anytrellis] saved ${path}`);
+      return `Saved ${path.split(/[\\/]/).pop()} next to the notebook`;
+    };
+    let done: Promise<string>;
+    if ((how === "png" || how === "svg") && !canDownload()) done = Promise.reject(new Error(NO_DOWNLOADS));
+    else if (how === "copy") done = copyPng(png()).then(() => "Copied: paste it into your slides");
+    else if (how === "copy-svg") done = copySvg(svg(), png()).then(() => svgBlob().then((b) => svgMessage("Copied", b.size)));
+    else if (how === "png") done = png().then((b) => (download(b, name("png")), `Downloaded ${name("png")}`));
+    else if (how === "svg") done = svgBlob().then((b) => (download(b, name("svg")), svgMessage(`Downloaded ${name("svg")}`, b.size)));
+    else if (!save) done = Promise.reject(new Error("no Python to save the file"));
+    else if (how === "save-png") done = png().then((b) => save(name("png"), b)).then(saved);
+    else done = svgBlob().then((b) => save(name("svg"), b)).then(saved);
+    this.notify("Making the image…");
+    return done.then(
+      (message) => {
+        this.notify(message, 3000);
+        return message;
+      },
+      (err) => {
+        console.warn("[anytrellis] export failed:", err);
+        const copying = how === "copy" || how === "copy-svg";
+        const why = err instanceof Error ? err.message : String(err);
+        this.notify(copying ? "Copying is not allowed here: download the image instead" : why === NO_DOWNLOADS ? why : `Export failed: ${why}`, 4000);
+        throw err;
+      },
+    );
   }
 
   destroy(): void {

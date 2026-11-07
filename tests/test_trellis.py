@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -335,6 +336,28 @@ def test_widget_answers_need_with_chunks_and_missing(monkeypatch: pytest.MonkeyP
     answer = sent.messages[-1][0]
     assert answer["request"] == 7
     assert answer["rows"][0][0] == "g"
+
+
+def test_widget_saves_an_exported_image_next_to_the_notebook(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    w = Trellis(SMALL).points(x="t", y="v").widget
+    sent = Sent()
+    monkeypatch.setattr(w, "send", sent)
+    png = b"\x89PNG fake"
+    for request in (1, 2):
+        w._on_msg(w, {"type": "save", "request": request, "name": "Fuel use.png"}, [png])
+    paths = [m["path"] for m, _ in sent.messages]
+    # never overwritten: a second image gets a number
+    assert [Path(p).name for p in paths] == ["Fuel use.png", "Fuel use-2.png"]
+    assert all(Path(p).parent == tmp_path.resolve() for p in paths)
+    assert Path(paths[0]).read_bytes() == png
+    # only a file name, of a png or svg: no folders, no other kinds of file
+    w._on_msg(w, {"type": "save", "request": 3, "name": "../../evil.sh"}, [b"x"])
+    assert Path(sent.messages[-1][0]["path"]) == tmp_path.resolve() / "evil.png"
+    w._on_msg(w, {"type": "save", "request": 4, "name": "plot.svg"}, [])
+    assert sent.messages[-1][0] == {"type": "answer", "request": 4, "error": "no image data"}
 
 
 def test_large_buffers_go_in_chunks(monkeypatch: pytest.MonkeyPatch) -> None:

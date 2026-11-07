@@ -8,6 +8,11 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- Export images of a plot (toolbar button, or `e`): copy a PNG, or an SVG with a PNG beside
+  it, to the clipboard; download a PNG (twice the screen's size) or an SVG; or, in a
+  notebook, save either next to the notebook without overwriting. The image is the plot as
+  shown (zoom, selection, opened panel, theme), without the toolbar. It works in pages
+  saved with `save_html` too.
 - Documentation at [mluttikh.github.io/anytrellis](https://mluttikh.github.io/anytrellis/):
   tutorials, how-to guides, a gallery, the API reference and explanations, with live plots.
 

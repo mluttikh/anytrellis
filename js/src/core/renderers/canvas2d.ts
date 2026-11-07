@@ -2,7 +2,7 @@
 // filled or stroked as one path.
 
 import type { RendererKind } from "../types";
-import { type Frame, KIND_RECT, KIND_TRAP, type Renderer } from "./renderer";
+import { type Draw, type Frame, KIND_RECT, KIND_TRAP, type Renderer } from "./renderer";
 
 export class Canvas2DRenderer implements Renderer {
   readonly kind: RendererKind = "canvas2d";
@@ -36,65 +36,71 @@ export class Canvas2DRenderer implements Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    for (const d of frame.draws) {
-      if (d.count <= 0) continue;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(d.clip.x, d.clip.y, d.clip.w, d.clip.h);
-      ctx.clip();
-      ctx.globalAlpha = d.opacity;
-      ctx.lineCap = "round";
-      ctx.lineWidth = Math.max(0.5, d.halfWidth * 2);
-      const { coords, colors, base } = d.set;
-      let style = -1;
-      let open = false;
-      const flush = (): void => {
-        if (!open) return;
-        if (d.kind === KIND_RECT || d.kind === KIND_TRAP) ctx.fill();
-        else ctx.stroke();
-        open = false;
-      };
-      for (let i = d.start; i < d.start + d.count; i++) {
-        const rgba = (colors[i * 4] << 24) | (colors[i * 4 + 1] << 16) | (colors[i * 4 + 2] << 8) | colors[i * 4 + 3];
-        if (rgba !== style) {
-          flush();
-          style = rgba;
-          const css = `rgba(${colors[i * 4]},${colors[i * 4 + 1]},${colors[i * 4 + 2]},${colors[i * 4 + 3] / 255})`;
-          ctx.fillStyle = css;
-          ctx.strokeStyle = css;
-          ctx.beginPath();
-          open = true;
-        }
-        const ax = d.ox + coords[i * 4] * d.sx;
-        const ay = d.oy + coords[i * 4 + 1] * d.sy;
-        const bx = d.ox + coords[i * 4 + 2] * d.sx;
-        const by = d.oy + coords[i * 4 + 3] * d.sy;
-        if (!Number.isFinite(ax + ay + bx + by)) continue;
-        if (d.kind === KIND_TRAP && base) {
-          const ba = d.oy + base[i * 2] * d.sy;
-          const bb = d.oy + base[i * 2 + 1] * d.sy;
-          if (!Number.isFinite(ba + bb)) continue;
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
-          ctx.lineTo(bx, bb);
-          ctx.lineTo(ax, ba);
-          ctx.closePath();
-        } else if (d.kind === KIND_RECT) {
-          const x = Math.min(ax, bx);
-          const y = Math.min(ay, by);
-          ctx.rect(x, y, Math.max(1, Math.abs(bx - ax)), Math.max(1, Math.abs(by - ay)));
-        } else {
-          ctx.moveTo(ax, ay);
-          // a zero-length segment draws nothing in some browsers: nudge it
-          ctx.lineTo(bx === ax && by === ay ? bx + 0.01 : bx, by);
-        }
-      }
-      flush();
-      ctx.restore();
-    }
+    drawMarks(ctx, frame.draws);
   }
 
   retain(): void {}
 
   destroy(): void {}
+}
+
+/** The marks of `draws`, in CSS pixels, on any 2D context: this renderer's canvas, or an
+ * exported image's (a PNG's canvas, or the SVG recorder of ../export). */
+export function drawMarks(ctx: CanvasRenderingContext2D, draws: Draw[]): void {
+  for (const d of draws) {
+    if (d.count <= 0) continue;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(d.clip.x, d.clip.y, d.clip.w, d.clip.h);
+    ctx.clip();
+    ctx.globalAlpha = d.opacity;
+    ctx.lineCap = "round";
+    ctx.lineWidth = Math.max(0.5, d.halfWidth * 2);
+    const { coords, colors, base } = d.set;
+    let style = -1;
+    let open = false;
+    const flush = (): void => {
+      if (!open) return;
+      if (d.kind === KIND_RECT || d.kind === KIND_TRAP) ctx.fill();
+      else ctx.stroke();
+      open = false;
+    };
+    for (let i = d.start; i < d.start + d.count; i++) {
+      const rgba = (colors[i * 4] << 24) | (colors[i * 4 + 1] << 16) | (colors[i * 4 + 2] << 8) | colors[i * 4 + 3];
+      if (rgba !== style) {
+        flush();
+        style = rgba;
+        const css = `rgba(${colors[i * 4]},${colors[i * 4 + 1]},${colors[i * 4 + 2]},${colors[i * 4 + 3] / 255})`;
+        ctx.fillStyle = css;
+        ctx.strokeStyle = css;
+        ctx.beginPath();
+        open = true;
+      }
+      const ax = d.ox + coords[i * 4] * d.sx;
+      const ay = d.oy + coords[i * 4 + 1] * d.sy;
+      const bx = d.ox + coords[i * 4 + 2] * d.sx;
+      const by = d.oy + coords[i * 4 + 3] * d.sy;
+      if (!Number.isFinite(ax + ay + bx + by)) continue;
+      if (d.kind === KIND_TRAP && base) {
+        const ba = d.oy + base[i * 2] * d.sy;
+        const bb = d.oy + base[i * 2 + 1] * d.sy;
+        if (!Number.isFinite(ba + bb)) continue;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(bx, bb);
+        ctx.lineTo(ax, ba);
+        ctx.closePath();
+      } else if (d.kind === KIND_RECT) {
+        const x = Math.min(ax, bx);
+        const y = Math.min(ay, by);
+        ctx.rect(x, y, Math.max(1, Math.abs(bx - ax)), Math.max(1, Math.abs(by - ay)));
+      } else {
+        ctx.moveTo(ax, ay);
+        // a zero-length segment draws nothing in some browsers: nudge it
+        ctx.lineTo(bx === ax && by === ay ? bx + 0.01 : bx, by);
+      }
+    }
+    flush();
+    ctx.restore();
+  }
 }
