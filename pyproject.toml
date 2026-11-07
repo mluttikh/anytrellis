@@ -36,6 +36,8 @@ dependencies = [
 [project.optional-dependencies]
 # the example notebooks and anytrellis.datasets.load (which also takes pandas or PyArrow)
 examples = ["polars>=1.30"]
+# Trellis.save_png (save_svg needs nothing more)
+png = ["resvg-py>=0.5.0"]
 
 [project.urls]
 Homepage = "https://github.com/mluttikh/anytrellis"
@@ -55,6 +57,7 @@ dev = [
     "polars>=1.30",
     "pyarrow>=20",
     "hypothesis>=6.100",
+    "resvg-py>=0.5.0",
     # the documentation (scripts/build_docs.py)
     "zensical>=0.1.0",
     "mkdocstrings[python]>=1.0.8",

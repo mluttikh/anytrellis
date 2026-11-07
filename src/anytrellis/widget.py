@@ -24,6 +24,9 @@ buffers, drawn in the browser. This module is the protocol between them.
 * ``{"type": "save", "request", "name"}`` with the file's bytes as its buffer: an image from
   the Export menu, saved in Python's working folder (the notebook's, usually) without
   overwriting; Python answers ``{"type": "answer", "request", "path"}``.
+* ``{"type": "view", "width", "x": [[group, [lo, hi]], ...], "y": ...}``: the plot's width
+  and each scale group's range as shown (relative to the origins), sent a moment after
+  they change; ``Trellis.save_png`` and ``save_svg`` draw that view.
 
 Bulk data never goes into synced traits, so it is not saved into the notebook and only sent
 to views that ask for it.
@@ -93,6 +96,8 @@ class TrellisWidget(anywidget.AnyWidget):
             except Exception as err:  # the browser says what went wrong
                 answer["error"] = str(err)
             self.send(answer)
+        elif kind == "view":  # what the browser shows: save_png and save_svg draw it
+            self._plot._view = {k: content.get(k) for k in ("width", "x", "y")}
         elif kind == "ready":  # a view started: what a link highlights in it
             self._plot._send_highlight()
         elif kind == "clear":  # a click in a linked plot with no brush of its own
