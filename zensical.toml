@@ -37,6 +37,7 @@ nav = [
     { "Draw lines, points and bars" = "how-to/marks.md" },
     { "Draw areas, bands, rects and text" = "how-to/more-marks.md" },
     { "Show distributions" = "how-to/distributions.md" },
+    { "Plot every pair of columns" = "how-to/pairs.md" },
     { "Fit a smooth line" = "how-to/smooth.md" },
     { "Colours, legends and order" = "how-to/colours.md" },
     { "Link plots" = "how-to/link.md" },
@@ -51,6 +52,7 @@ nav = [
   { "Reference" = [
     "reference/index.md",
     { "Trellis" = "reference/trellis.md" },
+    { "pairs and Pairs" = "reference/pairs.md" },
     { "link and Link" = "reference/link.md" },
     { "anytrellis.datasets" = "reference/datasets.md" },
     { "anytrellis.synthetic" = "reference/synthetic.md" },

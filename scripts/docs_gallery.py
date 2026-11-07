@@ -40,7 +40,7 @@ class Entry:
 def _gallery() -> list[Entry]:
     import polars as pl
 
-    from anytrellis import Trellis
+    from anytrellis import Trellis, pairs
     from anytrellis.datasets import load
     from anytrellis.synthetic import scatter, sensors
 
@@ -128,6 +128,9 @@ def _gallery() -> list[Entry]:
         Entry("error-bars", "Error bars", "how-to/distributions.md#error-bars",
               lambda: Trellis(known, wrap="species", cols=3).errorbar(
                   x="sex", y="body_mass_g", color="sex")),
+        Entry("pairs", "Every pair of columns", "how-to/pairs.md",
+              lambda: pairs(penguins, ["bill_length_mm", "bill_depth_mm", "flipper_length_mm"],
+                            color="species")),
         Entry("smooth", "Smooth fits", "how-to/smooth.md",
               lambda: Trellis(cars, wrap="origin", cols=3)
               .points(x="horsepower", y="mpg", size=4, opacity=0.5)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import numpy as np
@@ -59,6 +59,8 @@ class Grid:
     _row_vars: tuple[str, ...] = ()
     _col_vars: tuple[str, ...] = ()
     _wrap_vars: tuple[str, ...] = ()
+    _kept: np.ndarray | None = None
+    """A grid without its empty cells: each cell's panel (−1: dropped), by row * cols + col."""
 
     def assign(self, table: Table) -> np.ndarray | None:
         """The panel of each row of ``table`` (−1: a level not in the trellis), or None when
@@ -80,6 +82,8 @@ class Grid:
         c = _combo_index(table, self._col_vars, self._levels, self._col_combos)
         out = r * self.cols + c
         out[(r < 0) | (c < 0)] = -1
+        if self._kept is not None:
+            out = np.where(out >= 0, self._kept[np.maximum(out, 0)], -1)
         return out
 
     def spec(self) -> dict[str, Any]:
@@ -145,8 +149,12 @@ def build_grid(
         _levels=levels, _row_combos=row_combos, _col_combos=col_combos,
         _row_vars=row, _col_vars=col,
     )  # fmt: skip
-    if not keep_empty:
-        grid.panels = [p for p in grid.panels if p.index in _used(grid, sources)]
+    if not keep_empty:  # the cells with data, numbered in turn
+        used = _used(grid, sources)
+        kept = [p for p in grid.panels if p.index in used]
+        grid._kept = np.full(nrows * ncols, -1, dtype=np.int64)
+        grid._kept[[p.index for p in kept]] = np.arange(len(kept))
+        grid.panels = [replace(p, index=i) for i, p in enumerate(kept)]
     return grid
 
 

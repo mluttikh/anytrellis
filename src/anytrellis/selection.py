@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from anytrellis.data import Table
+from anytrellis.data import Column, Table
 from anytrellis.layers import Geometry
 
 Brush = dict[str, Any]
@@ -57,30 +57,57 @@ def row_mask(mark: str, geom: Geometry, n: int, x: tuple[float, float] | None,
 def link_keys(tables: Sequence[Table], names: Sequence[str]) -> list[np.ndarray | None]:
     """One integer per row for each table's combination of the link columns, the same
     integer for the same values across tables; None for a table without all of them."""
-    parts: list[np.ndarray | None] = []
-    for table in tables:
-        if not all(name in table for name in names):
-            parts.append(None)
-            continue
-        cols = [table.column(name).values.astype(str) for name in names]
-        key = cols[0]
-        for col in cols[1:]:
-            key = np.char.add(np.char.add(key, "\x1f"), col)
-        parts.append(key)
-    present = [p for p in parts if p is not None]
-    if not present:
+    have = [t for t in tables if all(name in t for name in names)]
+    if not have:
         return [None] * len(tables)
-    _, inverse = np.unique(np.concatenate(present), return_inverse=True)
-    inverse = inverse.ravel().astype(np.int64)
+    key = _shared_codes([t.column(names[0]) for t in have])
+    for name in names[1:]:
+        _, key = np.unique(key, return_inverse=True)  # small, before the next column's
+        codes = _shared_codes([t.column(name) for t in have])
+        key = key.ravel().astype(np.int64) * (int(codes.max(initial=0)) + 1) + codes
+    if len(names) > 1:
+        _, key = np.unique(key, return_inverse=True)
+        key = key.ravel().astype(np.int64)
     out: list[np.ndarray | None] = []
     at = 0
-    for part in parts:
-        if part is None:
+    for table in tables:
+        if not all(name in table for name in names):
             out.append(None)
             continue
-        out.append(inverse[at : at + len(part)])
-        at += len(part)
+        out.append(key[at : at + table.n])
+        at += table.n
     return out
+
+
+def _shared_codes(columns: list[Column]) -> np.ndarray:
+    """The tables' values of one link column, concatenated, as one integer per value."""
+    if all(c.kind != "category" for c in columns) and len({c.kind for c in columns}) == 1:
+        values = np.concatenate([c.values for c in columns])
+        if len(values) and np.isfinite(values).all():  # whole numbers (ids): the keys
+            lo, hi = values.min(), values.max()
+            if lo >= 0 and hi < 2**32 and (values == np.floor(values)).all():
+                return values.astype(np.int64)
+    elif all(c.kind == "category" for c in columns):
+        labels = list(dict.fromkeys(lv for c in columns for lv in c.levels))
+        lookup = {lv: i for i, lv in enumerate(labels)}
+        parts = []
+        for c in columns:
+            codes = c.level_codes()
+            mapped = np.array([lookup[lv] for lv in c.levels] + [-1], dtype=np.int64)[codes]
+            if (codes < 0).any():  # values outside declared levels: by their text
+                return _text_codes(columns)
+            parts.append(mapped)
+        return np.concatenate(parts)
+    else:
+        return _text_codes(columns)
+    _, inverse = np.unique(values, return_inverse=True)
+    return inverse.ravel().astype(np.int64)
+
+
+def _text_codes(columns: list[Column]) -> np.ndarray:
+    values = np.concatenate([c.values.astype(str) for c in columns])
+    _, inverse = np.unique(values, return_inverse=True)
+    return inverse.ravel().astype(np.int64)
 
 
 def grow(mask: np.ndarray, keys: np.ndarray | None, selected_keys: np.ndarray) -> np.ndarray:

@@ -118,6 +118,9 @@ class Trellis:
             densities).
         height: The plot's height in CSS pixels (default: from ``panel_height``).
         panel_height: Each panel's height in CSS pixels (default: from its width).
+        aspect: Each panel's height as a multiple of its width (``1``: square), unless
+            ``height`` or ``panel_height`` is given (default: about 0.62, between 90 and
+            300 px).
         title: A title over the plot.
         x_title: The x axis title (default: the x column's name).
         y_title: The y axis title (default: the y column's name).
@@ -149,6 +152,7 @@ class Trellis:
         y_scale: str = "linear",
         height: int | None = None,
         panel_height: int | None = None,
+        aspect: float | None = None,
         title: str = "",
         x_title: str | None = None,
         y_title: str | None = None,
@@ -178,10 +182,15 @@ class Trellis:
         self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
         self._scales: dict[str, str] = {"x": _scale(x_scale), "y": _scale(y_scale)}
         self._orders: dict[str, Order] = {}
+        self._keep_empty = True
+        """A grid's cells without data are kept (empty panels), or left out."""
         self._layers: list[Layer] = []
         self._tables: dict[int, Table] = {}
         self.height = height
         self.panel_height = panel_height
+        if aspect is not None and not aspect > 0:
+            raise ValueError(f"aspect must be positive, got {aspect!r}")
+        self.aspect = aspect
         self.title = title
         self.x_title = x_title
         self.y_title = y_title
@@ -1592,7 +1601,8 @@ class Trellis:
         if self._data is not None:
             tables.insert(0, self._data)
         grid = build_grid(tables, row=self._row, col=self._col, wrap=self._wrap,
-                          cols=self._cols, orders=self._orders)  # fmt: skip
+                          cols=self._cols, orders=self._orders,
+                          keep_empty=self._keep_empty)  # fmt: skip
         npanels = len(grid.panels)
         pages = self._pages(grid)
         given = self._given_orders(tables)
@@ -1723,6 +1733,7 @@ class Trellis:
             "legends": colors.legends(),
             "height": self.height,
             "panel_height": self.panel_height,
+            "aspect": self.aspect,
             "legend_position": self.legend,
             "fit_y": self.fit_y,
             "pages": pages,

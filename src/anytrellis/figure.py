@@ -472,6 +472,8 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
             h = spec["panel_height"]
         elif spec.get("height"):
             h = (spec["height"] - fixed) / rows
+        elif spec.get("aspect"):
+            h = w * spec["aspect"]
         else:
             h = min(300, max(90, w * 0.62))
         return w, max(MIN_PANEL, math.floor(h))

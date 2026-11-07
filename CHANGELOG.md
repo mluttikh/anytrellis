@@ -8,6 +8,13 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- `pairs()`: a scatterplot matrix of a table's number columns, x by column and y by row,
+  each variable's scale shared along its column and its row. The diagonal shows each
+  variable alone (a density curve per colour, or a stacked histogram) over its own range.
+  Brushing a panel lights up its rows in every panel; `selected()` gives them as rows of
+  the table, and hovering a point shows its row. `corner=True` keeps each pair once.
+- `Trellis(aspect=)`: each panel's height as a multiple of its width (`1`: square).
+
 - Level of detail: what goes to the browser grows with the pixels shown, not the rows. A
   panel of more than 20,000 points of a line sends each series thinned (M4: per column,
   its first, last, lowest and highest point), and a panel of more than 100,000 points is
@@ -21,6 +28,9 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- Faster selections over linked rows (`link=`): number and category link columns are
+  keyed from their values and codes, not their text; and dense points' cells are counted
+  and grouped without sorting their points.
 - Faster plots of many rows in panels: rows find their panel by their column's codes, not
   their text, and numbers as panels are labelled once per value, not once per row. Four
   million rows of a line in four panels build in 1.2 s instead of 2.2 s (by a column of

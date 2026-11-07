@@ -147,6 +147,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     if (opts.height) h = (opts.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
     else if (spec.panel_height) h = spec.panel_height;
     else if (spec.height) h = (spec.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
+    else if (spec.aspect) h = w * spec.aspect;
     else h = Math.min(300, Math.max(90, w * 0.62));
     return [w, Math.max(MIN_PANEL, Math.floor(h))];
   };

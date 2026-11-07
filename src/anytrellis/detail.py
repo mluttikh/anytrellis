@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from anytrellis.data import Table
+from anytrellis.data import Table, group_order
 from anytrellis.layers import Geometry, polyline
 
 COLUMNS = 2000
@@ -288,7 +288,17 @@ class PointDetail:
         iy = np.minimum(np.floor(fy[idx] * ny[p]).astype(np.int64), ny[p] - 1)
         wide, high = int(nx.max()), int(ny.max())
         key = (p * high + iy) * wide + ix
-        uniq, inverse, counts = np.unique(key, return_inverse=True, return_counts=True)
+        space = npanels * high * wide
+        if space <= max(4 * len(key), 1 << 20):  # few possible cells: count them in place
+            every = np.bincount(key, minlength=space)
+            uniq = np.flatnonzero(every)
+            counts = every[uniq]
+            number = np.zeros(space, dtype=np.int64)
+            number[uniq] = np.arange(len(uniq))
+            inverse = number[key]
+        else:
+            uniq, inverse, counts = np.unique(key, return_inverse=True, return_counts=True)
+            inverse = inverse.ravel()
         cx, rest = uniq % wide, uniq // wide
         cy, cp = rest % high, rest // high
         n = len(uniq)
@@ -326,7 +336,7 @@ class PointDetail:
                 columns[f"{self.color_name} {level}"] = mix[:, k]
         if self.color_name is not None and means is not None:
             columns[f"mean {self.color_name}"] = means
-        order = np.argsort(inverse, kind="stable")
+        order = group_order(inverse, n)
         member_starts = np.r_[0, np.cumsum(counts)]
         return Table(columns), geom, member_starts, g.rows[idx][order]
 

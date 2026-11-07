@@ -54,7 +54,8 @@ The panel's strip shows both levels, joined by ` · `, which is also its name in
 | --- | --- |
 | `panel_height=160` | Each panel's height in pixels |
 | `height=600` | The whole plot's height; the panels share it |
-| neither | Each panel is about 0.6 times as high as it is wide, from 90 to 300 pixels |
+| `aspect=1` | Each panel's height as a multiple of its width: `1` is square |
+| none of them | Each panel is about 0.6 times as high as it is wide, from 90 to 300 pixels |
 
 The width is the notebook's or the page's. A plot keeps the width it is given and fits
 its panels in it.
