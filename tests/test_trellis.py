@@ -311,8 +311,8 @@ def test_number_facets_index_rows_by_their_labels() -> None:
     second = Table({"g": [1.0, 2.5, 9.0], "v": [0.0, 0.0, 0.0]})
     grid = build_grid([first, second], row=(), col=(), wrap=("g",), cols=None, orders={})
     assert [p.label for p in grid.panels] == ["1", "2", "2.5", "9", "(missing)"]
-    assert grid.assign(first).tolist() == [1, 0, 4, 2, 0]
-    assert grid.assign(second).tolist() == [0, 2, 3]
+    panels = [grid.assign(t) for t in (first, second)]
+    assert [None if p is None else p.tolist() for p in panels] == [[1, 0, 4, 2, 0], [0, 2, 3]]
     by_median = {"g": Order(by="median", of="v", descending=True)}
     grid = build_grid([first], row=(), col=(), wrap=("g",), cols=None, orders=by_median)
     assert [p.label for p in grid.panels] == ["2", "(missing)", "1", "2.5"]  # 2.5: no values
