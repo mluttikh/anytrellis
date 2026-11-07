@@ -24,3 +24,8 @@ _scratch/
 
 # pages the example notebooks write when run (save_html)
 examples/**/*.html
+
+# the documentation's build (scripts/build_docs.py): the site, and what it copies and draws
+site/
+docs/user/assets/anytrellis/
+docs/user/assets/gallery/

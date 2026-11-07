@@ -1,0 +1,57 @@
+/* plots in the pages: room around them, and a height while they wait to start (a plot
+   starts when it comes near the screen) */
+.anytrellis-embed {
+  margin: 1em 0 1.5em;
+  min-height: 160px;
+}
+.anytrellis-embed > script {
+  display: none;
+}
+
+/* the theme styles every button, heading, list and table in a page: not inside a plot */
+.md-typeset .atr-root {
+  font-size: 12px;
+  line-height: 1.35;
+}
+.md-typeset .atr-root button {
+  font-size: inherit;
+}
+.md-typeset .atr-root ul,
+.md-typeset .atr-root li {
+  margin: 0;
+  padding: 0;
+}
+.md-typeset .atr-root li::before {
+  content: none;
+}
+
+/* the gallery: a grid of pictures, each linking to the guide that makes it */
+.atr-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin: 1.5em 0;
+}
+.md-typeset .atr-gallery a {
+  display: block;
+  color: inherit;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.md-typeset .atr-gallery a:hover {
+  border-color: var(--md-accent-fg-color);
+}
+.atr-gallery img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  object-position: top;
+  background: #fff;
+}
+.atr-gallery span {
+  display: block;
+  padding: 0.4em 0.7em 0.5em;
+  font-size: 0.75rem;
+}

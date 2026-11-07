@@ -39,6 +39,7 @@ examples = ["polars>=1.30"]
 
 [project.urls]
 Homepage = "https://github.com/mluttikh/anytrellis"
+Documentation = "https://mluttikh.github.io/anytrellis/"
 Repository = "https://github.com/mluttikh/anytrellis"
 Issues = "https://github.com/mluttikh/anytrellis/issues"
 Changelog = "https://github.com/mluttikh/anytrellis/blob/main/CHANGELOG.md"
@@ -54,6 +55,10 @@ dev = [
     "polars>=1.30",
     "pyarrow>=20",
     "hypothesis>=6.100",
+    # the documentation (scripts/build_docs.py)
+    "zensical>=0.1.0",
+    "mkdocstrings[python]>=1.0.8",
+    "markdown-exec>=1.12.6",
 ]
 
 [build-system]

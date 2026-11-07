@@ -1,5 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
-<dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs)."""
+<dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
+many.mjs)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import polars as pl
 
+import anytrellis
 from anytrellis import Trellis
 from anytrellis.datasets import load
 from anytrellis.synthetic import sensors
@@ -30,6 +32,29 @@ def main(out: Path) -> None:
     cars = load("cars").with_columns(cyl=pl.col("cylinders").cast(pl.String))
     density = Trellis(cars, wrap="origin", cols=3, panel_height=150)
     density.density(x="mpg", color="cyl", fill=True).save_html(out / "density.html")
+    many_plots(out / "many.html", gapminder)
+
+
+def many_plots(path: Path, gapminder: pl.DataFrame, count: int = 20) -> None:
+    """A page as the documentation makes one: many plots (``_embed_html``) between text,
+    the bundle and its CSS once."""
+    static = Path(anytrellis.__file__).parent / "static"
+    css = (static / "widget.css").read_text(encoding="utf-8")
+    script = (static / "standalone.js").read_text(encoding="utf-8")
+    text = "<p style='height:500px'>Text between the plots.</p>"
+    plots = []
+    for i, year in enumerate(sorted(gapminder["year"].unique())[:count] * 2):
+        if len(plots) == count:
+            break
+        rows = gapminder.filter(pl.col("year") == year)
+        plot = Trellis(rows, wrap="region", panel_height=90, title=f"{year} ({i + 1})")
+        plots.append(plot.points(x="fertility", y="life_expect")._embed_html())
+    body = text.join(plots)
+    path.write_text(
+        f"<!doctype html><html><head><meta charset='utf-8'><style>{css}</style></head>"
+        f"<body>{body}<script>{script}</script></body></html>",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

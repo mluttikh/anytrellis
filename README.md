@@ -2,9 +2,13 @@
 
 [![PyPI](https://img.shields.io/pypi/v/anytrellis)](https://pypi.org/project/anytrellis/)
 [![CI](https://github.com/mluttikh/anytrellis/actions/workflows/ci.yml/badge.svg)](https://github.com/mluttikh/anytrellis/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-mluttikh.github.io%2Fanytrellis-blue)](https://mluttikh.github.io/anytrellis/)
 
 Trellis, facet and small-multiple plots for Jupyter and marimo notebooks, drawn on the GPU
 (WebGPU, WebGL2, or Canvas 2D on machines without a usable GPU).
+
+**Documentation: [mluttikh.github.io/anytrellis](https://mluttikh.github.io/anytrellis/)**:
+tutorials, guides, a gallery and the API reference, with live plots.
 
 ```bash
 pip install anytrellis
@@ -241,11 +245,25 @@ node test/linked.mjs <url of 07 in JupyterLab>     # linked plots: brushing acro
 Pages force a backend with `?renderer=webgpu|webgl2|canvas2d` in their URL;
 `uv run python js/test/pages.py <dir>` writes the pages the browser checks run on.
 
+The documentation is in `docs/user/` (Markdown, built by [Zensical](https://zensical.org)
+with the settings in `zensical.toml`); its example plots run when it is built, and are live
+in the pages:
+
+```sh
+uv run python scripts/build_docs.py            # into site/; warnings fail the build
+uv run python scripts/build_docs.py serve      # preview at http://localhost:8000
+uv run python scripts/docs_gallery.py          # redraw the gallery's pictures (Chromium)
+```
+
+Build the JavaScript bundle first (`cd js && npm run build`). The build also fails on a
+page over 3 MB gzipped, and on a public method or parameter that no guide uses.
+
 CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff
 and ty, the TypeScript checks, pytest on Python 3.12 to 3.15 (Linux; macOS and Windows on
 3.15), the select, legend and zoom checks in headless Chromium (WebGL2 and Canvas 2D), and
-builds the sdist and wheel, checked by `scripts/check_dist.py` (contents, version, a clean
-install that draws a plot).
+builds the documentation (kept as the run's `github-pages` artifact), and builds the sdist
+and wheel, checked by `scripts/check_dist.py` (contents, version, a clean install that
+draws a plot).
 
 ## Releasing
 
@@ -261,6 +279,9 @@ Once, before the first release:
    `testpypi`.
 2. On GitHub (Settings > Environments), the environments `pypi` and `testpypi`; giving
    `pypi` a required reviewer makes every release wait for an approval.
+3. For the documentation: Settings > Pages > Source: *GitHub Actions*; then in Settings >
+   Environments > `github-pages`, add the tag rule `v*` to the deployment branches and
+   tags, so a release may deploy.
 
 Each release:
 
@@ -270,4 +291,5 @@ Each release:
    (`pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ anytrellis`).
 3. Commit, tag and push: `git tag vx.y.z && git push origin main vx.y.z`. The release
    workflow runs CI on the tag, checks that the tag matches the version, publishes to PyPI
-   and makes a GitHub release with the changelog's section and the files.
+   makes a GitHub release with the changelog's section and the files, and deploys the
+   documentation. To fix a page between releases, run Actions > Docs > Run workflow.

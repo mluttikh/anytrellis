@@ -366,6 +366,16 @@ def test_spec_is_json_and_html_is_self_contained(tmp_path: Any) -> None:
     assert path.read_text(encoding="utf-8") == page
 
 
+def test_embed_html_is_the_plot_without_the_code() -> None:
+    t = Trellis(SMALL, wrap="g", title="</script>").points(x="t", y="v")
+    embed = t._embed_html()
+    assert embed.startswith("<div class='anytrellis-embed'>")
+    assert embed.count("</script>") == 1  # the data's; no bundle
+    assert embed in t.to_html()
+    payload = embed.split(">", 2)[2].rsplit("</script>", 1)[0].replace("<\\/", "</")
+    assert json.loads(payload)["spec"]["title"] == "</script>"
+
+
 def test_layer_names_are_unique() -> None:
     t = Trellis(SMALL).points(x="t", y="v")
     t.points(x="t", y="v")

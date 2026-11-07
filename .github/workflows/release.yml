@@ -1,6 +1,6 @@
 # Publish a release: push a tag v<version> (the version in pyproject.toml) and this runs CI,
-# publishes the checked sdist and wheel to PyPI, and makes a GitHub release with them and
-# the changelog's section. Run it by hand (Actions > Release > Run workflow) for a dry run
+# publishes the checked sdist and wheel to PyPI, makes a GitHub release with them and the
+# changelog's section, and deploys the documentation CI built to GitHub Pages. Run it by hand (Actions > Release > Run workflow) for a dry run
 # to TestPyPI instead.
 #
 # PyPI is reached by trusted publishing (no token): on pypi.org (and test.pypi.org for the
@@ -94,3 +94,17 @@ jobs:
           case "$GITHUB_REF_NAME" in *a*|*b*|*rc*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/* --title "anytrellis ${GITHUB_REF_NAME#v}" \
             --notes-file notes.md --verify-tag $prerelease
+
+  docs:
+    name: Deploy the documentation
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

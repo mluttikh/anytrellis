@@ -253,7 +253,8 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
     order = np.lexsort((v, ginv))
     sv, sg, srows = v[order], ginv[order], rows[order]
     counts = np.bincount(sg, minlength=len(guniq))
-    starts = np.r_[0, np.cumsum(counts)].astype(np.int64)
+    # intp: reduceat takes only the platform's index type (int32 in WebAssembly)
+    starts = np.r_[0, np.cumsum(counts)].astype(np.intp)
     first = starts[:-1]
 
     def quantile(f: float) -> np.ndarray:

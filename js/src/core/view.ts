@@ -210,13 +210,15 @@ export class TrellisView {
     this.rendererReady = this.makeRenderer(opts.renderer);
     this.resizeObserver = new ResizeObserver(() => this.relayout());
     this.resizeObserver.observe(this.root);
-    // the host's theme (light or dark) changes: read the colours again
+    // the host's theme (light or dark) changes: read the colours again (data-md-color-scheme:
+    // the documentation's light/dark toggle)
     this.themeObserver = new MutationObserver(() => {
       this.theme = readTheme(this.root);
       this.request();
     });
+    const themeAttributes = ["class", "data-theme", "data-jp-theme-light", "data-md-color-scheme"];
     for (const target of [document.documentElement, document.body]) {
-      this.themeObserver.observe(target, { attributes: true, attributeFilter: ["class", "data-theme", "data-jp-theme-light"] });
+      this.themeObserver.observe(target, { attributes: true, attributeFilter: themeAttributes });
     }
     this.listen();
   }

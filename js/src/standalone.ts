@@ -48,8 +48,29 @@ async function start(host: HTMLElement): Promise<void> {
   }
 }
 
+// A plot starts when it comes near the screen: each holds a GPU context, and browsers keep
+// only so many (Chrome 16 WebGL contexts, fewer on phones; past that the oldest are lost),
+// so a page of many plots (the documentation) starts only those read. One in view, or in a
+// browser without IntersectionObserver, starts at once.
+const NEAR = "600px";
+
 function startAll(): void {
-  document.querySelectorAll<HTMLElement>(".anytrellis-embed").forEach((h) => void start(h));
+  const hosts = document.querySelectorAll<HTMLElement>(".anytrellis-embed");
+  if (typeof IntersectionObserver === "undefined") {
+    hosts.forEach((h) => void start(h));
+    return;
+  }
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        observer.unobserve(e.target);
+        void start(e.target as HTMLElement);
+      }
+    },
+    { rootMargin: NEAR },
+  );
+  hosts.forEach((h) => observer.observe(h));
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startAll);

@@ -1,0 +1,36 @@
+# Build the documentation and deploy it to GitHub Pages, by hand (Actions > Docs > Run
+# workflow), from a branch or a tag: to fix a page between releases. A release deploys it
+# by itself (release.yml, after "Publish to PyPI").
+#
+# Deploying needs Settings > Pages > Source: "GitHub Actions", and the "github-pages"
+# environment allowing the branch or tag deployed (Settings > Environments > github-pages;
+# a release deploys from its tag v*).
+name: Docs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/docs-build.yml
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

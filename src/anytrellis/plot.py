@@ -190,6 +190,11 @@ class Trellis:
     ) -> Self:
         """Lines through the points of each series, sorted by x.
 
+        ```python
+        t = Trellis(gapminder, wrap="region")
+        t.line(x="year", y="life_expect", group="country", width=1)
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The x column.
@@ -224,6 +229,11 @@ class Trellis:
     ) -> Self:
         """A point per row.
 
+        ```python
+        t = Trellis(penguins, wrap="species")
+        t.points(x="flipper_length_mm", y="body_mass_g", color="sex")
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The x column.
@@ -254,6 +264,10 @@ class Trellis:
         name: str | None = None,
     ) -> Self:
         """Bars from 0 to y at each x (categories, numbers or times).
+
+        ```python
+        Trellis(barley, wrap="site").bars(x="variety", y="yield", color="year", position="dodge")
+        ```
 
         Args:
             data: The layer's table (default: the plot's).
@@ -292,6 +306,10 @@ class Trellis:
     ) -> Self:
         """Filled areas under the line of each series, down to 0.
 
+        ```python
+        Trellis(by_region).area(x="year", y="pop", color="region")
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The x column.
@@ -327,6 +345,10 @@ class Trellis:
     ) -> Self:
         """A band between two lines: from ``ymin`` to ``ymax`` along x (a range, an
         interval, an envelope), one per group (and colour).
+
+        ```python
+        Trellis(weather, wrap="year").band(x="date", ymin="temp_min", ymax="temp_max")
+        ```
 
         Args:
             data: The layer's table (default: the plot's).
@@ -364,6 +386,11 @@ class Trellis:
     ) -> Self:
         """A smooth line through each panel's points (and each colour's), with a
         confidence band for its mean.
+
+        ```python
+        t = Trellis(cars, wrap="origin")
+        t.points(x="horsepower", y="mpg").smooth(x="horsepower", y="mpg")
+        ```
 
         Args:
             data: The layer's table (default: the plot's).
@@ -415,6 +442,10 @@ class Trellis:
         """Rectangles: tiles centred on (x, y), one step of the data wide and high (a
         heatmap, with a number colour), or from (x, y) to (x2, y2).
 
+        ```python
+        Trellis(daily, wrap="year").rect(x="day", y="month", color="temp_max")
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The x column (the tiles' centres, or their left with ``x2``).
@@ -454,6 +485,10 @@ class Trellis:
     ) -> Self:
         """A label per row: the ``text`` column's value at (x, y).
 
+        ```python
+        t.text(x="fertility", y="life_expect", text="country", align="left", dx=6)
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The x column.
@@ -491,6 +526,10 @@ class Trellis:
         name: str | None = None,
     ) -> Self:
         """A histogram in each panel: the rows counted in bins that every panel shares.
+
+        ```python
+        Trellis(penguins, wrap="species").hist(x="flipper_length_mm", binwidth=2, color="sex")
+        ```
 
         Args:
             data: The layer's table (default: the plot's).
@@ -541,6 +580,10 @@ class Trellis:
         third quartile with a line at the median, whiskers to the furthest values within
         ``whis`` times the box's height of it, and the values beyond as points.
 
+        ```python
+        Trellis(penguins, wrap="island").box(x="body_mass_g", y="species")
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The positions (categories, or numbers), or the values for horizontal boxes.
@@ -587,6 +630,10 @@ class Trellis:
         """A density curve in each panel (and for each colour): a Gaussian kernel density
         estimate, each curve covering an area of 1, on x values every panel shares.
 
+        ```python
+        Trellis(penguins, wrap="species").density(x="body_mass_g", color="sex", fill=True)
+        ```
+
         Args:
             data: The layer's table (default: the plot's).
             x: The column (numbers or times).
@@ -621,6 +668,10 @@ class Trellis:
     ) -> Self:
         """Reference lines across every panel: vertical at ``x``, or horizontal at ``y``
         (a value or a list of values).
+
+        ```python
+        t.rule(y=0, color="#888888", dash=(4, 3))
+        ```
 
         Args:
             x: Position(s) of vertical lines.
@@ -983,14 +1034,9 @@ class Trellis:
 
         return mo.ui.anywidget(self.widget)
 
-    def to_html(self, *, title: str | None = None) -> str:
-        """The plot as a standalone HTML page: data and code inside, no kernel needed."""
-        script = _STATIC / "standalone.js"
-        css = _STATIC / "widget.css"
-        if not script.exists():
-            raise FileNotFoundError(
-                "the JavaScript bundle is not built: run `npm run build` in js/"
-            )
+    def _embed_html(self) -> str:
+        """The plot's data in a ``<div class="anytrellis-embed">``, for a page that loads
+        ``standalone.js`` and ``widget.css`` once (the documentation's pages)."""
         spec, buffers = self._scene()
         payload = {
             "spec": spec,
@@ -1000,6 +1046,18 @@ class Trellis:
             "selection": self._current_selection(),
         }
         data = json.dumps(payload).replace("</", "<\\/")
+        script = f"<script type='application/json'>{data}</script>"
+        return f"<div class='anytrellis-embed'>{script}</div>"
+
+    def to_html(self, *, title: str | None = None) -> str:
+        """The plot as a standalone HTML page: data and code inside, no kernel needed."""
+        script = _STATIC / "standalone.js"
+        css = _STATIC / "widget.css"
+        if not script.exists():
+            raise FileNotFoundError(
+                "the JavaScript bundle is not built: run `npm run build` in js/"
+            )
+        embed = self._embed_html()
         name = html.escape(title or self.title or "anytrellis")
         return (
             "<!doctype html><html><head><meta charset='utf-8'>"
@@ -1008,8 +1066,7 @@ class Trellis:
             "<style>body{margin:16px;font-family:system-ui,sans-serif;background:#fff}"
             "@media (prefers-color-scheme: dark){body{background:#12171d}}"
             f"{css.read_text(encoding='utf-8')}</style>"
-            "</head><body><div class='anytrellis-embed'>"
-            f"<script type='application/json'>{data}</script></div>"
+            f"</head><body>{embed}"
             f"<script>{script.read_text(encoding='utf-8')}</script></body></html>"
         )
 
