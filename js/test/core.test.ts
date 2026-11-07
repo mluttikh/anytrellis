@@ -167,6 +167,17 @@ describe("layout", () => {
     const l = layout(spec([panel(0, 0), panel(0, 1)], 1, 2), opts);
     for (const p of l.panels) expect(p.strip!.y + p.strip!.h).toBeLessThanOrEqual(p.rect.y);
   });
+
+  it("makes room for the y labels a tall panel draws", () => {
+    // 5 ticks over 0-4.2G step by 1G (labels 1.0G); a 300 px panel draws 8, by 0.5G: 500M
+    const tall = (s: TrellisSpec) => ({ ...s, panel_height: 300, panels: s.panels.map((q) => ({ ...q, y: [0, 4.2e9] as [number, number] })) });
+    const widest = (h: number) => Math.max(...ticks("number", 0, 4.2e9, 0, Math.floor(h / 36)).map((t) => t.label.length * 7));
+    const l = layout(tall(spec([panel(0, 0), panel(0, 1)], 1, 2)), opts);
+    expect(l.panels[0].rect.h).toBe(300);
+    expect(l.yAxisWidth[0]).toBeGreaterThanOrEqual(widest(300) + 4);
+    const one = layout(tall(spec([panel(0, 0), panel(0, 1)], 1, 2)), { ...opts, focused: 0, height: 600 });
+    expect(one.yAxisWidth[0]).toBeGreaterThanOrEqual(widest(one.panels[0].rect.h) + 4);
+  });
 });
 
 function layer(type: MarkLayerSpec["type"], coords: number[], kind: number, halfWidth: number, context = false) {

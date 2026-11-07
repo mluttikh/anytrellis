@@ -3,7 +3,7 @@
 
 import type { Layout, Rect } from "./layout";
 import type { PanelMap, TextData } from "./scene";
-import { type Tick, minorTicks, ticks } from "./ticks";
+import { type Tick, minorTicks, ticks, yTickCount } from "./ticks";
 import type { RuleLayerSpec, TrellisSpec } from "./types";
 
 export interface Theme {
@@ -61,13 +61,8 @@ export function xTicks(spec: TrellisSpec, v: PanelView): Tick[] {
 }
 
 export function yTicks(spec: TrellisSpec, v: PanelView): Tick[] {
-  let count = Math.floor(v.rect.h / 36);
-  if (spec.y.kind === "band") {
-    // a category per label height (about 15 px)
-    const shown = Math.max(1, v.y[1] - v.y[0]);
-    count = Math.floor(shown / Math.max(1, Math.ceil(15 / (v.rect.h / shown))));
-  }
-  return ticks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, Math.max(2, count), spec.y.levels);
+  const count = yTickCount(spec.y.kind, v.y[0], v.y[1], v.rect.h);
+  return ticks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, count, spec.y.levels);
 }
 
 export function drawBack(ctx: CanvasRenderingContext2D, spec: TrellisSpec, views: PanelView[], theme: Theme): void {

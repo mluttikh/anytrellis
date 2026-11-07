@@ -8,7 +8,7 @@
 // every panel; a grid puts its column labels over the top row and its row labels to the
 // right of the last column.
 
-import { ticks } from "./ticks";
+import { ticks, yTickCount } from "./ticks";
 import type { TrellisSpec } from "./types";
 
 export interface Rect {
@@ -99,12 +99,16 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
 
   // y labels' width per column, from the ticks of the panels that draw a y axis; not those
   // with an empty cell on their left, whose labels go in that cell
+  const yLabelWidth = panels.map((p, i) => (showY[i] ? yLabelsWidth(spec, p.y, opts, null) : 0));
   const yAxisWidth = new Array<number>(cols).fill(0);
-  const yLabelWidth = panels.map((p, i) => (showY[i] ? yLabelsWidth(spec, p.y, opts) : 0));
-  panels.forEach((p, i) => {
-    if (!showY[i] || (p.col > 0 && cell(p.row, p.col - 1) === undefined)) return;
-    yAxisWidth[p.col] = Math.max(yAxisWidth[p.col], yLabelWidth[i]);
-  });
+  const yGutters = () => {
+    yAxisWidth.fill(0);
+    panels.forEach((p, i) => {
+      if (!showY[i] || (p.col > 0 && cell(p.row, p.col - 1) === undefined)) return;
+      yAxisWidth[p.col] = Math.max(yAxisWidth[p.col], yLabelWidth[i]);
+    });
+  };
+  yGutters();
   const xAxisHeight = fs + TICK + 6;
   const rowHasX = new Array<boolean>(rows).fill(false);
   panels.forEach((p, i) => {
@@ -123,16 +127,27 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   const top = 6 + titleH;
   const bottom = 4 + xTitleH;
 
-  const gutters = yAxisWidth.reduce((a, b) => a + b, 0);
-  const free = opts.width - left - right - gutters - (cols - 1) * GAP - rightStrip - (rightStrip ? GAP : 0);
-  const pw = Math.max(MIN_PANEL, Math.floor(free / cols));
   const axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
-  let ph: number;
-  if (opts.height) ph = (opts.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
-  else if (spec.panel_height) ph = spec.panel_height;
-  else if (spec.height) ph = (spec.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
-  else ph = Math.min(300, Math.max(90, pw * 0.62));
-  ph = Math.max(MIN_PANEL, Math.floor(ph));
+  const panelSize = (): [number, number] => {
+    const gutters = yAxisWidth.reduce((a, b) => a + b, 0);
+    const free = opts.width - left - right - gutters - (cols - 1) * GAP - rightStrip - (rightStrip ? GAP : 0);
+    const w = Math.max(MIN_PANEL, Math.floor(free / cols));
+    let h: number;
+    if (opts.height) h = (opts.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
+    else if (spec.panel_height) h = spec.panel_height;
+    else if (spec.height) h = (spec.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
+    else h = Math.min(300, Math.max(90, w * 0.62));
+    return [w, Math.max(MIN_PANEL, Math.floor(h))];
+  };
+  // the panels' height sets how many y ticks they draw (finer steps, longer labels: 500M
+  // between 0 and 1.0G), and it can follow their width, which follows the labels: so size
+  // them, measure the labels drawn at that height, keep the wider, and size them again
+  let [pw, ph] = panelSize();
+  panels.forEach((p, i) => {
+    if (showY[i]) yLabelWidth[i] = Math.max(yLabelWidth[i], yLabelsWidth(spec, p.y, opts, ph));
+  });
+  yGutters();
+  [pw, ph] = panelSize();
 
   const colX: number[] = [];
   let x = left;
@@ -207,9 +222,11 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   };
 }
 
-/** The width of a y axis (labels and ticks) over `domain`; bands: every label measured. */
-function yLabelsWidth(spec: TrellisSpec, domain: [number, number], opts: LayoutOptions): number {
-  const labels = ticks(spec.y.kind, domain[0], domain[1], spec.y.origin, spec.y.kind === "band" ? 1000 : 5, spec.y.levels);
+/** The width of a y axis (labels and ticks) over `domain`, with the ticks a panel `h` px high
+ * draws (null: about 5); bands: every label measured. */
+function yLabelsWidth(spec: TrellisSpec, domain: [number, number], opts: LayoutOptions, h: number | null): number {
+  const count = spec.y.kind === "band" ? 1000 : h === null ? 5 : yTickCount(spec.y.kind, domain[0], domain[1], h);
+  const labels = ticks(spec.y.kind, domain[0], domain[1], spec.y.origin, count, spec.y.levels);
   return Math.ceil(Math.max(0, ...labels.map((t) => opts.measure(t.label)))) + TICK + 4;
 }
 
@@ -217,7 +234,6 @@ function yLabelsWidth(spec: TrellisSpec, domain: [number, number], opts: LayoutO
 function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Layout {
   const fs = opts.fontSize;
   const p = spec.panels[index];
-  const yW = yLabelsWidth(spec, p.y, opts);
   const stripH = Math.round(fs * 1.5 + 4);
   const xAxisHeight = fs + TICK + 6;
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
@@ -228,8 +244,9 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
   const top = 6 + titleH;
   const bottom = 4 + xTitleH;
   const total = opts.height ?? 360;
-  const w = Math.max(MIN_PANEL, opts.width - left - yW - right);
   const h = Math.max(MIN_PANEL, Math.floor(total - top - stripH - xAxisHeight - bottom - 2));
+  const yW = yLabelsWidth(spec, p.y, opts, h);
+  const w = Math.max(MIN_PANEL, opts.width - left - yW - right);
   const rect = { x: left + yW, y: top + stripH, w, h };
   const plotBottom = rect.y + h + xAxisHeight;
   return {

@@ -10,6 +10,14 @@ export interface Tick {
   label: string;
 }
 
+/** How many ticks a y axis of `h` px draws over [lo, hi]: one per 36 px; bands, one per
+ * label height (about 15 px). */
+export function yTickCount(kind: AxisKind, lo: number, hi: number, h: number): number {
+  if (kind !== "band") return Math.max(2, Math.floor(h / 36));
+  const shown = Math.max(1, hi - lo);
+  return Math.max(2, Math.floor(shown / Math.max(1, Math.ceil(15 / (h / shown)))));
+}
+
 /** Ticks for [lo, hi] (axis units relative to `origin`), about `count` of them. */
 export function ticks(kind: AxisKind, lo: number, hi: number, origin: number, count: number, levels: string[] | null = null): Tick[] {
   if (!(hi > lo) || !Number.isFinite(lo) || !Number.isFinite(hi)) return [];
