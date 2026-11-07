@@ -17,6 +17,15 @@ All notable changes to anytrellis. The format follows
   browser (scripts, reports, CI): the zoom last shown in the notebook, the selection, a
   linked plot's highlight and an opened panel, in the light or dark theme, at any size.
   PNGs need the new `png` extra (`pip install "anytrellis[png]"`, with resvg-py).
+- `violin()`: each group's values as a violin (a kernel density mirrored around its
+  position), with its median and quartiles, or its values as points (`inner=`). Scaled to
+  the same area, by count or to the same width (`scale=`); side by side with a colour,
+  sideways when y is the category. Brushing selects whole violins.
+- `errorbar()`: each group's mean with its confidence interval (`extent="ci"`, at
+  `level=`), standard error, standard deviation or range, with caps and a point at the
+  mean; or intervals you computed, from `ymin=`/`ymax=` (or `xmin=`/`xmax=`, sideways).
+- `line(step=...)`: step lines, `"post"`, `"pre"` or `"mid"`. Hovering a step shows the
+  row it starts from.
 - Documentation at [mluttikh.github.io/anytrellis](https://mluttikh.github.io/anytrellis/):
   tutorials, how-to guides, a gallery, the API reference and explanations, with live plots.
 

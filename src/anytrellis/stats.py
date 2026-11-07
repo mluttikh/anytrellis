@@ -83,6 +83,10 @@ def parts(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int)
         return density(layer, table, panel_of, npanels)
     if layer.mark == "smooth":
         return smooth(layer, table, panel_of, npanels)
+    if layer.mark == "violin":
+        return violin(layer, table, panel_of, npanels)
+    if layer.mark == "errorbar":
+        return errorbar(layer, table, panel_of, npanels)
     raise ValueError(f"{layer.mark!r} is not a summary mark")
 
 
@@ -218,23 +222,110 @@ def _round_width(raw: float) -> float:
     return float(steps[np.argmin(np.abs(np.log(steps / raw)))])
 
 
-# ---- box plots ----------------------------------------------------------------------------
+# ---- values by position: box plots, violins, error bars ------------------------------------
 
 
-def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
-    """A box per (panel, position, colour): the quartiles, a line at the median, whiskers
-    to the furthest values within ``whis`` IQRs of the box, and the values beyond as
-    points. Vertical, or horizontal when y is the category and x the numbers."""
+@dataclass
+class _Groups:
+    """A layer's values in groups, one per (panel, position, colour), sorted within each:
+    what a box, a violin or an error bar summarises. Vertical, or horizontal when y is
+    the category and x the numbers."""
+
+    layer: Layer
+    horizontal: bool
+    pos: Column
+    """The positions (x, or y when horizontal)."""
+    val: Column
+    """The values (y, or x when horizontal)."""
+    color: Column | None
+    puniq: np.ndarray
+    labels: np.ndarray
+    guniq: np.ndarray
+    sv: np.ndarray
+    """The values, sorted by group and within it."""
+    sg: np.ndarray
+    srows: np.ndarray
+    counts: np.ndarray
+    starts: np.ndarray
+
+    @property
+    def npos(self) -> int:
+        return max(len(self.puniq), 1)
+
+    @property
+    def nc(self) -> int:
+        return len(self.labels)
+
+    @property
+    def gp(self) -> np.ndarray:
+        """Each group's panel."""
+        return self.guniq // (self.npos * self.nc)
+
+    @property
+    def gpos(self) -> np.ndarray:
+        """Each group's position (index in ``puniq``)."""
+        return (self.guniq // self.nc) % self.npos
+
+    @property
+    def gc(self) -> np.ndarray:
+        """Each group's colour (index in ``labels``)."""
+        return self.guniq % self.nc
+
+    @property
+    def first(self) -> np.ndarray:
+        return self.starts[:-1]
+
+    def quantile(self, f: float) -> np.ndarray:
+        """Each group's ``f`` quantile (linear between values)."""
+        h = (self.counts - 1) * f
+        lo = np.floor(h).astype(np.int64)
+        hi = np.ceil(h).astype(np.int64)
+        sv, first = self.sv, self.first
+        return sv[first + lo] + (h - lo) * (sv[first + hi] - sv[first + lo])
+
+    def position_column(self, index: np.ndarray) -> Column:
+        values = self.puniq[index]
+        if self.pos.kind == "category":
+            return Column(self.pos.name, "category", values.astype(object), self.pos.levels)
+        return Column(self.pos.name, self.pos.kind, values.astype(np.float64))
+
+    def raw_position(self, index: np.ndarray) -> np.ndarray:
+        values = self.puniq[index]
+        if self.pos.log:
+            return 10.0 ** values.astype(np.float64)
+        return _times(values) if self.pos.kind == "time" else values
+
+    def columns(self, index: np.ndarray, value: np.ndarray) -> list[Column]:
+        """A summary table's columns for groups ``index``: panel, position, ``value`` (on
+        the values' axis) and colour."""
+        cols = [Column(PANEL, "number", self.gp[index].astype(np.float64)),
+                self.position_column(self.gpos[index]),
+                Column(self.val.name, "number", value)]  # fmt: skip
+        if self.color is not None:
+            cols.append(Column(self.color.name, "category", self.labels[self.gc[index]],
+                               self.color.levels))  # fmt: skip
+        return cols
+
+    def slots(self, width: float) -> _Slots:
+        step = 1.0 if self.pos.kind == "category" else step_of([self.puniq.astype(np.float64)])
+        color = self.color
+        dodge = color is not None and color.name != self.pos.name and \
+            self.layer.position == "dodge"  # fmt: skip
+        return _Slots(self.pos.name, color.name if dodge and color else None, self.horizontal,
+                      width * step)  # fmt: skip
+
+
+def _grouped(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> _Groups:
+    """The layer's values grouped by panel, position (x, or a category y) and colour."""
     assert layer.x is not None
     assert layer.y is not None
-    args = layer.stat_args
     xc, yc = table.column(layer.x), table.column(layer.y)
     horizontal = yc.kind == "category" and xc.kind != "category"
     pos, val = (yc, xc) if horizontal else (xc, yc)
     if val.kind != "number":
         raise ValueError(
-            f"box(): the values must be numbers; {val.name!r} holds {val.kind}s (one of x and "
-            "y gives the positions, the other the numbers)"
+            f"{layer.mark}(): the values must be numbers; {val.name!r} holds {val.kind}s (one "
+            "of x and y gives the positions, the other the numbers)"
         )
     color = _color(layer, table)
     rows, panel = expand(panel_of, table.n, npanels, layer.facet)
@@ -242,6 +333,8 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
     keep = np.isfinite(v)
     if pos.kind != "category":
         keep &= np.isfinite(pos.values[rows])
+    else:
+        keep &= pos.level_codes()[rows] >= 0
     rows, panel, v = rows[keep], panel[keep], v[keep]
     if pos.kind == "category":  # by code: a million strings don't sort fast
         puniq, pi_ = np.array(pos.levels, dtype=object), pos.level_codes()[rows]
@@ -251,19 +344,54 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
     npos, nc = max(len(puniq), 1), len(labels)
     guniq, ginv = _codes((panel * npos + pi_) * nc + c)
     order = np.lexsort((v, ginv))
-    sv, sg, srows = v[order], ginv[order], rows[order]
-    counts = np.bincount(sg, minlength=len(guniq))
+    counts = np.bincount(ginv[order], minlength=len(guniq))
     # intp: reduceat takes only the platform's index type (int32 in WebAssembly)
     starts = np.r_[0, np.cumsum(counts)].astype(np.intp)
-    first = starts[:-1]
+    return _Groups(layer, horizontal, pos, val, color, puniq, labels, guniq, v[order],
+                   ginv[order], rows[order], counts, starts)  # fmt: skip
 
-    def quantile(f: float) -> np.ndarray:
-        h = (counts - 1) * f
-        lo = np.floor(h).astype(np.int64)
-        hi = np.ceil(h).astype(np.int64)
-        return sv[first + lo] + (h - lo) * (sv[first + hi] - sv[first + lo])
 
-    q1, med, q3 = quantile(0.25), quantile(0.5), quantile(0.75)
+@dataclass
+class _Slots:
+    """Where each group sits across its axis: centred on its position, ``span`` wide, or
+    (``dodge``: a colour column's name) side by side by colour."""
+
+    pos: str
+    dodge: str | None
+    horizontal: bool
+    span: float
+
+    def centres(self, tbl: Table, x_levels: Levels, y_levels: Levels,
+                color_levels: ColorLevels) -> tuple[np.ndarray, float]:  # fmt: skip
+        """Each row's centre (on the positions' axis) and its half width."""
+        centre = axis_values(tbl.column(self.pos), y_levels if self.horizontal else x_levels)
+        if self.dodge is None:
+            return centre, self.span / 2
+        k = max(len(color_levels[self.dodge]), 1)
+        code = axis_values(tbl.column(self.dodge), color_levels[self.dodge])
+        slot = self.span / k
+        return centre - self.span / 2 + (code + 0.5) * slot, slot * 0.9 / 2
+
+    def oriented(self, panel: np.ndarray, a0: np.ndarray, v0: np.ndarray, a1: np.ndarray,
+                 v1: np.ndarray, rows: np.ndarray, line: bool = False) -> Geometry:  # fmt: skip
+        """Geometry from (position, value) corners, turned for horizontal groups."""
+        if self.horizontal:
+            g = Geometry(panel, v0, a0, v1, a1, rows)
+        else:
+            g = Geometry(panel, a0, v0, a1, v1, rows)
+        if line:
+            g.rows_end = rows.copy()
+        return _sorted(g)
+
+
+def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+    """A box per (panel, position, colour): the quartiles, a line at the median, whiskers
+    to the furthest values within ``whis`` IQRs of the box, and the values beyond as
+    points. Vertical, or horizontal when y is the category and x the numbers."""
+    args = layer.stat_args
+    g = _grouped(layer, table, panel_of, npanels)
+    sv, sg, srows, first = g.sv, g.sg, g.srows, g.first
+    q1, med, q3 = g.quantile(0.25), g.quantile(0.5), g.quantile(0.75)
     iqr = q3 - q1
     whis = float(args["whis"])
     inside = (sv >= (q1 - whis * iqr)[sg]) & (sv <= (q3 + whis * iqr)[sg])
@@ -274,96 +402,317 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
         wlo = whi = np.zeros(0)
     wlo = np.where(np.isfinite(wlo), np.minimum(wlo, q1), q1)
     whi = np.where(np.isfinite(whi), np.maximum(whi, q3), q3)
-    gp = guniq // (npos * nc)
-    gpos = (guniq // nc) % npos
-    gc = guniq % nc
-
-    def position_column(index: np.ndarray) -> Column:
-        values = puniq[index]
-        if pos.kind == "category":
-            return Column(pos.name, "category", values.astype(object), pos.levels)
-        return Column(pos.name, pos.kind, values.astype(np.float64))
-
-    def raw_position(index: np.ndarray) -> np.ndarray:
-        values = puniq[index]
-        if pos.log:
-            return 10.0 ** values.astype(np.float64)
-        return _times(values) if pos.kind == "time" else values
-
-    boxes_cols = [Column(PANEL, "number", gp.astype(np.float64)), position_column(gpos),
-                  Column(val.name, "number", med)]  # fmt: skip
-    if color is not None:
-        boxes_cols.append(Column(color.name, "category", labels[gc], color.levels))
-    shown_med, shown_q1, shown_q3, shown_lo, shown_hi = _shown(val, med, q1, q3, wlo, whi)
+    groups = np.arange(len(g.guniq))
+    shown_med, shown_q1, shown_q3, shown_lo, shown_hi = _shown(g.val, med, q1, q3, wlo, whi)
     stats_text = {
-        pos.name: raw_position(gpos),
-        "n": counts,
+        g.pos.name: g.raw_position(g.gpos),
+        "n": g.counts,
         "median": shown_med,
         "q1": shown_q1,
         "q3": shown_q3,
         "whiskers": _ranges(shown_lo, shown_hi, "number"),
     }
-    boxes = _table(boxes_cols, stats_text)
-    out_mask = ~inside
-    orows, og, ov = srows[out_mask], sg[out_mask], sv[out_mask]
+    boxes = _table(g.columns(groups, med), stats_text)
+    og = sg[~inside]
+    orows, ov = srows[~inside], sv[~inside]
     if not args["outliers"]:
         orows, og, ov = orows[:0], og[:0], ov[:0]
-    outlier_cols = [Column(PANEL, "number", gp[og].astype(np.float64)), position_column(gpos[og]),
-                    Column(val.name, "number", ov)]  # fmt: skip
-    if color is not None:
-        outlier_cols.append(Column(color.name, "category", labels[gc[og]], color.levels))
     user_tips = {name: table.raw(name)[orows] for name in layer.tooltip}
-    outliers = _table(outlier_cols, {pos.name: raw_position(gpos[og]), **user_tips})
-    step = 1.0 if pos.kind == "category" else step_of([puniq.astype(np.float64)])
-    span = float(args["width"]) * step
-    dodge = color is not None and color.name != pos.name and layer.position == "dodge"
-
-    def centres(tbl: Table, x_levels: Levels, y_levels: Levels,
-                color_levels: ColorLevels) -> tuple[np.ndarray, float]:  # fmt: skip
-        centre = axis_values(tbl.column(pos.name), y_levels if horizontal else x_levels)
-        if not dodge or color is None:
-            return centre, span / 2
-        k = max(len(color_levels[color.name]), 1)
-        code = axis_values(tbl.column(color.name), color_levels[color.name])
-        slot = span / k
-        return centre - span / 2 + (code + 0.5) * slot, slot * 0.9 / 2
-
-    def oriented(panel_: np.ndarray, a0: np.ndarray, v0: np.ndarray, a1: np.ndarray,
-                 v1: np.ndarray, rows_: np.ndarray, line: bool = False) -> Geometry:  # fmt: skip
-        g = Geometry(panel_, v0, a0, v1, a1, rows_) if horizontal else Geometry(
-            panel_, a0, v0, a1, v1, rows_)  # fmt: skip
-        if line:
-            g.rows_end = rows_.copy()
-        return _sorted(g)
+    outliers = _table(g.columns(og, ov), {g.pos.name: g.raw_position(g.gpos[og]), **user_tips})
+    slots = g.slots(float(args["width"]))
+    gp = g.gp
 
     def build_body(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
-        c_, h = centres(boxes, xl, yl, cl)
-        return oriented(gp, c_ - h, q1, c_ + h, q3, np.arange(len(gp)))
+        c_, h = slots.centres(boxes, xl, yl, cl)
+        return slots.oriented(gp, c_ - h, q1, c_ + h, q3, groups)
 
     def build_lines(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
-        c_, h = centres(boxes, xl, yl, cl)
+        c_, h = slots.centres(boxes, xl, yl, cl)
         left, right = c_ - h, c_ + h
         segments = [  # the outline, the median, the whiskers
             (left, q1, right, q1), (right, q1, right, q3), (right, q3, left, q3),
             (left, q3, left, q1), (left, med, right, med), (c_, q1, c_, wlo), (c_, q3, c_, whi),
         ]  # fmt: skip
         a0, v0, a1, v1 = (np.concatenate([s[i] for s in segments]) for i in range(4))
-        n = len(gp)
-        return oriented(np.tile(gp, 7), a0, v0, a1, v1, np.tile(np.arange(n), 7), line=True)
+        return slots.oriented(np.tile(gp, 7), a0, v0, a1, v1, np.tile(groups, 7), line=True)
 
     def build_points(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
-        c_, _ = centres(outliers, xl, yl, cl)
-        return oriented(gp[og], c_, ov, c_.copy(), ov.copy(), np.arange(len(og)))
+        c_, _ = slots.centres(outliers, xl, yl, cl)
+        return slots.oriented(gp[og], c_, ov, c_.copy(), ov.copy(), np.arange(len(og)))
 
-    tips = [pos.name, "n", "median", "q1", "q3", "whiskers"]
-    group_members = Members(starts, srows)
+    tips = [g.pos.name, "n", "median", "q1", "q3", "whiskers"]
+    members = Members(g.starts, srows)
     body = replace(layer, mark="rect", opacity=layer.opacity * FILL, tooltip=tips)
     lines = replace(layer, mark="line", tooltip=tips)
     points = replace(layer, mark="points", tooltip=list(layer.tooltip))
     return [
-        Part(body, boxes, build_body, group_members, hide=("x", "y"), family=True),
-        Part(lines, boxes, build_lines, group_members, hide=("x", "y"), family=True),
+        Part(body, boxes, build_body, members, hide=("x", "y"), family=True),
+        Part(lines, boxes, build_lines, members, hide=("x", "y"), family=True),
         Part(points, outliers, build_points, Members.each(orows)),
+    ]
+
+
+# ---- violins -------------------------------------------------------------------------------
+
+VIOLIN_SCALES = ("area", "count", "width")
+VIOLIN_INNER = ("quartiles", "points", None)
+
+
+def violin(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+    """A violin per (panel, position, colour): the values' density (a Gaussian kernel
+    estimate, ``cut`` bandwidths past them) mirrored around the position, as wide as
+    ``scale`` says: ``"area"``, every violin the same area; ``"count"``, areas as the
+    counts; ``"width"``, every violin the same width. Inside it: its median and quartiles
+    (``inner="quartiles"``), or its values (``"points"``)."""
+    args = layer.stat_args
+    g = _grouped(layer, table, panel_of, npanels)
+    groups = np.arange(len(g.guniq))
+    q1, med, q3 = g.quantile(0.25), g.quantile(0.5), g.quantile(0.75)
+    cut, gridsize, adjust = float(args["cut"]), int(args["gridsize"]), float(args["bw_adjust"])
+    grids: list[np.ndarray] = []
+    dens: list[np.ndarray] = []
+    owner: list[np.ndarray] = []
+    for k in groups:
+        s = g.sv[g.starts[k] : g.starts[k + 1]]
+        if len(s) < 2 or s[-1] <= s[0]:
+            continue
+        bw = adjust * float(np.std(s, ddof=1)) * len(s) ** -0.2
+        grid = np.linspace(s[0] - cut * bw, s[-1] + cut * bw, gridsize)
+        grids.append(grid)
+        dens.append(_kde(s, grid, bw))
+        owner.append(np.full(gridsize, k))
+    ys = np.concatenate(grids) if grids else np.zeros(0)
+    d = np.concatenate(dens) if dens else np.zeros(0)
+    k_of = np.concatenate(owner) if owner else np.zeros(0, np.int64)
+    # each sample's half width, as a share of the slot's half width
+    peak = np.zeros(len(groups))
+    if len(d):
+        np.maximum.at(peak, k_of, d)
+    scale = args["scale"]
+    if scale == "width":
+        w = d / np.where(peak > 0, peak, 1)[k_of]
+    elif scale == "count":
+        weight = g.counts.astype(np.float64)
+        top = float((peak * weight).max()) if len(d) else 1.0
+        w = d * weight[k_of] / (top or 1.0)
+    else:
+        w = d / (float(peak.max()) if len(d) else 1.0)
+    # each group's width at its median and quartiles (a group of one value: half)
+    at_q = np.full((3, len(groups)), 0.5)
+    for i, k in enumerate(np.unique(k_of)):
+        sl = slice(i * gridsize, (i + 1) * gridsize)
+        at_q[:, k] = np.interp([q1[k], med[k], q3[k]], ys[sl], w[sl])
+    pair = np.flatnonzero(k_of[1:] == k_of[:-1]) if len(k_of) else np.zeros(0, np.int64)
+    a, b = pair, pair + 1
+    kp = k_of[a]
+    shown_med, shown_q1, shown_q3 = _shown(g.val, med, q1, q3)
+    violins = _table(g.columns(groups, med), {g.pos.name: g.raw_position(g.gpos), "n": g.counts,
+                                              "median": shown_med, "q1": shown_q1,
+                                              "q3": shown_q3})  # fmt: skip
+    slots = g.slots(float(args["width"]))
+    gp = g.gp
+
+    def build_fill(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
+        c_, h = slots.centres(violins, xl, yl, cl)
+        c, ya, yb = c_[kp], ys[a], ys[b]
+        wa, wb = w[a] * h, w[b] * h
+        if slots.horizontal:  # a band along x: its upper edge, its lower as the base
+            geom = Geometry(gp[kp], ya, c + wa, yb, c + wb, kp, rows_end=kp.copy(),
+                            base0=c - wa, base1=c - wb)  # fmt: skip
+            return _sorted(geom)
+        # vertical: each slice between two samples as trapezoids with vertical sides: a
+        # rectangle as wide as its narrower end, and a triangle on each side
+        m, big = np.minimum(wa, wb), np.maximum(wa, wb)
+        ym, yb_ = np.where(wa <= wb, ya, yb), np.where(wa <= wb, yb, ya)
+        x0 = np.concatenate([c - m, c + m, c - big])
+        y0 = np.concatenate([ya, ym, yb_])
+        x1 = np.concatenate([c + m, c + big, c - m])
+        y1 = np.concatenate([ya, yb_, ym])
+        base = np.concatenate([yb, yb_, yb_])
+        rows = np.tile(kp, 3)
+        geom = Geometry(np.tile(gp[kp], 3), x0, y0, x1, y1, rows, rows_end=rows.copy(),
+                        base0=base, base1=base.copy())  # fmt: skip
+        return _sorted(geom)
+
+    def build_lines(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
+        c_, h = slots.centres(violins, xl, yl, cl)
+        c, wa, wb = c_[kp], w[a] * h, w[b] * h
+        segs = [(c + wa, ys[a], c + wb, ys[b]), (c - wa, ys[a], c - wb, ys[b])]  # its sides
+        owners = [kp, kp]
+        if args["inner"] == "quartiles":  # the median across it, the quartiles half way
+            for q, f, row in ((med, 1.0, 1), (q1, 0.5, 0), (q3, 0.5, 2)):
+                half = at_q[row] * h * f
+                segs.append((c_ - half, q, c_ + half, q))
+                owners.append(groups)
+        a0, v0, a1, v1 = (np.concatenate([s[i] for s in segs]) for i in range(4))
+        rows = np.concatenate(owners)
+        return slots.oriented(gp[rows], a0, v0, a1, v1, rows, line=True)
+
+    tips = [g.pos.name, "n", "median", "q1", "q3"]
+    members = Members(g.starts, g.srows)
+    fill = replace(layer, mark="band", opacity=layer.opacity * FILL, tooltip=tips)
+    lines = replace(layer, mark="line", tooltip=tips)
+    out = [
+        Part(fill, violins, build_fill, members, hide=("x", "y"), family=True),
+        Part(lines, violins, build_lines, members, hide=("x", "y"), family=True),
+    ]
+    if args["inner"] == "points":
+        user_tips = {name: table.raw(name)[g.srows] for name in layer.tooltip}
+        values = _table(g.columns(g.sg, g.sv), {g.pos.name: g.raw_position(g.gpos[g.sg]),
+                                               **user_tips})  # fmt: skip
+
+        def build_points(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
+            c_, _ = slots.centres(values, xl, yl, cl)
+            return slots.oriented(gp[g.sg], c_, g.sv, c_.copy(), g.sv.copy(),
+                                  np.arange(len(g.sv)))  # fmt: skip
+
+        dots = replace(layer, mark="points", tooltip=list(layer.tooltip))
+        out.append(Part(dots, values, build_points, Members.each(g.srows)))
+    return out
+
+
+# ---- error bars ----------------------------------------------------------------------------
+
+EXTENTS = ("ci", "se", "sd", "range")
+
+
+def errorbar(layer: Layer, table: Table, panel_of: np.ndarray | None,
+             npanels: int) -> list[Part]:  # fmt: skip
+    """Error bars: from given lows to highs (``ymin`` and ``ymax``, or ``xmin`` and
+    ``xmax``), or, from the values, around each group's mean: ``extent="ci"`` (its
+    ``level`` confidence interval, Student's t), ``"se"`` (one standard error), ``"sd"``
+    (one standard deviation) or ``"range"`` (the lowest value to the highest). Each with
+    caps ``cap`` of a position's step wide, and its centre (the mean, or ``y``/``x``) as a
+    point."""
+    args = layer.stat_args
+    if args.get("lo") is None:
+        return _errorbar_summary(layer, table, panel_of, npanels)
+    return _errorbar_given(layer, table, panel_of, npanels)
+
+
+def _errorbar_summary(layer: Layer, table: Table, panel_of: np.ndarray | None,
+                      npanels: int) -> list[Part]:  # fmt: skip
+    args = layer.stat_args
+    g = _grouped(layer, table, panel_of, npanels)
+    groups = np.arange(len(g.guniq))
+    n = g.counts.astype(np.float64)
+    first = g.first
+    if len(g.sv):
+        mean = np.add.reduceat(g.sv, first) / n
+        dev = g.sv - mean[g.sg]
+        sd = np.sqrt(np.add.reduceat(dev * dev, first) / np.maximum(n - 1, 1))
+    else:
+        mean = sd = np.zeros(0)
+    sd = np.where(n >= 2, sd, np.nan)
+    extent = args["extent"]
+    if extent == "range":
+        lo = np.minimum.reduceat(g.sv, first) if len(g.sv) else np.zeros(0)
+        hi = np.maximum.reduceat(g.sv, first) if len(g.sv) else np.zeros(0)
+        label = "range"
+    else:
+        if extent == "ci":
+            p_hi = 1 - (1 - float(args["level"])) / 2
+            t = np.array([_t_quantile(p_hi, k - 1) if k >= 2 else np.nan for k in n])
+            half = t * sd / np.sqrt(n)
+            label = f"{float(args['level']):.0%} CI"
+        elif extent == "se":
+            half = sd / np.sqrt(n)
+            label = "mean ± SE"
+        else:
+            half = sd
+            label = "mean ± SD"
+        lo, hi = mean - half, mean + half
+    shown_mean, shown_lo, shown_hi = _shown(g.val, mean, lo, hi)
+    text = _ranges(shown_lo, shown_hi, "number", digits=4)
+    text[~np.isfinite(lo)] = ""
+    bars = _table(g.columns(groups, mean), {g.pos.name: g.raw_position(g.gpos), "n": g.counts,
+                                            "mean": shown_mean, label: text})  # fmt: skip
+    tips = [g.pos.name, "n", "mean", label]
+    return _errorbar_parts(layer, bars, g.gp, g.slots(float(args["width"])), mean, lo, hi,
+                           Members(g.starts, g.srows), tips)  # fmt: skip
+
+
+def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
+                    npanels: int) -> list[Part]:  # fmt: skip
+    args = layer.stat_args
+    horizontal = bool(args["horizontal"])
+    pos_name = layer.y if horizontal else layer.x
+    centre_name = layer.x if horizontal else layer.y
+    assert pos_name is not None
+    pos = table.column(pos_name)
+    ends = [table.column(args["lo"]), table.column(args["hi"])]
+    values = [*ends, *([table.column(centre_name)] if centre_name else [])]
+    for col in values:
+        if col.kind == "category":
+            raise ValueError(f"errorbar(): {col.name!r} holds categories; the ends (and the "
+                             "centre) must be numbers or times")  # fmt: skip
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    lo, hi = ends[0].values[rows], ends[1].values[rows]
+    keep = np.isfinite(lo) & np.isfinite(hi)
+    keep &= (pos.level_codes()[rows] >= 0) if pos.kind == "category" else \
+        np.isfinite(pos.values[rows])  # fmt: skip
+    rows, panel, lo, hi = rows[keep], panel[keep], lo[keep], hi[keep]
+    centre = table.column(centre_name).values[rows] if centre_name else None
+    color = _color(layer, table)
+    value_name = centre_name or ends[0].name
+    cols = [Column(PANEL, "number", panel.astype(np.float64)), _take(pos, rows),
+            Column(value_name, values[-1].kind, centre if centre is not None else lo,
+                   log=values[-1].log)]  # fmt: skip
+    if color is not None:
+        cols.append(_take(color, rows))
+    names = [pos_name, *([centre_name] if centre_name else []), ends[0].name, ends[1].name]
+    raw = {name: table.raw(name)[rows] for name in dict.fromkeys([*names, *layer.tooltip])}
+    bars = _table(cols, raw)
+    positions = pos.values[rows] if pos.kind != "category" else np.zeros(0)
+    step = 1.0 if pos.kind == "category" else step_of([positions])
+    dodge = color is not None and color.name != pos_name and layer.position == "dodge"
+    slots = _Slots(pos_name, color.name if dodge and color else None, horizontal,
+                   float(args["width"]) * step)  # fmt: skip
+    tips = list(dict.fromkeys([*names, *layer.tooltip]))
+    # the drawn parts' x and y: the table's position and value columns
+    axes = {"x": value_name, "y": pos_name} if horizontal else {"x": pos_name, "y": value_name}
+    return _errorbar_parts(replace(layer, **axes), bars, panel, slots, centre, lo, hi,
+                           Members.each(rows), tips)  # fmt: skip
+
+
+def _errorbar_parts(layer: Layer, bars: Table, panel: np.ndarray, slots: _Slots,
+                    centre: np.ndarray | None, lo: np.ndarray, hi: np.ndarray,
+                    members: Members, tips: list[str]) -> list[Part]:  # fmt: skip
+    """An error bar per row of ``bars``: a line from ``lo`` to ``hi`` with caps, and its
+    centre as a point."""
+    args = layer.stat_args
+    rows = np.arange(len(lo))
+    drawn = np.isfinite(lo) & np.isfinite(hi)
+    cap = float(args["cap"])
+    width = float(args["width"])
+
+    def build_lines(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
+        c_, h = slots.centres(bars, xl, yl, cl)
+        r = rows[drawn]
+        c, a, b = c_[r], lo[r], hi[r]
+        segs = [(c, a, c, b)]
+        if cap > 0:
+            half = h * cap / width  # a share of the step; dodged, of each one's slot
+            segs += [(c - half, a, c + half, a), (c - half, b, c + half, b)]
+        a0, v0, a1, v1 = (np.concatenate([s[i] for s in segs]) for i in range(4))
+        owners = np.tile(r, len(segs))
+        return slots.oriented(panel[owners], a0, v0, a1, v1, owners, line=True)
+
+    lines = replace(layer, mark="line", tooltip=tips)
+    if centre is None or not args["points"]:
+        return [Part(lines, bars, build_lines, members, hide=("x", "y"))]
+    mid = np.asarray(centre)
+    shown = np.isfinite(mid)
+
+    def build_points(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
+        c_, _ = slots.centres(bars, xl, yl, cl)
+        r = rows[shown]
+        return slots.oriented(panel[r], c_[r], mid[r], c_[r].copy(), mid[r].copy(), r)
+
+    points = replace(layer, mark="points", tooltip=tips)
+    return [
+        Part(lines, bars, build_lines, members, hide=("x", "y"), family=True),
+        Part(points, bars, build_points, members, hide=("x", "y"), family=True),
     ]
 
 
@@ -682,6 +1031,12 @@ def _table(columns: list[Column], extra: dict[str, np.ndarray]) -> Table:
     out = Table(data)
     out._cache.update({c.name: c for c in columns})
     return out
+
+
+def _take(col: Column, rows: np.ndarray) -> Column:
+    """These rows of a column."""
+    codes = col.level_codes()[rows] if col.kind == "category" else None
+    return Column(col.name, col.kind, col.values[rows], col.levels, codes, col.log)
 
 
 def _sorted(g: Geometry) -> Geometry:

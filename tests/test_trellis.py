@@ -787,6 +787,217 @@ def test_density_bandwidth_and_errors():
         Trellis(DIST).density(x="g")._scene()
 
 
+# ---- step lines -----------------------------------------------------------------------------
+
+STEPS = {"t": [0.0, 1.0, 3.0], "v": [1.0, 2.0, 5.0], "id": ["a", "b", "c"]}
+
+
+@pytest.mark.parametrize(
+    ("step", "pieces", "ids"),
+    [
+        ("post", [[0, 1, 1, 1], [1, 2, 3, 2], [1, 2, 1, 1], [3, 5, 3, 2], [3, 5, 3, 5]],
+         "abbcc"),
+        ("pre", [[0, 1, 0, 2], [0, 1, 0, 1], [1, 2, 1, 5], [1, 2, 0, 2], [3, 5, 1, 5]],
+         "aabbc"),
+        ("mid", [[0, 1, 0.5, 1], [0.5, 1, 0.5, 2], [1, 2, 2, 2], [2, 2, 2, 5], [1, 2, 0.5, 2],
+                 [3, 5, 2, 5]], "aabbbc"),
+    ],
+)  # fmt: skip
+def test_step_lines_draw_levels_and_risers(step: str, pieces: list[list[float]], ids: str):
+    t = Trellis(STEPS).line(x="t", y="v", step=step, tooltip=["id"])
+    spec, _ = scene(t)
+    assert spec["layers"][0]["step"] == step
+    assert coords(t).tolist() == pieces
+    # each piece starts at a data point, the one its tooltip shows
+    assert "".join(t._tooltip(0, i)[0][1] for i in range(len(pieces))) == ids
+
+
+def test_step_lines_keep_series_apart_and_check_the_mode():
+    t = Trellis(SMALL).line(x="t", y="v", color="g", step="post")
+    c = coords(t)
+    assert len(c) == 9  # per series: a level, a riser and its last point
+    assert not np.any((c[:, 1] == 2.0) & (c[:, 3] == 10.0))  # no riser from a to b
+    assert scene(Trellis(SMALL).line(x="t", y="v"))[0]["layers"][0]["step"] is None
+    assert scene(Trellis(SMALL).points(x="t", y="v"))[0]["layers"][0]["step"] is None
+    with pytest.raises(ValueError, match="step"):
+        Trellis(SMALL).line(x="t", y="v", step="before")
+
+
+def test_step_lines_select_their_points():
+    t = Trellis(STEPS).line(x="t", y="v", step="post")
+    t.select(x=(0.5, 1.5))
+    assert list(t.selected()["id"]) == ["a", "b"]  # the level from a ends there; b starts
+
+
+# ---- violins --------------------------------------------------------------------------------
+
+
+def violin_areas(t: Trellis) -> dict[int, float]:
+    """A horizontal violin's area per position, from its band: the upper edge less the base."""
+    c, base = coords(t, 0), base_of(t, 0)
+    centre = np.rint((c[:, 1] + base[:, 0]) / 2).astype(int)
+    width = (c[:, 1] - base[:, 0] + c[:, 3] - base[:, 1]) / 2
+    area = (c[:, 2] - c[:, 0]) * width
+    return {int(k): float(area[centre == k].sum()) for k in np.unique(centre)}
+
+
+def test_violin_scales_by_area_count_or_width():
+    area = violin_areas(Trellis(DIST).violin(x="v", y="g"))
+    assert np.isclose(area[0], area[1], rtol=0.01)  # the same area
+    count = violin_areas(Trellis(DIST).violin(x="v", y="g", scale="count"))
+    assert np.isclose(count[0] / count[1], 2.0, rtol=0.01)  # 200 values against 100
+    t = Trellis(DIST).violin(x="v", y="g", scale="width")
+    c, base = coords(t, 0), base_of(t, 0)
+    half = (c[:, 1] - base[:, 0]) / 2
+    centre = np.rint((c[:, 1] + base[:, 0]) / 2)
+    assert np.allclose([half[centre == k].max() for k in (0, 1)], 0.4, atol=1e-3)
+
+
+def test_violin_fill_is_the_same_shape_upright():
+    up = Trellis(DIST).violin(x="g", y="v")
+    spec, _ = scene(up)
+    assert [lr["type"] for lr in spec["layers"]] == ["band", "line"]
+    assert spec["layers"][0]["family"] == spec["layers"][1]["family"] == 0
+    c, base = coords(up, 0), base_of(up, 0)
+    centre = np.rint((c[:, 0] + c[:, 2]) / 2).astype(int)
+    area = (c[:, 2] - c[:, 0]) * ((base[:, 0] - c[:, 1]) + (base[:, 1] - c[:, 3])) / 2
+    sideways = violin_areas(Trellis(DIST).violin(x="v", y="g"))
+    for k in (0, 1):
+        assert np.isclose(np.abs(area[centre == k]).sum(), sideways[k], rtol=1e-6)
+
+
+def test_violin_quartiles_points_and_tooltip():
+    t = Trellis(DIST).violin(x="g", y="v")
+    a = np.asarray(DIST["v"][:200])
+    q1, med, q3 = np.percentile(a, [25, 50, 75])
+    lines = coords(t, 1)
+    flat = lines[np.isclose(lines[:, 1], lines[:, 3])]
+    for q in (q1, med, q3):
+        assert np.any(np.isclose(flat[:, 1], q))
+    median = flat[np.isclose(flat[:, 1], med)][0]
+    quartile = flat[np.isclose(flat[:, 1], q1)][0]
+    assert median[2] - median[0] > quartile[2] - quartile[0]  # the median goes across
+    tips = scene(t)[0]["layers"][0]["tips"]
+    assert tips["names"] == ["g", "n", "median", "q1", "q3"]
+    assert tips["values"][1][:2] == ["b", "100"]
+    data = {**DIST, "id": [f"r{i}" for i in range(300)]}
+    p = Trellis(data).violin(x="g", y="v", inner="points", tooltip=["id"])
+    spec, _ = scene(p)
+    assert [lr["type"] for lr in spec["layers"]] == ["band", "line", "points"]
+    assert spec["layers"][2]["count"] == 300
+    assert len(coords(p, 1)) == len(coords(p, 0)) * 2 // 3  # sides only: no quartiles
+    assert t._tooltip(0, 0)[0][0] == "g"
+    assert p._tooltip(2, 0)[0][0] == "id"
+    assert len(scene(Trellis(DIST).violin(x="g", y="v", inner=None))[0]["layers"]) == 2
+
+
+def test_violin_selects_whole_violins_dodges_and_checks_its_arguments():
+    t = Trellis(DIST).violin(x="g", y="v")
+    t.select(x=["b"])
+    assert len(t.selected()["g"]) == 100
+    d = Trellis(DIST).violin(x="g", y="v", color="c")
+    c = coords(d, 1)
+    centres = np.unique(np.round((c[:, 0] + c[:, 2]) / 2, 1))
+    assert {-0.2, 0.2, 0.8, 1.2} <= set(centres.tolist())
+    one = {"g": ["a", "a", "b"], "v": [1.0, 2.0, 5.0]}  # b: one value, no density
+    spec, _ = scene(Trellis(one).violin(x="g", y="v"))
+    assert spec["layers"][0]["count"] > 0
+    v = Trellis(DIST).violin
+    for bad, match in [
+        (lambda: v(x="g", y="v", scale="size"), "scale"),
+        (lambda: v(x="g", y="v", inner="box"), "inner"),
+        (lambda: v(x="g", y="v", gridsize=1), "gridsize"),
+        (lambda: v(x="g", y="v", bw_adjust=0), "bw_adjust"),
+        (lambda: v(x="g", y="v", width=0), "width"),
+        (lambda: v(x="g", y="v", position="stack"), "position"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            bad()
+    with pytest.raises(ValueError, match="must be numbers"):
+        Trellis(DIST).violin(x="g", y="c")._scene()
+
+
+# ---- error bars -----------------------------------------------------------------------------
+
+
+def test_errorbar_summarises_the_mean_and_its_interval():
+    t = Trellis(DIST).errorbar(x="g", y="v")
+    spec, _ = scene(t)
+    assert [lr["type"] for lr in spec["layers"]] == ["line", "points"]
+    a = np.asarray(DIST["v"][:200])
+    mean, se = a.mean(), a.std(ddof=1) / np.sqrt(200)
+    bar = coords(t, 0)[0]
+    t975 = 1.9719565  # Student's t, 199 degrees of freedom
+    assert np.allclose(bar[[1, 3]], [mean - t975 * se, mean + t975 * se], rtol=1e-5)
+    assert np.isclose(coords(t, 1)[0, 1], mean)
+    assert spec["layers"][0]["tips"]["names"] == ["g", "n", "mean", "95% CI"]
+    caps = coords(t, 0)[2:]
+    assert np.allclose(caps[:, 2] - caps[:, 0], 0.25)  # a quarter of the step between bars
+    for extent, lo, hi, label in [
+        ("se", mean - se, mean + se, "mean ± SE"),
+        ("sd", mean - a.std(ddof=1), mean + a.std(ddof=1), "mean ± SD"),
+        ("range", a.min(), a.max(), "range"),
+    ]:
+        e = Trellis(DIST).errorbar(x="g", y="v", extent=extent, cap=0)
+        assert np.allclose(coords(e, 0)[0, [1, 3]], [lo, hi])
+        assert len(coords(e, 0)) == 2  # no caps
+        assert scene(e)[0]["layers"][0]["tips"]["names"][-1] == label
+    wide = Trellis(DIST).errorbar(x="g", y="v", level=0.99)
+    assert scene(wide)[0]["layers"][0]["tips"]["names"][-1] == "99% CI"
+    assert np.ptp(coords(wide, 0)[0, [1, 3]]) > np.ptp(bar[[1, 3]])
+
+
+def test_errorbar_dodges_selects_and_goes_horizontal():
+    t = Trellis(DIST).errorbar(x="g", y="v", color="c")
+    bars = coords(t, 0)[:4]
+    assert np.allclose(np.sort(bars[:, 0]), [-0.2, 0.2, 0.8, 1.2])
+    t.select(x=["a"])
+    assert len(t.selected()["g"]) == 200
+    h = Trellis(DIST).errorbar(x="v", y="g", points=False)
+    spec, _ = scene(h)
+    assert spec["y"]["kind"] == "band"
+    assert [lr["type"] for lr in spec["layers"]] == ["line"]
+    bar = coords(h, 0)[0]
+    assert bar[1] == bar[3] == 0.0  # along x, at the first position
+
+
+GIVEN = {"k": ["a", "b", "c"], "lo": [1.0, 10.0, 100.0], "hi": [3.0, 30.0, 300.0],
+         "m": [2.0, 20.0, 200.0]}  # fmt: skip
+
+
+def test_errorbar_draws_given_ends():
+    t = Trellis(GIVEN).errorbar(x="k", y="m", ymin="lo", ymax="hi")
+    spec, _ = scene(t)
+    assert [lr["type"] for lr in spec["layers"]] == ["line", "points"]
+    assert coords(t, 0)[:3].tolist() == [[0, 1, 0, 3], [1, 10, 1, 30], [2, 100, 2, 300]]
+    assert coords(t, 1)[:, 1].tolist() == [2, 20, 200]
+    assert t._tooltip(0, 1) == [["k", "b"], ["m", "20"], ["lo", "10"], ["hi", "30"]]
+    t.select(x=["c"])
+    assert list(t.selected()["m"]) == [200.0]
+    h = Trellis(GIVEN, x_scale="log").errorbar(y="k", xmin="lo", xmax="hi")
+    spec, _ = scene(h)
+    assert spec["x"]["kind"] == "log"
+    assert [lr["type"] for lr in spec["layers"]] == ["line"]  # no centre, no points
+    assert np.allclose(coords(h, 0)[:3, [0, 2]], np.log10([[1, 3], [10, 30], [100, 300]]))
+
+
+def test_errorbar_checks_its_arguments():
+    e = Trellis(GIVEN).errorbar
+    for bad, match in [
+        (lambda: e(x="k", ymin="lo"), "both ends"),
+        (lambda: e(x="k", ymin="lo", ymax="hi", xmin="lo", xmax="hi"), "not both"),
+        (lambda: e(y="k", ymin="lo", ymax="hi"), "x gives the positions"),
+        (lambda: e(x="k", xmin="lo", xmax="hi"), "y gives the positions"),
+        (lambda: e(x="k"), "x and y"),
+        (lambda: e(x="k", y="m", extent="iqr"), "extent"),
+        (lambda: e(x="k", y="m", level=1.5), "level"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            bad()
+    with pytest.raises(ValueError, match="holds categories"):
+        Trellis(GIVEN).errorbar(x="m", ymin="k", ymax="hi")._scene()
+
+
 # ---- log scales -----------------------------------------------------------------------------
 
 

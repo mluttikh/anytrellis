@@ -21,9 +21,9 @@ from anytrellis.data import Column, Table
 
 Mark = Literal[
     "line", "points", "bars", "area", "band", "rect", "text", "rule", "hist", "box", "density",
-    "smooth",
+    "smooth", "violin", "errorbar",
 ]  # fmt: skip
-SUMMARIES = ("hist", "box", "density", "smooth")
+SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar")
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "dodge", "identity"]
 
@@ -60,6 +60,8 @@ class Layer:
     # summaries (hist, box, density): their options; on a drawn part, the summary's mark
     stat_args: dict[str, Any] = field(default_factory=dict)
     stat: str | None = None
+    # lines: steps instead of slopes ("pre", "post" or "mid"), or None
+    step: str | None = None
     # rules: constant positions
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
@@ -144,11 +146,16 @@ def expand(
     return rows[keep], panel_of[keep]
 
 
+STEPS = ("pre", "post", "mid")
+
+
 def line_geometry(
-    rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.ndarray, series: np.ndarray
-) -> Geometry:
+    rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.ndarray, series: np.ndarray,
+    step: str | None = None,
+) -> Geometry:  # fmt: skip
     """Segments between consecutive points of each series (sorted by x), in each panel; a
-    point with no neighbour is a dot (a segment of zero length)."""
+    point with no neighbour is a dot (a segment of zero length). ``step``: as steps (see
+    ``_steps``)."""
     xs, ys, ss = x[rows], y[rows], series[rows]
     order = np.lexsort((xs, ss, panel))
     rows, panel, xs, ys, ss = rows[order], panel[order], xs[order], ys[order], ss[order]
@@ -159,11 +166,48 @@ def line_geometry(
     touched[pairs] = True
     touched[pairs + 1] = True
     dots = np.flatnonzero(valid & ~touched)
+    if step is not None:
+        return _steps(pairs, dots, panel, xs, ys, rows, step)
     first = np.concatenate([pairs, dots])
     second = np.concatenate([pairs + 1, dots])
     geom = Geometry(panel[first], xs[first], ys[first], xs[second], ys[second], rows[first],
                     rows_end=rows[second])  # fmt: skip
     return geom.take(np.argsort(geom.panel, kind="stable"))
+
+
+def _steps(pairs: np.ndarray, dots: np.ndarray, panel: np.ndarray, xs: np.ndarray,
+           ys: np.ndarray, rows: np.ndarray, step: str) -> Geometry:  # fmt: skip
+    """A step line: between points a and b, a level and a riser. ``post``: a's value holds
+    until b; ``pre``: b's value from a on; ``mid``: each holds to halfway.
+
+    Every level starts at its point (so hovering it reports the point), and so does every
+    riser but ``mid``'s, which runs between two levels: the browser hovers the levels of a
+    step line, not its risers. Each point is the start of a level: the last's (``post``)
+    and the first's (``pre``) of length 0."""
+    if step not in STEPS:
+        raise ValueError(f"step must be one of {STEPS} or None, got {step!r}")
+    a, b = pairs, pairs + 1
+    xa, ya, xb, yb = xs[a], ys[a], xs[b], ys[b]
+    ra, rb = rows[a], rows[b]
+    pieces: list[tuple[np.ndarray, ...]] = []  # (point, x0, y0, x1, y1, row, row_end)
+    if step == "post":
+        pieces += [(a, xa, ya, xb, ya, ra, ra), (b, xb, yb, xb, ya, rb, ra)]
+        last = np.setdiff1d(b, a)  # a series' last point: a level of length 0
+        pieces.append((last, xs[last], ys[last], xs[last], ys[last], rows[last], rows[last]))
+    elif step == "pre":
+        pieces += [(a, xa, ya, xa, yb, ra, rb), (b, xb, yb, xa, yb, rb, rb)]
+        first = np.setdiff1d(a, b)
+        pieces.append((first, xs[first], ys[first], xs[first], ys[first], rows[first],
+                       rows[first]))  # fmt: skip
+    else:
+        xm = (xa + xb) / 2
+        pieces += [(a, xa, ya, xm, ya, ra, ra), (a, xm, ya, xm, yb, ra, rb),
+                   (b, xb, yb, xm, yb, rb, rb)]  # fmt: skip
+    pieces.append((dots, xs[dots], ys[dots], xs[dots], ys[dots], rows[dots], rows[dots]))
+    point, x0, y0, x1, y1, r0, r1 = (np.concatenate([p[i] for p in pieces]) for i in range(7))
+    geom = Geometry(panel[point], x0, y0, x1, y1, r0, rows_end=r1)
+    # in order along each series, as the points are
+    return geom.take(np.lexsort((np.arange(len(point)), point)))
 
 
 def area_geometry(

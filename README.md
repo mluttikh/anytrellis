@@ -18,9 +18,9 @@ pip install "anytrellis[png]"        # with resvg-py, for save_png
 
 Status: early development (0.1). One panel per level of the facet columns, every panel
 drawn with the same layers (lines, points, bars, areas, rects, text, histograms, box plots,
-densities, reference rules), on shared scales unless
-told otherwise. Every panel goes into one canvas, so a grid of hundreds of panels and
-millions of marks stays interactive.
+violins, densities, error bars, reference rules), on shared scales unless told otherwise.
+Every panel goes into one canvas, so a grid of hundreds of panels and millions of marks
+stays interactive.
 
 ```python
 from anytrellis import Trellis
@@ -47,7 +47,7 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 
 | method | draws |
 |---|---|
-| `line(x, y, color, group)` | a line per group (and colour) |
+| `line(x, y, color, group, step=None\|"post"\|"pre"\|"mid")` | a line per group (and colour), or steps |
 | `points(x, y, color, size)` | a point per row |
 | `bars(x, y, color, position="stack"\|"dodge"\|"identity")` | a bar per row, from zero |
 | `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |
@@ -57,7 +57,9 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `rule(x=..., y=...)` | reference lines across every panel |
 | `hist(x, color, bins=30 \| binwidth=, stat="count"\|"percent"\|"density")` | a histogram per panel, stacked by colour |
 | `box(x, y, color, whis=1.5)` | box plots per position (and colour, side by side); sideways when y is the category |
+| `violin(x, y, color, scale="area"\|"count"\|"width", inner="quartiles")` | violins per position, placed like boxes |
 | `density(x, color, fill=False, bw_adjust=1)` | a kernel density curve per panel and colour |
+| `errorbar(x, y, color, extent="ci"\|"se"\|"sd"\|"range")` / `errorbar(x, ymin=, ymax=)` | a mean and its interval per position, or intervals you computed |
 | `smooth(x, y, color, method="loess"\|"linear", se=True)` | a fitted line per panel and colour, with a confidence band |
 
 A number column as `color` gets a continuous scale (and a gradient legend); text gets a
@@ -67,14 +69,14 @@ the panel's edge goes to the other side of its point. `tooltip=[...]` adds colum
 what hovering shows (a box: to its outliers'); every mark but `text` and `rule` can be
 selected.
 
-`hist`, `box`, `density` and `smooth` summarise each panel's rows in Python, and are drawn
-as bars, boxes, lines, bands and points. A histogram's bins are the same in every panel (round widths
+`hist`, `box`, `violin`, `density`, `errorbar` and `smooth` summarise each panel's rows in
+Python, and are drawn as bars, boxes, violins, lines, bands and points. A histogram's bins are the same in every panel (round widths
 by default), and so are a density's x values, so the panels compare. `stat="percent"`
 and `"density"` scale each panel's counts. With `facet="exclude"` a summary covers the
 other panels' rows, in grey: each panel against the rest. Hovering a box shows its
 quartiles, its count and its whiskers' reach; a smooth line, its confidence interval.
 `smooth` fits loess (local lines with tricube weights over a `span` share of the points)
-or least squares, and its band is the `level` (95%) interval for the mean. Brushing selects whole bins and boxes, and
+or least squares, and its band is the `level` (95%) interval for the mean. Brushing selects whole bins, boxes and violins, and
 `t.selected("hist")` gives the rows they stand for.
 
 ## Facets and scales

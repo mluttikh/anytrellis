@@ -23,6 +23,7 @@ from anytrellis.data import Table
 from anytrellis.facets import Grid, Order, Summary, build_grid, ordered_levels
 from anytrellis.layers import (
     FACET_MODES,
+    STEPS,
     SUMMARIES,
     FacetMode,
     Geometry,
@@ -184,17 +185,19 @@ class Trellis:
         y: str,
         color: str | None = None,
         group: str | Sequence[str] | None = None,
+        step: str | None = None,
         width: float = 1.5,
         opacity: float = 1.0,
         facet: FacetMode = "auto",
         tooltip: Sequence[str] = (),
         name: str | None = None,
     ) -> Self:
-        """Lines through the points of each series, sorted by x.
+        """Lines through the points of each series, sorted by x; or steps between them.
 
         ```python
         t = Trellis(gapminder, wrap="region")
         t.line(x="year", y="life_expect", group="country", width=1)
+        t.line(x="time", y="state", step="post")    # each value holds until the next
         ```
 
         Args:
@@ -204,6 +207,10 @@ class Trellis:
             color: A colour column (one line per category; numbers along a colormap) or
                 one colour.
             group: Column(s) whose combinations are separate lines (besides ``color``).
+            step: Steps instead of slopes: ``"post"`` (each value holds until the next
+                point: a level that changes at the points, as a counter or a state),
+                ``"pre"`` (each value holds back to the point before) or ``"mid"`` (each
+                holds to halfway between the points).
             width: Line width in CSS pixels.
             opacity: 0 to 1.
             facet: ``"auto"`` (each row in its panel; every panel when the data has no facet
@@ -212,8 +219,11 @@ class Trellis:
             tooltip: Columns shown on hover, besides x and y.
             name: The layer's name.
         """
+        if step not in (None, *STEPS):
+            raise ValueError(f"step must be one of {STEPS} or None, got {step!r}")
         layer = Layer("line", name or self._name("line"), data, x, y, color, _names(group),
-                      facet, width=width, opacity=opacity, tooltip=list(tooltip))  # fmt: skip
+                      facet, width=width, opacity=opacity, tooltip=list(tooltip),
+                      step=step)  # fmt: skip
         return self._add(layer)
 
     def points(
@@ -656,6 +666,181 @@ class Trellis:
         args = {"fill": fill, "bw_adjust": bw_adjust, "cut": cut, "gridsize": gridsize}
         return self._add(Layer("density", name or self._name("density"), data, x, None, color,
                                (), facet, width=width, opacity=opacity,
+                               stat_args=args))  # fmt: skip
+
+    def violin(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        color: str | None = None,
+        position: Position = "dodge",
+        width: float = 0.8,
+        scale: str = "area",
+        inner: str | None = "quartiles",
+        bw_adjust: float = 1.0,
+        cut: float = 2.0,
+        gridsize: int = 100,
+        linewidth: float = 1.0,
+        size: float = 3.0,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        tooltip: Sequence[str] = (),
+        name: str | None = None,
+    ) -> Self:
+        """Violins: the values' distribution at each position (and colour) in each panel,
+        as their density mirrored around the position, with the median and quartiles
+        inside. Where a box plot shows five numbers, a violin shows the shape: two peaks,
+        a long tail.
+
+        ```python
+        Trellis(penguins, wrap="island").violin(x="species", y="body_mass_g")
+        Trellis(penguins).violin(x="body_mass_g", y="species", color="sex")  # horizontal
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The positions (categories, or numbers), or the values for horizontal violins.
+            y: The values, or (a category column) the positions of horizontal violins.
+            color: A category column (its violins side by side) or one colour.
+            position: With a colour: ``"dodge"`` (default, side by side) or ``"identity"``.
+            width: The widest violin's width, as a fraction of the step between positions.
+            scale: ``"area"`` (every violin the same area), ``"count"`` (areas as the
+                number of values) or ``"width"`` (every violin as wide).
+            inner: ``"quartiles"`` (the median across it, the quartiles half way),
+                ``"points"`` (the values, along its middle) or None.
+            bw_adjust: The bandwidth, as a multiple of Scott's rule's.
+            cut: How far past the values each violin goes, in bandwidths.
+            gridsize: Points along each violin.
+            linewidth: The outline's (and the quartiles') width in CSS pixels.
+            size: The values' diameter in CSS pixels (``inner="points"``).
+            opacity: 0 to 1 (the fill is lighter).
+            facet: As for ``line``.
+            tooltip: Columns shown when hovering a value (``inner="points"``).
+            name: The layer's name.
+        """
+        from anytrellis.stats import VIOLIN_INNER, VIOLIN_SCALES
+
+        if position not in ("dodge", "identity"):
+            raise ValueError(f"position must be 'dodge' or 'identity', got {position!r}")
+        if not 0 < width <= 1:
+            raise ValueError("width must be in (0, 1]")
+        if scale not in VIOLIN_SCALES:
+            raise ValueError(f"scale must be one of {VIOLIN_SCALES}, got {scale!r}")
+        if inner not in VIOLIN_INNER:
+            raise ValueError(f"inner must be one of {VIOLIN_INNER}, got {inner!r}")
+        if not bw_adjust > 0:
+            raise ValueError("bw_adjust must be positive")
+        if gridsize < 2:
+            raise ValueError("gridsize must be at least 2")
+        args = {"width": width, "scale": scale, "inner": inner, "bw_adjust": bw_adjust,
+                "cut": cut, "gridsize": gridsize}  # fmt: skip
+        return self._add(Layer("violin", name or self._name("violin"), data, x, y, color, (),
+                               facet, width=linewidth, size=size, opacity=opacity,
+                               position=position, tooltip=list(tooltip),
+                               stat_args=args))  # fmt: skip
+
+    def errorbar(
+        self,
+        data: Any = None,
+        *,
+        x: str | None = None,
+        y: str | None = None,
+        ymin: str | None = None,
+        ymax: str | None = None,
+        xmin: str | None = None,
+        xmax: str | None = None,
+        extent: str = "ci",
+        level: float = 0.95,
+        color: str | None = None,
+        position: Position = "dodge",
+        width: float = 0.8,
+        cap: float = 0.25,
+        points: bool = True,
+        linewidth: float = 1.5,
+        size: float = 6.0,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        tooltip: Sequence[str] = (),
+        name: str | None = None,
+    ) -> Self:
+        """Error bars: an interval at each position, with caps, and its centre as a point.
+
+        From the values: the mean of each position's (and colour's) values with an
+        interval around it (``extent``). Or as given: from ``ymin`` to ``ymax`` at each x
+        (``xmin`` to ``xmax`` at each y: horizontal), centred on ``y`` (``x``) if given.
+
+        ```python
+        Trellis(penguins, wrap="island").errorbar(x="species", y="body_mass_g")  # mean, 95% CI
+        Trellis(fits, wrap="site").errorbar(x="dose", y="effect", ymin="lo", ymax="hi")
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The positions; or the values (a category ``y``), or the centres (with
+                ``xmin`` and ``xmax``).
+            y: The values (a category or number ``x``); or the centres (with ``ymin`` and
+                ``ymax``), or the positions (with ``xmin`` and ``xmax``).
+            ymin: Each vertical bar's low end (with ``ymax``).
+            ymax: Its high end.
+            xmin: Each horizontal bar's low end (with ``xmax``).
+            xmax: Its high end.
+            extent: From the values: ``"ci"`` (the mean's ``level`` confidence interval),
+                ``"se"`` (the mean ± its standard error), ``"sd"`` (± one standard
+                deviation) or ``"range"`` (the lowest value to the highest). On a log axis,
+                of the logs (the centre is the geometric mean).
+            level: The confidence level of ``extent="ci"``.
+            color: A category column (its bars side by side) or one colour.
+            position: With a colour: ``"dodge"`` (default, side by side) or ``"identity"``.
+            width: The room the bars of a position share (dodged), as a fraction of the
+                step between positions.
+            cap: The caps' width, as a fraction of each bar's room: the step between
+                positions, or its share of it when dodged (0: no caps).
+            points: Draw the centre as a point.
+            linewidth: In CSS pixels.
+            size: The centre's diameter in CSS pixels.
+            opacity: 0 to 1.
+            facet: As for ``line``.
+            tooltip: Columns shown on hover (bars as given).
+            name: The layer's name.
+        """
+        from anytrellis.stats import EXTENTS
+
+        vertical = ymin is not None or ymax is not None
+        horizontal = xmin is not None or xmax is not None
+        if vertical and horizontal:
+            raise ValueError("errorbar(): give ymin and ymax, or xmin and xmax, not both")
+        if (vertical and (ymin is None or ymax is None)) or (
+                horizontal and (xmin is None or xmax is None)):  # fmt: skip
+            raise ValueError("errorbar(): give both ends: ymin and ymax (or xmin and xmax)")
+        if vertical and x is None:
+            raise ValueError("errorbar(ymin=, ymax=): x gives the positions")
+        if horizontal and y is None:
+            raise ValueError("errorbar(xmin=, xmax=): y gives the positions")
+        if not (vertical or horizontal) and (x is None or y is None):
+            raise ValueError("errorbar(): x and y (the positions and the values), or the ends "
+                             "with ymin and ymax (xmin and xmax)")  # fmt: skip
+        if extent not in EXTENTS:
+            raise ValueError(f"extent must be one of {EXTENTS}, got {extent!r}")
+        if not 0 < level < 1:
+            raise ValueError("level must be between 0 and 1")
+        if position not in ("dodge", "identity"):
+            raise ValueError(f"position must be 'dodge' or 'identity', got {position!r}")
+        if not 0 < width <= 1:
+            raise ValueError("width must be in (0, 1]")
+        if not cap >= 0:
+            raise ValueError("cap must be at least 0")
+        args: dict[str, Any] = {"extent": extent, "level": level, "width": width, "cap": cap,
+                                "points": points, "horizontal": horizontal,
+                                "lo": ymin or xmin, "hi": ymax or xmax}  # fmt: skip
+        if vertical:
+            args["y_columns"] = (ymin, ymax)
+        if horizontal:
+            args["x_columns"] = (xmin, xmax)
+        return self._add(Layer("errorbar", name or self._name("errorbar"), data, x, y, color,
+                               (), facet, width=linewidth, size=size, opacity=opacity,
+                               position=position, tooltip=list(tooltip),
                                stat_args=args))  # fmt: skip
 
     def rule(
@@ -1153,7 +1338,9 @@ class Trellis:
             table = self._data if layer.data is None else Table(layer.data)
             if table is None:
                 raise ValueError(f"{layer.mark}() needs data: give the plot or the layer a table")
-            for name in [layer.x, layer.y, layer.x2, layer.y2, *layer.group, *layer.tooltip]:
+            ends = [*layer.stat_args.get("x_columns", ()), *layer.stat_args.get("y_columns", ())]
+            for name in [layer.x, layer.y, layer.x2, layer.y2, *layer.group, *layer.tooltip,
+                         *ends]:  # fmt: skip
                 if name is not None:
                     table.column(name)
             if layer.color is not None and layer.color not in table and not is_color(layer.color):
@@ -1383,8 +1570,10 @@ def _scaled(layer: Layer, table: Table, logs: list[str]) -> Table:
     names = set()
     if "x" in logs:
         names |= {n for n in (layer.x, layer.x2) if n is not None}
+        names |= set(layer.stat_args.get("x_columns", ()))
     if "y" in logs:
         names |= {n for n in (layer.y, layer.y2) if n is not None}
+        names |= set(layer.stat_args.get("y_columns", ()))
     return table.log_scaled(names) if names else table
 
 
@@ -1558,7 +1747,7 @@ def _geometry(
         extra = list(layer.group)
         if color_col is not None and color_col.kind == "category":
             extra.append(color_col.name)
-        geom = line_geometry(rows, panel, x, y, series_codes(table, extra))
+        geom = line_geometry(rows, panel, x, y, series_codes(table, extra), layer.step)
     elif layer.mark == "area":
         extra = list(layer.group)
         if color_col is not None and color_col.kind == "category":
@@ -1646,6 +1835,7 @@ def _layer_spec(
         "opacity": layer.opacity,
         "tooltip": bool(layer.tooltip),
         "context": layer.facet == "exclude",
+        "step": layer.step if layer.mark == "line" else None,
     }
 
 

@@ -19,7 +19,7 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 - [Draw lines, points and bars](marks.md)
 - [Draw areas, bands, rects and text](more-marks.md): ranges, heatmaps, labels, reference
   lines.
-- [Show distributions](distributions.md): histograms, box plots and densities.
+- [Show distributions](distributions.md): histograms, box plots, violins, densities and error bars.
 - [Fit a smooth line](smooth.md): loess or least squares, with a confidence band.
 - [Colours, legends and order](colours.md)
 

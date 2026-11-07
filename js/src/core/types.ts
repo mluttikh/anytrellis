@@ -79,6 +79,9 @@ export interface MarkLayerSpec {
   tooltip: boolean;
   /** Context (the other panels' data): not hovered, not selected. */
   context: boolean;
+  /** A line drawn as steps ("pre", "post", "mid"): hovering it finds its levels, each
+   * starting at its point, not its risers. */
+  step?: string | null;
   /** Per instance, its row's key of the link columns (uint32): a selection grows to every
    * mark sharing a key. Absent: not linked. */
   link?: BufferRef | null;
