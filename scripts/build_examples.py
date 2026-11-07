@@ -1020,7 +1020,8 @@ def main() -> None:
     MARIMO.mkdir(parents=True, exist_ok=True)
     for name, cells in NOTEBOOKS.items():
         nb = JUPYTER / f"{name}.ipynb"
-        nb.write_text(json.dumps(ipynb(name, cells), indent=1, ensure_ascii=False) + "\n")
+        text = json.dumps(ipynb(name, cells), indent=1, ensure_ascii=False) + "\n"
+        nb.write_text(text, encoding="utf-8")
         mo = MARIMO / f"{name}.py"
         subprocess.run([sys.executable, "-m", "marimo", "convert", str(nb), "-o", str(mo)],
                        check=True, capture_output=True)  # fmt: skip

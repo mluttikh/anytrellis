@@ -1,0 +1,178 @@
+# Lint, test (Python on Linux, macOS and Windows; TypeScript; the plots in a browser), and
+# build the sdist and wheel, checked and uploaded as the "dist" artifact. The release
+# workflow runs this first and publishes that artifact.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FORCE_COLOR: "1"
+  UV_FROZEN: "1" # install exactly uv.lock
+
+jobs:
+  lint:
+    name: Lint (ruff, ty)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - name: Build the JavaScript bundle
+        working-directory: js
+        run: npm ci && npm run build
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run ty check
+      - name: The example notebooks are as scripts/build_examples.py writes them
+        run: |
+          uv run python scripts/build_examples.py
+          git diff --exit-code -- examples
+
+  js:
+    name: TypeScript (typecheck, unit tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: js
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  test:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.12", "3.13", "3.14", "3.15"]
+        include:
+          - os: macos-latest
+            python: "3.15"
+          - os: windows-latest
+            python: "3.15"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - name: Build the JavaScript bundle
+        working-directory: js
+        run: npm ci && npm run build
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync
+      - run: uv run pytest
+
+  browser:
+    name: Plots in Chromium (WebGL2, Canvas 2D)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - name: Build the JavaScript bundle and install Chromium
+        working-directory: js
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync
+      - name: Write the test pages
+        run: uv run python js/test/pages.py "$RUNNER_TEMP/pages"
+      - name: Select, legend and zoom, in each renderer
+        working-directory: js
+        run: |
+          pages="$RUNNER_TEMP/pages"
+          shots="$RUNNER_TEMP/shots"
+          mkdir -p "$shots"
+          for r in webgl2 canvas2d; do
+            echo "::group::$r"
+            node test/select.mjs "$pages/years.html" "$shots" "$r"
+            node test/select.mjs "$pages/gap-link.html" "$shots" "$r"
+            node test/legend.mjs "$pages/years.html" "$shots" "$r"
+            node test/legend.mjs "$pages/density.html" "$shots" "$r"
+            echo "::endgroup::"
+          done
+          node test/zoom.mjs "$pages/sensors.html" "$shots"
+          node test/zoom.mjs "$pages/years.html" "$shots"
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+
+  build:
+    name: Build and check the sdist and wheel
+    needs: [lint, js, test, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+      - name: Install the JavaScript build tools
+        working-directory: js
+        run: npm ci
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build (the hook builds the bundle into the sdist; the wheel is built from it)
+        run: uv build
+      - run: uvx twine check --strict dist/*
+      - name: Check the contents, version and tag; install the wheel and draw
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            uv run --no-project python scripts/check_dist.py --tag "$GITHUB_REF_NAME"
+          else
+            uv run --no-project python scripts/check_dist.py
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

@@ -33,6 +33,11 @@ dependencies = [
     { name = "numpy" },
 ]
 
+[package.optional-dependencies]
+examples = [
+    { name = "polars" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
@@ -51,7 +56,9 @@ requires-dist = [
     { name = "anywidget", specifier = ">=0.9.13" },
     { name = "narwhals", specifier = ">=1.30" },
     { name = "numpy", specifier = ">=1.24" },
+    { name = "polars", marker = "extra == 'examples'", specifier = ">=1.30" },
 ]
+provides-extras = ["examples"]
 
 [package.metadata.requires-dev]
 dev = [

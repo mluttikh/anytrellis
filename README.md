@@ -1,10 +1,14 @@
 # anytrellis
 
+[![PyPI](https://img.shields.io/pypi/v/anytrellis)](https://pypi.org/project/anytrellis/)
+[![CI](https://github.com/mluttikh/anytrellis/actions/workflows/ci.yml/badge.svg)](https://github.com/mluttikh/anytrellis/actions/workflows/ci.yml)
+
 Trellis, facet and small-multiple plots for Jupyter and marimo notebooks, drawn on the GPU
 (WebGPU, WebGL2, or Canvas 2D on machines without a usable GPU).
 
 ```bash
 pip install anytrellis
+pip install "anytrellis[examples]"   # with Polars, for the example notebooks and datasets
 ```
 
 Status: early development (0.1). One panel per level of the facet columns, every panel
@@ -194,8 +198,10 @@ Licence: MIT.
 
 ## Examples
 
-Notebooks in [`examples/jupyter`](examples/jupyter) (JupyterLab, VS Code) and the same in
-[`examples/marimo`](examples/marimo) (`marimo edit examples/marimo/01_getting_started.py`):
+Notebooks in [`examples/jupyter`](https://github.com/mluttikh/anytrellis/tree/main/examples/jupyter)
+(JupyterLab, VS Code) and the same in
+[`examples/marimo`](https://github.com/mluttikh/anytrellis/tree/main/examples/marimo)
+(`marimo edit examples/marimo/01_getting_started.py`):
 
 | notebook | what it shows |
 |---|---|
@@ -209,7 +215,9 @@ Notebooks in [`examples/jupyter`](examples/jupyter) (JupyterLab, VS Code) and th
 
 Their data comes with the package: `from anytrellis.datasets import load; load("barley")`
 (anscombe, barley, cars, gapminder, penguins, population, seattle_weather, stocks; from
-vega-datasets). The notebooks are written once in `scripts/build_examples.py`, which
+vega-datasets; their sources and licences are in
+[`SOURCES.md`](https://github.com/mluttikh/anytrellis/blob/main/src/anytrellis/datasets/SOURCES.md)).
+The notebooks are written once in `scripts/build_examples.py`, which
 writes both sets: run `uv run python scripts/build_examples.py` after changing it.
 
 ## Development
@@ -223,8 +231,41 @@ node test/visual.mjs <dir of save_html pages>      # screenshots per backend
 node test/interact.mjs <page.html>                 # hover, linked zoom, pan, reset, dark
 node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, undo
 node test/select.mjs <page.html> [dir] [renderer]  # brushing, moving, clearing
+node test/legend.mjs <page.html> [dir] [renderer]  # clicking legend entries
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
 node test/linked.mjs <url of 07 in JupyterLab>     # linked plots: brushing across plots
 ```
 
-Pages force a backend with `?renderer=webgpu|webgl2|canvas2d` in their URL.
+Pages force a backend with `?renderer=webgpu|webgl2|canvas2d` in their URL;
+`uv run python js/test/pages.py <dir>` writes the pages the browser checks run on.
+
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff
+and ty, the TypeScript checks, pytest on Python 3.12 to 3.15 (Linux; macOS and Windows on
+3.15), the select, legend and zoom checks in headless Chromium (WebGL2 and Canvas 2D), and
+builds the sdist and wheel, checked by `scripts/check_dist.py` (contents, version, a clean
+install that draws a plot).
+
+## Releasing
+
+Releases go to PyPI from GitHub Actions by
+[trusted publishing](https://docs.pypi.org/trusted-publishers/): no API token is stored.
+
+Once, before the first release:
+
+1. On [pypi.org](https://pypi.org/manage/account/publishing/), add a pending publisher:
+   project `anytrellis`, owner `mluttikh`, repository `anytrellis`, workflow
+   `release.yml`, environment `pypi`. For dry runs, do the same on
+   [test.pypi.org](https://test.pypi.org/manage/account/publishing/) with environment
+   `testpypi`.
+2. On GitHub (Settings > Environments), the environments `pypi` and `testpypi`; giving
+   `pypi` a required reviewer makes every release wait for an approval.
+
+Each release:
+
+1. Set the version in `pyproject.toml`, and in `CHANGELOG.md` move *Unreleased* under a
+   heading `## [x.y.z] - date` (and update the links at the bottom).
+2. Optionally, a dry run: Actions > Release > Run workflow publishes to TestPyPI
+   (`pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ anytrellis`).
+3. Commit, tag and push: `git tag vx.y.z && git push origin main vx.y.z`. The release
+   workflow runs CI on the tag, checks that the tag matches the version, publishes to PyPI
+   and makes a GitHub release with the changelog's section and the files.

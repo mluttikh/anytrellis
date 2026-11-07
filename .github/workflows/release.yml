@@ -1,0 +1,96 @@
+# Publish a release: push a tag v<version> (the version in pyproject.toml) and this runs CI,
+# publishes the checked sdist and wheel to PyPI, and makes a GitHub release with them and
+# the changelog's section. Run it by hand (Actions > Release > Run workflow) for a dry run
+# to TestPyPI instead.
+#
+# PyPI is reached by trusted publishing (no token): on pypi.org (and test.pypi.org for the
+# dry run) the project trusts this repository's release.yml in environment "pypi"
+# ("testpypi"). See the README's "Releasing".
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  testpypi:
+    name: Publish to TestPyPI (dry run)
+    if: github.event_name == 'workflow_dispatch'
+    needs: ci
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/anytrellis
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: ci
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/anytrellis
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub release
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # the lines under "## [<version>]", up to the next heading or the link definitions
+          awk -v v="$version" '
+            /^## \[/ { if (on) exit; on = index($0, "## [" v "]") == 1; next }
+            /^\[[^]]+\]: / { exit }
+            on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+          cat notes.md
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *a*|*b*|*rc*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --title "anytrellis ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md --verify-tag $prerelease

@@ -1007,10 +1007,10 @@ class Trellis:
             f"<title>{name}</title>"
             "<style>body{margin:16px;font-family:system-ui,sans-serif;background:#fff}"
             "@media (prefers-color-scheme: dark){body{background:#12171d}}"
-            f"{css.read_text()}</style>"
+            f"{css.read_text(encoding='utf-8')}</style>"
             "</head><body><div class='anytrellis-embed'>"
             f"<script type='application/json'>{data}</script></div>"
-            f"<script>{script.read_text()}</script></body></html>"
+            f"<script>{script.read_text(encoding='utf-8')}</script></body></html>"
         )
 
     def save_html(self, path: str | Path, *, title: str | None = None) -> Path:

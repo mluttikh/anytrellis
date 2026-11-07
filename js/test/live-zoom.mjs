@@ -5,7 +5,7 @@
 import { chromium } from "@playwright/test";
 
 const [, , mode, url, exe] = process.argv;
-const browser = await chromium.launch({ executablePath: exe, args: ["--enable-unsafe-webgpu", "--use-angle=metal"] });
+const browser = await chromium.launch({ executablePath: exe, args: ["--enable-unsafe-webgpu", ...(process.platform === "darwin" ? ["--use-angle=metal"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));

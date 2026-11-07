@@ -17,7 +17,7 @@ function executable() {
     if (existsSync(app)) return app;
   }
 }
-const browser = await chromium.launch({ executablePath: executable(), args: ["--enable-unsafe-webgpu", "--use-angle=metal"] });
+const browser = await chromium.launch({ executablePath: executable(), args: ["--enable-unsafe-webgpu", ...(process.platform === "darwin" ? ["--use-angle=metal"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"])] });
 const page = await browser.newPage({ viewport: { width: 1000, height: 800 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));

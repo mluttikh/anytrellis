@@ -24,7 +24,7 @@ def test_there_are_examples() -> None:
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.stem)
 def test_notebook_runs(path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)  # save_html writes here
-    cells = json.loads(path.read_text())["cells"]
+    cells = json.loads(path.read_text(encoding="utf-8"))["cells"]
     namespace: dict[str, Any] = {}
     for cell in cells:
         if cell["cell_type"] == "code":
