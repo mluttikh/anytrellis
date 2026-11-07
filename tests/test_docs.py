@@ -53,7 +53,7 @@ def test_every_page_in_the_nav_exists_and_every_page_is_in_it() -> None:
     config = tomllib.loads((ROOT / "zensical.toml").read_text(encoding="utf-8"))
     nav = _nav_pages(config["project"]["nav"])
     assert [p for p in nav if not (DOCS / p).exists()] == []
-    pages = {str(p.relative_to(DOCS)) for p in DOCS.rglob("*.md")}
+    pages = {p.relative_to(DOCS).as_posix() for p in DOCS.rglob("*.md")}
     assert pages - set(nav) == set()
 
 
@@ -61,7 +61,7 @@ def _links() -> list[tuple[str, str]]:
     found = []
     for page in sorted(DOCS.rglob("*.md")):
         text = re.sub(r"```.*?```", "", page.read_text(encoding="utf-8"), flags=re.DOTALL)
-        found += [(str(page.relative_to(DOCS)), target)
+        found += [(page.relative_to(DOCS).as_posix(), target)
                   for target in re.findall(r"\]\(([^)\s]+)\)", text)
                   if not re.match(r"^(https?:|mailto:|#)", target) and ".md" in target]  # fmt: skip
     found += [("gallery.md", e.guide) for e in _gallery().entries()]
