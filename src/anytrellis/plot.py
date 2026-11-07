@@ -9,6 +9,7 @@ buffers, which the browser draws on the GPU.
 from __future__ import annotations
 
 import base64
+import copy
 import html
 import json
 from collections.abc import Sequence
@@ -63,7 +64,17 @@ from anytrellis.pages import (
     trends,
 )
 from anytrellis.pages import order as panel_order
-from anytrellis.query import panel_summaries
+from anytrellis.query import (
+    among_labels,
+    combos,
+    distinct,
+    drawn,
+    never,
+    panel_extents,
+    panel_summaries,
+    panel_trends,
+    within,
+)
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
 from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
 from anytrellis.stats import Members, Part
@@ -84,6 +95,11 @@ if TYPE_CHECKING:
 SPEC_VERSION = 1
 RENDERERS = ("auto", "webgpu", "webgl2", "canvas2d")
 LEGENDS = ("auto", "bottom")
+LOADS = ("all", "pages")
+PAGE_MARKS = ("points", "line", "text")
+"""The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
+WINDOWS_KEPT = 4
+"""``load="pages"``: the windows of rows kept, to turn back to without reading them again."""
 _STATIC = Path(__file__).parent / "static"
 
 
@@ -139,6 +155,12 @@ class Trellis:
             selection grows to every row sharing them, in all panels and layers that have
             the columns. Select a few countries in 1955 and see them in every year.
             (Separate plots sharing a selection: ``anytrellis.link``.)
+        load: How a lazy table's rows are read: ``"all"`` (every row, once) or ``"pages"``
+            (a paged wrap: only the rows of the panels of the page shown and the pages either
+            side of it, read again as the reader turns the pages; the panels' statistics,
+            the axes' ranges and the colours' levels come from the database). For a table
+            in a database: lines, points and text drawn from the plot's data (other layers
+            bring their own); not with ``link``. ``save_html`` still reads every row.
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
     """
 
@@ -165,9 +187,17 @@ class Trellis:
         legend: str = "auto",
         fit_y: bool = False,
         link: str | Sequence[str] | None = None,
+        load: str = "all",
         renderer: str = "auto",
     ) -> None:
         self._data = None if data is None else Table(data)
+        if load not in LOADS:
+            raise ValueError(f"load must be one of {LOADS}, got {load!r}")
+        self._load = load
+        self._page_tables: dict[int, Table] = {}
+        """``load="pages"``: the layers drawing the plot's data, and the rows read of it."""
+        self._window_rows: dict[Any, Table] = {}
+        """``load="pages"``: the rows of the last few windows read, by window and columns."""
         self._row = _names(row)
         self._col = _names(col)
         self._wrap = _names(wrap)
@@ -180,6 +210,10 @@ class Trellis:
             raise ValueError(f"rows must be at least 1, or 'all', got {rows!r}")
         if isinstance(rows, int) and not self._wrap:
             raise ValueError("rows= pages a wrap: give wrap= (a grid shows all its cells)")
+        if load == "pages" and not self._wrap:
+            raise ValueError("load='pages' reads a paged wrap's pages: give wrap=")
+        if load == "pages" and rows == "all":
+            raise ValueError("load='pages' reads a wrap a page at a time: not with rows='all'")
         self._rows = rows
         self._given_stats: Table | None = None
         self._paging: Paging = {}
@@ -228,6 +262,8 @@ class Trellis:
         self._start: list[_Sent] = []
         """``_full`` as the plot starts (a saved page's)."""
         self._full_scene_cache: tuple[dict[str, Any], Buffers] | None = None
+        self._shadow: Trellis | None = None
+        """``load="pages"``: this plot reading every row, for a saved page."""
 
     # ---- layers -------------------------------------------------------------------------
 
@@ -1173,6 +1209,12 @@ class Trellis:
             if layer.mark == "rule" or layer.facet == "exclude":
                 continue
             table = self._table(layer)
+            if self._on_page(layer):  # from the database: its rows are read a page at a time
+                found_stats = self._page_stats(table, grid, layer)
+                if found_stats is None:
+                    continue
+                stats = found_stats
+                break
             panel_of = grid.assign(table)
             if panel_of is None:
                 continue
@@ -1200,6 +1242,38 @@ class Trellis:
             names = {s.name for s in given}
             stats = [s for s in stats if s.name not in names] + given
         return stats
+
+    def _page_stats(self, whole: Table, grid: Grid, layer: Layer) -> list[Stat] | None:
+        """``load="pages"``: the built-in statistics of a layer, from the database (None:
+        it draws no numbers)."""
+        numeric = [a for a in (layer.y, layer.x) if a is not None and whole.kind(a) == "number"]
+        if not numeric:
+            return None
+        name = numeric[0]
+        x_name = None
+        if name == layer.y and layer.x is not None and whole.kind(layer.x) != "category":
+            x_name = layer.x
+        keys = grid.columns
+        found = whole.memo(("summaries", keys, name, x_name),
+                           lambda: panel_summaries(whole, keys, name, x_name))  # fmt: skip
+        if found is None:
+            raise ValueError(
+                "load='pages': the database could not compute the panels' statistics (the "
+                f"mean, median, min, max and sd of {name!r}); use load='all'"
+            )
+        n = len(grid.panels)
+        trend = None
+        if x_name is not None:
+            x = x_name  # (for the query's closure: a str)
+            given = whole.memo(("trends", keys, name, x),
+                               lambda: panel_trends(whole, keys, name, x))  # fmt: skip
+            if given is not None:  # (a backend that can't: no trend)
+                trend = np.full(n, np.nan)
+                at = grid.assign(given)
+                assert at is not None
+                ok = at >= 0
+                trend[at[ok]] = given.column("trend").values[ok]
+        return queried_stats(n, grid.assign, found, name, trend)
 
     # ---- selecting ----------------------------------------------------------------------
 
@@ -1259,6 +1333,8 @@ class Trellis:
         (``anytrellis.link``) without a brush of its own: the rows another plot selects."""
         self._scene()
         user = self._user_layer(layer)
+        if self._on_page(user):
+            return self._selected_query(user)
         table = self._table(user)
         if self._current_selection() is None and self._highlight is not None:
             mask = self._highlight.get(id(user))
@@ -1267,6 +1343,44 @@ class Trellis:
         else:
             mask = self._source_mask(user)
         return table.take(np.flatnonzero(mask))
+
+    def _selected_query(self, user: Layer) -> Any:
+        """``load="pages"``: the rows of the plot's data the brush selects, in every panel
+        (not only those read), as a query of the database: not yet read."""
+        import narwhals as nw
+
+        whole = self._data
+        assert whole is not None
+        assert user.x is not None
+        assert user.y is not None
+        brush = self._current_selection()
+        if brush is None:
+            return nw.to_native(whole.lazy.filter(never(user.x)))
+        where = drawn(whole, user.x) & drawn(whole, user.y)
+        for axis in ("x", "y"):
+            name = getattr(user, axis)
+            kind, levels, _ = self._axes[axis]
+            if kind == "log":  # values of 0 or less: not drawn
+                where = where & (nw.col(name) > 0)
+            r = self._absolute(axis, brush.get(axis))
+            if r is None:
+                continue
+            lo, hi = sorted(r)
+            if kind == "band":
+                chosen = [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
+                where = where & among_labels(whole, name, chosen)
+            else:
+                where = where & within(whole, name, lo, hi, kind)
+        if brush.get("panel") is not None:
+            where = where & self._panels_filter(self._grid, [int(brush["panel"])])
+        legend = self._legend_out(brush)
+        if legend is not None:  # only the chosen colours (another column's: none)
+            name, chosen = legend
+            if user.color != name or name not in whole or whole.kind(name) != "category":
+                where = never(user.x)
+            else:
+                where = where & among_labels(whole, name, chosen)
+        return nw.to_native(whole.lazy.filter(where))
 
     def _source_mask(self, user: Layer) -> np.ndarray:
         """The rows of a layer's data its brush selects."""
@@ -1587,6 +1701,7 @@ class Trellis:
 
     def _changed(self) -> Self:
         self._scene_cache = None
+        self._shadow = None
         if self._widget is not None:
             spec, _ = self._scene()
             self._widget._spec = spec
@@ -1595,7 +1710,111 @@ class Trellis:
         return self
 
     def _table(self, layer: Layer) -> Table:
-        return self._tables[id(layer)]
+        rows = self._page_tables.get(id(layer))
+        return rows if rows is not None else self._tables[id(layer)]
+
+    def _on_page(self, layer: Layer) -> bool:
+        """``load="pages"``: a layer drawing the plot's data, a page's rows at a time."""
+        return self._load == "pages" and layer.mark != "rule" and layer.data is None
+
+    def _check_pages(self) -> None:
+        """``load="pages"``: a lazy table, and layers drawing a page's rows each."""
+        if self._data is None or self._data.lazy is None:
+            raise ValueError(
+                "load='pages' reads a lazy table a page at a time (a DuckDB relation, an Ibis "
+                "table, a Polars LazyFrame): give one as data, or use load='all'"
+            )
+        if self._link:
+            raise ValueError("load='pages' does not link rows across panels (link=) yet")
+        for layer in self._layers:
+            if not self._on_page(layer):
+                continue
+            if layer.mark not in PAGE_MARKS:
+                raise ValueError(
+                    f"load='pages' draws lines, points and text from the plot's data; "
+                    f"{layer.mark}() needs more rows than a page's: give it its own data, or "
+                    "use load='all'"
+                )
+            if layer.facet in ("all", "exclude"):
+                raise ValueError(f"load='pages': {layer.name} draws every panel's rows "
+                                 f"(facet={layer.facet!r}): give it its own data")  # fmt: skip
+
+    def _facets(self) -> Table:
+        """``load="pages"``: the combinations of the facet columns, from the database."""
+        whole = self._data
+        assert whole is not None
+
+        def combinations() -> Table:
+            found = distinct(whole, self._wrap)
+            for name in self._wrap:  # their levels too, without asking again
+                if found.kind(name) == "category":
+                    whole.memo(("levels", name), lambda name=name: found.column(name).levels)
+            found.whole = whole
+            return found
+
+        return whole.memo(("facets", self._wrap), combinations)
+
+    def _panels_filter(self, grid: Grid, panels: Sequence[int]) -> Any:
+        """``load="pages"``: a query's condition for the rows of these panels."""
+        whole = self._data
+        assert whole is not None
+        facets = self._facets()
+        at = grid.assign(facets)
+        assert at is not None
+        inside = np.zeros(len(grid.panels) + 1, dtype=bool)
+        inside[list(panels)] = True
+        picked = np.flatnonzero(inside[at])  # at −1: the last, never inside
+        values = [facets.values(name) for name in grid.columns]
+        return combos(whole, grid.columns, [tuple(v[i] for v in values) for i in picked])
+
+    def _rows_of(self, grid: Grid, window: frozenset[int] | None) -> Table:
+        """``load="pages"``: the rows of the window's panels (None: every row), with the
+        columns the plot draws, read in one query; the last few windows are kept."""
+        import narwhals as nw
+
+        whole = self._data
+        assert whole is not None
+        names = tuple(whole._wanted)
+        key = (window, names)
+        rows = self._window_rows.pop(key, None)
+        if rows is None:
+            query = whole.lazy
+            if window is not None:
+                query = query.filter(self._panels_filter(grid, sorted(window)))
+            rows = Table(nw.to_native(query.select(*names).collect()))
+            rows.whole = whole
+        self._window_rows[key] = rows  # the latest last
+        while len(self._window_rows) > WINDOWS_KEPT:
+            del self._window_rows[next(iter(self._window_rows))]
+        return rows
+
+    def _page_extents(self, grid: Grid, extents: dict[str, Extent], logs: list[str]) -> None:
+        """``load="pages"``: each panel's range of x and y, of all its rows, from the
+        database (the rows read are a few pages')."""
+        whole = self._data
+        assert whole is not None
+        keys = grid.columns
+        for layer in self._layers:
+            if not self._on_page(layer):
+                continue
+            x, y = layer.x, layer.y
+            assert x is not None
+            assert y is not None
+            found = whole.memo(("extents", keys, x, y, tuple(logs)),
+                               lambda x=x, y=y: panel_extents(whole, keys, x, y, logs))  # fmt: skip
+            if not found.names:
+                continue
+            at = grid.assign(found)
+            assert at is not None
+            ok = at >= 0
+            for axis in ("x", "y"):
+                if f"{axis}_lo" not in found:
+                    continue
+                for end in ("lo", "hi"):
+                    values = found.column(f"{axis}_{end}").values[ok]
+                    if axis in logs:
+                        values = np.log10(values)
+                    extents[axis].add(at[ok], values)
 
     def _scene(self) -> tuple[dict[str, Any], Buffers]:
         if self._scene_cache is None:
@@ -1625,7 +1844,7 @@ class Trellis:
         for layer in self._layers:
             if layer.mark == "rule":
                 continue
-            table = self._table(layer)
+            table = self._tables[id(layer)]
             tables.append(table)
             ends = [*layer.stat_args.get("x_columns", ()), *layer.stat_args.get("y_columns", ())]
             table.want(layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text,
@@ -1634,16 +1853,32 @@ class Trellis:
             table.want(*shared)
 
     def _build(self) -> tuple[dict[str, Any], Buffers]:
+        self._page_tables = {}
         self._want_columns()
+        paged = self._load == "pages"
+        if paged:
+            self._check_pages()
         marks = [layer for layer in self._layers if layer.mark != "rule"]
+        own = [self._table(layer) for layer in marks if not self._on_page(layer)]
         tables = [self._table(layer) for layer in marks]
         if self._data is not None:
             tables.insert(0, self._data)
-        grid = build_grid(tables, row=self._row, col=self._col, wrap=self._wrap,
-                          cols=self._cols, orders=self._orders,
-                          keep_empty=self._keep_empty)  # fmt: skip
+        # load="pages": the panels from the facet columns' combinations in the database
+        grid = build_grid([self._facets(), *own] if paged else tables, row=self._row,
+                          col=self._col, wrap=self._wrap, cols=self._cols,
+                          orders=self._orders, keep_empty=self._keep_empty)  # fmt: skip
         npanels = len(grid.panels)
         pages = self._pages(grid)
+        self._grid = grid
+        window: frozenset[int] | None = None
+        if paged:  # the rows of the panels around the page shown
+            if pages is not None:
+                names = [_panel_name({"keys": p.keys, "label": p.label}, i)
+                         for i, p in enumerate(grid.panels)]  # fmt: skip
+                window = self._wanted_of(pages, names)
+            rows = self._rows_of(grid, window)
+            self._page_tables = {id(lr): rows for lr in marks if self._on_page(lr)}
+            tables = [rows, *own]
         given = self._given_orders(tables)
         # every layer as the plain layers it draws: a summary (hist, box, ...) as its parts
         drawn: list[_Drawn] = []
@@ -1706,8 +1941,9 @@ class Trellis:
                 geom = d.part.build(x_levels, y_levels, colors.levels)
                 _paint(layer, table, geom, colors)
             else:
+                paged_points = window is not None and self._on_page(d.user)
                 geom, detail = _geometry(layer, table, grid, x_levels, y_levels, colors, steps,
-                                         self._cell_colors(layer, table))  # fmt: skip
+                                         self._cell_colors(layer, table), paged_points)  # fmt: skip
             extents["x"].add(geom.panel, geom.x0)
             extents["x"].add(geom.panel, geom.x1)
             extents["y"].add(geom.panel, geom.y0)
@@ -1727,6 +1963,8 @@ class Trellis:
                 cells = _cells_layer(layer, none)
                 with_cells.append(_Drawn(d.user, cells, none, None, cells=True))
                 built.append((cells, none, _no_geometry()))
+        if window is not None:  # each panel's range of all its rows, not only those read
+            self._page_extents(grid, extents, logs)
         drawn = with_cells
         self._drawn = drawn
         self._geometry = built
@@ -1847,7 +2085,10 @@ class Trellis:
         pages = spec.get("pages")
         if pages is None:
             return None
-        names = [_panel_name(p, i) for i, p in enumerate(spec["panels"])]
+        return self._wanted_of(pages, [_panel_name(p, i) for i, p in enumerate(spec["panels"])])
+
+    def _wanted_of(self, pages: dict[str, Any], names: list[str]) -> frozenset[int]:
+        """``_wanted``, of a paged wrap's page size and its panels' names."""
         paging = self.paging
         shown = panel_order(self._stats, names, paging)
         per = pages["rows"] * pages["cols"]
@@ -1944,6 +2185,12 @@ class Trellis:
         ``detail`` message; None: none changed."""
         spec, _ = self._scene()
         changed: set[int] = set()
+        window = self._wanted(spec)
+        if window != self._window:  # another page: its panels' data, and its neighbours'
+            if self._page_tables:  # load="pages": their rows, read
+                self._turn_page()
+            self._window = window
+            changed |= {i for i, entry in enumerate(self._full) if entry[2] is not None}
         if self._details and view and view.get("panels"):
             shown = self._shown_panels(spec, view)
             for index, detail in self._details:
@@ -1957,10 +2204,6 @@ class Trellis:
                         self._drawn[i] = replace(d, layer=entry[0], table=entry[1],
                                                  part=entry[3])  # fmt: skip
                     changed.add(i)
-        window = self._wanted(spec)
-        if window != self._window:  # another page: its panels' data, and its neighbours'
-            self._window = window
-            changed |= {i for i, entry in enumerate(self._full) if entry[2] is not None}
         layers: list[dict[str, Any]] = []
         for i in sorted(changed):
             entry = self._windowed(self._full[i])
@@ -1978,6 +2221,15 @@ class Trellis:
         for buffer_id in [b for b in self._detail_buffers.data if b not in live]:
             del self._detail_buffers.data[buffer_id]
         return {"type": "detail", "layers": layers}
+
+    def _turn_page(self) -> None:
+        """``load="pages"``: the layers built again from the rows of the panels around the
+        page shown. The spec the browser has stays (the same panels, scales, legends and
+        statistics, from the database): ``_detail`` sends the layers."""
+        scene, history = self._scene_cache, self._history
+        self._build()
+        self._scene_cache = scene
+        self._history = {**history, **self._history}  # tooltips of the layers shown before
 
     def _shown_panels(self, spec: dict[str, Any], view: dict[str, Any]) -> dict[int, Shown]:
         """The panels a view shows: their ranges (axis units) and sizes."""
@@ -2019,6 +2271,10 @@ class Trellis:
         """The spec and buffers with every panel's data, as the plot starts: a saved page's
         (a paged plot's widget gets the panels around the page shown, as they are shown)."""
         spec, buffers = self._scene()
+        if self._page_tables:  # load="pages": every row, read for the page
+            if self._full_scene_cache is None:
+                self._full_scene_cache = self._every_row()._full_scene()
+            return self._full_scene_cache
         if self._window is None:  # it does not page: the spec has every panel's data
             return spec, buffers
         if self._full_scene_cache is None:
@@ -2029,6 +2285,30 @@ class Trellis:
             ]
             self._full_scene_cache = ({**spec, "layers": layers}, out)
         return self._full_scene_cache
+
+    def _every_row(self) -> Trellis:
+        """``load="pages"``: this plot reading every row (``load="all"``), as it is shown:
+        made once, its rows read once."""
+        if self._shadow is None:
+            assert self._data is not None
+            shadow = copy.copy(self)
+            shadow._load = "all"
+            shadow._data = Table(self._data.native)
+            shadow._tables = {k: shadow._data if t is self._data else t
+                              for k, t in self._tables.items()}  # fmt: skip
+            shadow._widget = None
+            shadow._link_group = None
+            shadow._page_tables = {}
+            shadow._window_rows = {}
+            shadow._shadow = None
+            self._shadow = shadow
+        shadow = self._shadow
+        shadow._paging = self.paging
+        shadow._focus = self.focused
+        shadow._selection = self._current_selection()
+        shadow._view = self._view
+        shadow._scene_cache = None
+        return shadow
 
     def _highlight_entries(self) -> list[tuple[Layer, Any, Any]]:
         """Each spec layer's user layer, summary part and geometry, as sent."""
@@ -2242,6 +2522,9 @@ class _ColorScales:
                 seen.extend(
                     v for v in _reorder(list(column.levels), given.get(name)) if v not in seen
                 )
+            elif (whole := table.span(name)) is not None:  # load="pages": of every row
+                lo, hi = self.ranges.get(name, (np.inf, -np.inf))
+                self.ranges[name] = (min(lo, whole[0]), max(hi, whole[1]))
             else:
                 finite = column.values[np.isfinite(column.values)]
                 if len(finite):
@@ -2283,9 +2566,12 @@ def _geometry(
     colors: _ColorScales,
     steps: dict[str, float],
     cell_colors: Any = None,
+    cells: bool = False,
 ) -> tuple[Geometry, Detail | None]:
     """A plain layer's geometry, and its level of detail: a line of many points thinned,
-    points drawn as cells where dense (the geometry: what Python selects, all of it)."""
+    points drawn as cells where dense (the geometry: what Python selects, all of it).
+    ``cells``: points with a layer of cells after them, even with no dense panel (a page's
+    rows: the layers stay the same from page to page)."""
     assert layer.x is not None
     assert layer.y is not None
     x = axis_values(table.column(layer.x), x_levels)
@@ -2330,7 +2616,7 @@ def _geometry(
     elif layer.mark in ("points", "text"):
         geom = point_geometry(rows, panel, x, y)
         numbers = x_levels is None and y_levels is None
-        dense = len(geom.panel) > DENSE and np.bincount(geom.panel).max() > DENSE
+        dense = cells or (len(geom.panel) > DENSE and np.bincount(geom.panel).max() > DENSE)
         if layer.mark == "points" and numbers and cell_colors is not None and dense:
             _paint(layer, table, geom, colors)
             values = None

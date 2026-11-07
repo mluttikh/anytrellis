@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import numpy as np
+
 from anytrellis.data import Table
 
 SUMMARIES = ("mean", "median", "min", "max", "sd")
@@ -98,3 +100,205 @@ def _finite(table: Table, name: str) -> Any:
     if table.dtype(name).is_float():
         return nw.col(name).is_finite()
     return ~nw.col(name).is_null()
+
+
+# ---- reading a page at a time (load="pages") ----------------------------------------------
+
+
+def distinct(table: Table, names: Sequence[str]) -> Table:
+    """The distinct combinations of a lazy table's columns ``names`` (a table in memory)."""
+    import narwhals as nw
+
+    return Table(nw.to_native(table.lazy.select(*names).unique().collect()))
+
+
+def span(table: Table, name: str) -> tuple[float, float] | None:
+    """The range of a lazy table's finite values of a number or time column (times in
+    milliseconds, as read), or None: it has none."""
+    import narwhals as nw
+
+    if table.kind(name) == "category":
+        return None
+    c = nw.col(name)
+    found = Table(nw.to_native(table.lazy.filter(_finite(table, name))
+                               .select(c.min().alias("lo"), c.max().alias("hi"))
+                               .collect()))  # fmt: skip
+    lo, hi = found.column("lo").values, found.column("hi").values
+    if not len(lo) or not (np.isfinite(lo[0]) and np.isfinite(hi[0])):
+        return None
+    return float(lo[0]), float(hi[0])
+
+
+def panel_extents(table: Table, keys: Sequence[str], x: str, y: str,
+                  logs: Sequence[str]) -> Table:  # fmt: skip
+    """Per combination of the facet columns ``keys``: the low and high x and y of the rows
+    drawn (``x_lo``, ``x_hi``, ``y_lo``, ``y_hi``: those with both; on a log axis, above
+    0), of number and time columns (a category axis's are left out)."""
+    import narwhals as nw
+
+    drawn = always(x)
+    aggs = []
+    for axis, name in (("x", x), ("y", y)):
+        if table.kind(name) == "category":  # every row has a category (or "(missing)")
+            continue
+        drawn = drawn & _finite(table, name)
+        if axis in logs:
+            drawn = drawn & (nw.col(name) > 0)
+        aggs += [nw.col(name).min().alias(f"{axis}_lo"), nw.col(name).max().alias(f"{axis}_hi")]
+    if not aggs:
+        return Table({})
+    found = table.lazy.filter(drawn).group_by(*keys).agg(*aggs).collect()
+    return Table(nw.to_native(found))
+
+
+TREND_X = "__anytrellis_x"
+TREND_DX = "__anytrellis_dx"
+TREND_DY = "__anytrellis_dy"
+
+
+def panel_trends(table: Table, keys: Sequence[str], value: str, x: str) -> Table | None:
+    """Per combination of the facet columns ``keys``: the trend of ``value`` over ``x``
+    (as ``pages.trends``: the change of its least-squares line over the span of x, of the
+    rows with both finite), or None: the backend can't (a time x in milliseconds)."""
+    import narwhals as nw
+
+    c = nw.col
+    ok = _finite(table, value) & _finite(table, x)
+    shifted = c(x) - c(x).min().over(*keys)  # from each panel's first x: small numbers
+    if table.kind(x) == "time":
+        shifted = shifted.dt.total_milliseconds()
+    try:
+        found = (
+            table.lazy.filter(ok)
+            .select(
+                *keys,
+                shifted.cast(nw.Float64).alias(TREND_X),
+                c(value).cast(nw.Float64).alias(value),
+            )
+            .with_columns(
+                (c(TREND_X) - c(TREND_X).mean().over(*keys)).alias(TREND_DX),
+                (c(value) - c(value).mean().over(*keys)).alias(TREND_DY),
+            )
+            .group_by(*keys)
+            .agg(
+                (c(TREND_DX) * c(TREND_DY)).sum().alias("sxy"),
+                (c(TREND_DX) * c(TREND_DX)).sum().alias("sxx"),
+                c(TREND_X).max().alias("span"),
+            )
+            .collect()
+        )
+    except Exception:  # the backend lacks an operation: no trend
+        return None
+    out = Table(nw.to_native(found))
+    sxy, sxx, width = (out.column(k).values for k in ("sxy", "sxx", "span"))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        trend = np.where(width > 0, sxy / sxx * width, np.nan)
+    return Table({**{k: np.array(out.values(k), dtype=object) for k in keys}, "trend": trend})
+
+
+def among(table: Table, name: str, values: Sequence[Any]) -> Any:
+    """Rows whose value of ``name`` is one of ``values`` (Python values, as read; None or
+    NaN: rows without one)."""
+    import narwhals as nw
+
+    c = nw.col(name)
+    plain = [v for v in values if not _missing(v)]
+    out = c.is_in(plain) if plain else never(name)
+    if any(v is None for v in values):
+        out = out | c.is_null()
+    if table.dtype(name).is_float() and any(isinstance(v, float) and v != v for v in values):
+        out = out | c.is_nan()
+    return out
+
+
+def among_labels(table: Table, name: str, labels: Sequence[str]) -> Any:
+    """Rows of a category column whose label is one of ``labels`` (``MISSING_LABEL``:
+    rows without a value)."""
+    import narwhals as nw
+
+    from anytrellis.data import MISSING_LABEL
+
+    c = nw.col(name).cast(nw.String)
+    plain = [lv for lv in labels if lv != MISSING_LABEL]
+    out = c.is_in(plain) if plain else never(name)
+    if MISSING_LABEL in labels:
+        out = out | nw.col(name).is_null()
+    return out
+
+
+def combos(table: Table, names: Sequence[str], rows: Sequence[Sequence[Any]]) -> Any:
+    """Rows having one of these combinations of values of the columns ``names``."""
+
+    if not rows:
+        return never(names[0])
+    if len(names) == 1:
+        return among(table, names[0], [r[0] for r in rows])
+    out = None
+    for row in rows:
+        term = None
+        for name, v in zip(names, row, strict=True):
+            one = among(table, name, [v])
+            term = one if term is None else term & one
+        out = term if out is None else out | term
+    return out
+
+
+def within(table: Table, name: str, lo: float, hi: float, kind: str) -> Any:
+    """Rows whose value of number or time column ``name`` is in ``[lo, hi]`` (a time:
+    milliseconds of wall-clock time in its zone; ``kind`` "log": log10 units)."""
+    import datetime as dt
+
+    import narwhals as nw
+
+    c = nw.col(name)
+    if kind == "log":
+        return (c >= 10.0**lo) & (c <= 10.0**hi)
+    if kind != "time":
+        return (c >= lo) & (c <= hi)
+    dtype = table.dtype(name)
+    if isinstance(dtype, nw.Date):
+        c = c.cast(nw.Datetime("us"))
+    zone = getattr(dtype, "time_zone", None)
+
+    epoch = dt.datetime(1970, 1, 1)  # noqa: DTZ001 - wall-clock time
+    micro = dt.timedelta(microseconds=1)
+    first = (dt.datetime.min - epoch) // micro  # noqa: DTZ901 - wall-clock time
+    last = (dt.datetime.max - epoch) // micro  # noqa: DTZ901 - wall-clock time
+
+    def at(ms: float) -> dt.datetime:  # (a range past the years a datetime has: to its ends)
+        us = min(max(ms * 1000, first), last)
+        when = epoch + dt.timedelta(microseconds=round(us))
+        if zone is None:
+            return when
+        from zoneinfo import ZoneInfo
+
+        return when.replace(tzinfo=ZoneInfo(zone))
+
+    return (c >= at(lo)) & (c <= at(hi))
+
+
+def drawn(table: Table, name: str) -> Any:
+    """Rows a point is drawn for, along column ``name``: a finite number or a time (any
+    category, or none)."""
+
+    if table.kind(name) == "category":
+        return always(name)
+    return _finite(table, name)
+
+
+def always(name: str) -> Any:
+    """A condition every row meets (row by row, as a filter needs: not a literal)."""
+    import narwhals as nw
+
+    return nw.col(name).is_null() | ~nw.col(name).is_null()
+
+
+def never(name: str) -> Any:
+    """A condition no row meets (row by row, as a filter needs: not a literal)."""
+    import narwhals as nw
+
+    return nw.col(name).is_null() & ~nw.col(name).is_null()
+
+
+def _missing(v: Any) -> bool:
+    return v is None or (isinstance(v, float) and v != v)

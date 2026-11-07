@@ -50,6 +50,8 @@ class Link:
                 raise TypeError(f"link() takes Trellis plots, got {type(p).__name__}")
             if p._link_group is not None:
                 raise ValueError(f"{p!r} is linked already: unlink() it first")
+            if p._load == "pages":
+                raise ValueError("a plot reading pages (load='pages') can't be linked yet")
         if len({id(p) for p in plots}) != len(plots):
             raise ValueError("a plot is given twice")
         self.plots = plots

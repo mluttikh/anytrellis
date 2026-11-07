@@ -20,6 +20,14 @@ All notable changes to anytrellis. The format follows
   statistics (rows, mean, median, min, max, sd) and `order()`'s summaries; the trend comes
   from the rows without sorting them. Ten million rows in 1,000 panels build in 3.3 s
   rather than 5.3 s from Ibis on DuckDB (3.2 s rather than 6.6 s from a `LazyFrame`).
+- `Trellis(load="pages")`: a paged wrap of a lazy table (DuckDB, Ibis, a `LazyFrame`) reads
+  only the rows of the panels of the page shown and the pages either side of it, and the
+  next ones as the pages turn. The panels, their statistics (with the trend), each panel's
+  range of x and y, the category levels and the colour ranges come from the database, so
+  every page looks as with every row read. Ten million rows in 1,000 panels from DuckDB
+  are drawn in 1.0 s from 480,000 rows read (3.9 s reading all of them); a page turns in
+  0.3 s. Lines, points and text; `selected()` is a query of the selected rows; a saved
+  page reads every row. Not with `link`.
 - Paged wraps send only the panels near the page shown: in a notebook, the browser gets
   the data of the page shown and the pages either side of it, and more as the pages turn,
   are sorted or filtered, or a panel of another page opens; a page further away says it
