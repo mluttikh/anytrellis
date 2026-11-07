@@ -214,9 +214,11 @@ Notebooks in [`examples/jupyter`](https://github.com/mluttikh/anytrellis/tree/ma
 | `07_linked_plots` | crossfiltering a scatter, histograms and boxes; plots linked by a key column |
 
 Their data comes with the package: `from anytrellis.datasets import load; load("barley")`
-(anscombe, barley, cars, gapminder, penguins, population, seattle_weather, stocks; from
-vega-datasets; their sources and licences are in
-[`SOURCES.md`](https://github.com/mluttikh/anytrellis/blob/main/src/anytrellis/datasets/SOURCES.md)).
+(anscombe, barley, cars, gapminder, penguins, seattle_weather; from the UCI Machine
+Learning Repository and vega-datasets; their sources and licences are in
+[`SOURCES.md`](https://github.com/mluttikh/anytrellis/blob/main/src/anytrellis/datasets/SOURCES.md);
+the gapminder data is based on free material from [GAPMINDER.ORG](https://www.gapminder.org/),
+CC-BY LICENSE).
 The notebooks are written once in `scripts/build_examples.py`, which
 writes both sets: run `uv run python scripts/build_examples.py` after changing it.
 

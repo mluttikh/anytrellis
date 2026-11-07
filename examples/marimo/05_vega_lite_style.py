@@ -21,11 +21,11 @@ def _(mo):
 
     | Altair                                          | anytrellis                     |
     |-------------------------------------------------|--------------------------------|
-    | `.facet(row="symbol")`                          | `row="symbol"`                 |
+    | `.facet(row="country")`                         | `row="country"`                |
     | `.facet(column="island")`                       | `col="island"`                 |
     | `.facet(facet="year", columns=3)`               | `wrap="year", cols=3`          |
     | `.resolve_scale(y="independent")`               | `share_y=False`                |
-    | `alt.Color("sex")`                              | `color="sex"`                  |
+    | `alt.Color("region")`                           | `color="region"`               |
 
     **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y; over an axis:
     that axis), drag to pan, Shift+drag to zoom to a box, `u` to undo and `r` to reset. Panels
@@ -54,7 +54,7 @@ def _(mo):
     ## Rows with independent y scales
 
     ```python
-    alt.Chart(stocks).mark_line().encode(x="date:T", y="price:Q").facet(row="symbol") \
+    alt.Chart(five).mark_line().encode(x="year:Q", y="fertility:Q").facet(row="country") \
         .resolve_scale(y="independent")
     ```
     """)
@@ -62,15 +62,17 @@ def _(mo):
 
 
 @app.cell
-def _(Trellis, load):
-    stocks = load("stocks")
+def _(Trellis, load, pl):
+    gapminder = load("gapminder")
+    five = gapminder.filter(
+        pl.col("country").is_in(["China", "India", "Iran", "Italy", "United States"]))
 
     rows = (
-        Trellis(stocks, row="symbol", share_y=False, panel_height=80)
-        .line(x="date", y="price", color="symbol", tooltip=["symbol"])
+        Trellis(five, row="country", share_y=False, panel_height=80)
+        .line(x="year", y="fertility", color="country", tooltip=["country"])
     )
     rows
-    return (stocks,)
+    return (five,)
 
 
 @app.cell(hide_code=True)
@@ -78,23 +80,22 @@ def _(mo):
     mo.md(r"""
     ## A trellis of grouped bars
 
-    The US population by age and sex, a panel per census (Vega-Lite's population example,
-    faceted).
+    Barley yields of ten varieties in 1931 and 1932, a panel per site (Vega-Lite's grouped
+    bars, faceted). Morris is the odd one: at every other site 1931 yielded more, at Morris
+    1932 did, for all ten varieties (Cleveland's famous suspicion: were its years swapped?).
     """)
     return
 
 
 @app.cell
 def _(Trellis, load, pl):
-    census = load("population").filter(pl.col("year").is_in([1900, 1930, 1960, 1990, 2000]))
+    barley = load("barley").with_columns(pl.col("year").cast(pl.String))
 
-    pyramids = (
-        Trellis(census, wrap="year", cols=2, panel_height=150, title="US population by age",
-                palette=["#e377c2", "#1f77b4"])
-        .order("sex", ["female", "male"])
-        .bars(x="age", y="people", color="sex", position="dodge")
+    grouped = (
+        Trellis(barley, wrap="site", cols=2, panel_height=150, title="Barley yields")
+        .bars(x="variety", y="yield", color="year", position="dodge")
     )
-    pyramids
+    grouped
     return
 
 
@@ -159,17 +160,17 @@ def _(mo):
     mo.md(r"""
     ## Areas
 
-    `mark_area` under `mark_line`, each stock on its own y scale.
+    `mark_area` under `mark_line`, each country's population on its own y scale.
     """)
     return
 
 
 @app.cell
-def _(Trellis, stocks):
+def _(Trellis, five):
     filled = (
-        Trellis(stocks, wrap="symbol", cols=3, share_y=False, title="Stock prices")
-        .area(x="date", y="price", color="symbol", opacity=0.5)
-        .line(x="date", y="price", color="symbol", tooltip=["symbol"])
+        Trellis(five, wrap="country", cols=3, share_y=False, title="Population")
+        .area(x="year", y="pop", color="country", opacity=0.5)
+        .line(x="year", y="pop", color="country", tooltip=["country"])
     )
     filled
     return

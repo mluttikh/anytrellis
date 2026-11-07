@@ -327,24 +327,29 @@ def _(mo):
     ## `geom_area`
 
     ```r
-    ggplot(population, aes(year, people, fill = age, group = age)) + geom_area() + facet_wrap(~ sex)
+    ggplot(by_region, aes(year, pop, fill = region)) + geom_area() + facet_wrap(~ world)
     ```
 
-    Areas stack like bars do (`position="identity"` overlaps them instead); a number column as
-    the colour gets a continuous scale.
+    Areas stack like bars do (`position="identity"` overlaps them instead): here the
+    population of each region, adding up to the world's (of the countries in the data), with
+    the Americas apart from the rest.
     """)
     return
 
 
 @app.cell
-def _(Trellis, load):
-    by_age = load("population")
-
-    ages = (
-        Trellis(by_age, wrap="sex", title="US population by age group")
-        .area(x="year", y="people", color="age", group="age", tooltip=["age"])
+def _(Trellis, gapminder, pl):
+    by_region = (
+        gapminder.group_by("region", "year").agg(pl.col("pop").sum())
+        .with_columns(world=pl.when(pl.col("region") == "Americas")
+                      .then(pl.lit("the Americas")).otherwise(pl.lit("the rest")))
     )
-    ages
+
+    regions = (
+        Trellis(by_region, wrap="world", title="Population by region")
+        .area(x="year", y="pop", color="region", tooltip=["region"])
+    )
+    regions
     return
 
 

@@ -96,26 +96,29 @@ grid.points(x="horsepower", y="mpg", size=4, tooltip=["name"])
 
 Shared scales make panels comparable; free scales show each panel's own detail.
 `share_y=False` gives each panel its own y scale (`"row"` or `"col"`: one per row or
-column of a grid). Zooming x still moves every panel: x is shared.
+column of a grid). Zooming x still moves every panel: x is shared. Here: countries whose
+populations differ a thousandfold, each growing in its own way.
 """),
     py("""
-stocks = load("stocks")
-free = Trellis(stocks, row="symbol", share_y=False, panel_height=90, title="Monthly prices")
-free.line(x="date", y="price")
+gapminder = load("gapminder")
+six = gapminder.filter(gapminder["country"].is_in(
+    ["China", "India", "United States", "Nigeria", "Japan", "Iceland"]))
+free = Trellis(six, row="country", share_y=False, panel_height=90, title="Population")
+free.line(x="year", y="pop")
 """),
     md("""
 ## Layers, context and reference lines
 
 Each layer is drawn in every panel. `facet="exclude"` draws the *other* panels' rows in
-grey behind each panel, so each stock is seen against the rest; `rule` draws a line at
-fixed positions (here the day Lehman Brothers fell).
+grey behind each panel, so each country is seen against the rest; `rule` draws a line at
+fixed positions (here a life expectancy of 70 years).
 """),
     py("""
 layered = (
-    Trellis(stocks, wrap="symbol", cols=3, title="Each stock against the others")
-    .line(x="date", y="price", group="symbol", facet="exclude", width=1, name="others")
-    .line(x="date", y="price", color="#1f77b4", width=2, name="price")
-    .rule(x="2008-09-15", dash=[4, 3], color="#888888")
+    Trellis(six, wrap="country", cols=3, title="Each country against the others")
+    .line(x="year", y="life_expect", group="country", facet="exclude", width=1, name="others")
+    .line(x="year", y="life_expect", color="#1f77b4", width=2, name="life expectancy")
+    .rule(y=70, dash=[4, 3], color="#888888")
 )
 layered
 """),
@@ -156,7 +159,7 @@ ranked.focused
 without Python, and keeps zooming and hovering.
 """),
     py("""
-layered.save_html("stocks.html")
+layered.save_html("life_expectancy.html")
 """),
 )
 
@@ -530,20 +533,25 @@ flippers
 ## `geom_area`
 
 ```r
-ggplot(population, aes(year, people, fill = age, group = age)) + geom_area() + facet_wrap(~ sex)
+ggplot(by_region, aes(year, pop, fill = region)) + geom_area() + facet_wrap(~ world)
 ```
 
-Areas stack like bars do (`position="identity"` overlaps them instead); a number column as
-the colour gets a continuous scale.
+Areas stack like bars do (`position="identity"` overlaps them instead): here the
+population of each region, adding up to the world's (of the countries in the data), with
+the Americas apart from the rest.
 """),
     py("""
-by_age = load("population")
-
-ages = (
-    Trellis(by_age, wrap="sex", title="US population by age group")
-    .area(x="year", y="people", color="age", group="age", tooltip=["age"])
+by_region = (
+    gapminder.group_by("region", "year").agg(pl.col("pop").sum())
+    .with_columns(world=pl.when(pl.col("region") == "Americas")
+                  .then(pl.lit("the Americas")).otherwise(pl.lit("the rest")))
 )
-ages
+
+regions = (
+    Trellis(by_region, wrap="world", title="Population by region")
+    .area(x="year", y="pop", color="region", tooltip=["region"])
+)
+regions
 """),
     md("""
 ## `geom_text`
@@ -733,11 +741,11 @@ scales independent with `resolve_scale`:
 
 | Altair                                          | anytrellis                     |
 |-------------------------------------------------|--------------------------------|
-| `.facet(row="symbol")`                          | `row="symbol"`                 |
+| `.facet(row="country")`                         | `row="country"`                |
 | `.facet(column="island")`                       | `col="island"`                 |
 | `.facet(facet="year", columns=3)`               | `wrap="year", cols=3`          |
 | `.resolve_scale(y="independent")`               | `share_y=False`                |
-| `alt.Color("sex")`                              | `color="sex"`                  |
+| `alt.Color("region")`                           | `color="region"`               |
 
 """
         + HOW_TO_USE
@@ -747,35 +755,36 @@ scales independent with `resolve_scale`:
 ## Rows with independent y scales
 
 ```python
-alt.Chart(stocks).mark_line().encode(x="date:T", y="price:Q").facet(row="symbol") \\
+alt.Chart(five).mark_line().encode(x="year:Q", y="fertility:Q").facet(row="country") \\
     .resolve_scale(y="independent")
 ```
 """),
     py("""
-stocks = load("stocks")
+gapminder = load("gapminder")
+five = gapminder.filter(
+    pl.col("country").is_in(["China", "India", "Iran", "Italy", "United States"]))
 
 rows = (
-    Trellis(stocks, row="symbol", share_y=False, panel_height=80)
-    .line(x="date", y="price", color="symbol", tooltip=["symbol"])
+    Trellis(five, row="country", share_y=False, panel_height=80)
+    .line(x="year", y="fertility", color="country", tooltip=["country"])
 )
 rows
 """),
     md("""
 ## A trellis of grouped bars
 
-The US population by age and sex, a panel per census (Vega-Lite's population example,
-faceted).
+Barley yields of ten varieties in 1931 and 1932, a panel per site (Vega-Lite's grouped
+bars, faceted). Morris is the odd one: at every other site 1931 yielded more, at Morris
+1932 did, for all ten varieties (Cleveland's famous suspicion: were its years swapped?).
 """),
     py("""
-census = load("population").filter(pl.col("year").is_in([1900, 1930, 1960, 1990, 2000]))
+barley = load("barley").with_columns(pl.col("year").cast(pl.String))
 
-pyramids = (
-    Trellis(census, wrap="year", cols=2, panel_height=150, title="US population by age",
-            palette=["#e377c2", "#1f77b4"])
-    .order("sex", ["female", "male"])
-    .bars(x="age", y="people", color="sex", position="dodge")
+grouped = (
+    Trellis(barley, wrap="site", cols=2, panel_height=150, title="Barley yields")
+    .bars(x="variety", y="yield", color="year", position="dodge")
 )
-pyramids
+grouped
 """),
     md("""
 ## Columns
@@ -820,13 +829,13 @@ heatmap
     md("""
 ## Areas
 
-`mark_area` under `mark_line`, each stock on its own y scale.
+`mark_area` under `mark_line`, each country's population on its own y scale.
 """),
     py("""
 filled = (
-    Trellis(stocks, wrap="symbol", cols=3, share_y=False, title="Stock prices")
-    .area(x="date", y="price", color="symbol", opacity=0.5)
-    .line(x="date", y="price", color="symbol", tooltip=["symbol"])
+    Trellis(five, wrap="country", cols=3, share_y=False, title="Population")
+    .area(x="year", y="pop", color="country", opacity=0.5)
+    .line(x="year", y="pop", color="country", tooltip=["country"])
 )
 filled
 """),

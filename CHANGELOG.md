@@ -32,8 +32,8 @@ The first release.
   filling to their selected share (crossfiltering).
 - Tooltips with Python's values; `save_html` writes a page that opens without Python.
 - Works in JupyterLab and marimo, and other anywidget hosts (Jupyter Notebook, VS Code).
-- `anytrellis.datasets.load`: eight small example datasets; example notebooks for Jupyter
-  and marimo.
+- `anytrellis.datasets.load`: six small example datasets, with their sources and licences
+  in `datasets/SOURCES.md`; example notebooks for Jupyter and marimo.
 
 [Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/mluttikh/anytrellis/releases/tag/v0.1.0

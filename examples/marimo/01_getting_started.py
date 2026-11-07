@@ -92,17 +92,20 @@ def _(mo):
 
     Shared scales make panels comparable; free scales show each panel's own detail.
     `share_y=False` gives each panel its own y scale (`"row"` or `"col"`: one per row or
-    column of a grid). Zooming x still moves every panel: x is shared.
+    column of a grid). Zooming x still moves every panel: x is shared. Here: countries whose
+    populations differ a thousandfold, each growing in its own way.
     """)
     return
 
 
 @app.cell
 def _(Trellis, load):
-    stocks = load("stocks")
-    free = Trellis(stocks, row="symbol", share_y=False, panel_height=90, title="Monthly prices")
-    free.line(x="date", y="price")
-    return (stocks,)
+    gapminder = load("gapminder")
+    six = gapminder.filter(gapminder["country"].is_in(
+        ["China", "India", "United States", "Nigeria", "Japan", "Iceland"]))
+    free = Trellis(six, row="country", share_y=False, panel_height=90, title="Population")
+    free.line(x="year", y="pop")
+    return (six,)
 
 
 @app.cell(hide_code=True)
@@ -111,19 +114,19 @@ def _(mo):
     ## Layers, context and reference lines
 
     Each layer is drawn in every panel. `facet="exclude"` draws the *other* panels' rows in
-    grey behind each panel, so each stock is seen against the rest; `rule` draws a line at
-    fixed positions (here the day Lehman Brothers fell).
+    grey behind each panel, so each country is seen against the rest; `rule` draws a line at
+    fixed positions (here a life expectancy of 70 years).
     """)
     return
 
 
 @app.cell
-def _(Trellis, stocks):
+def _(Trellis, six):
     layered = (
-        Trellis(stocks, wrap="symbol", cols=3, title="Each stock against the others")
-        .line(x="date", y="price", group="symbol", facet="exclude", width=1, name="others")
-        .line(x="date", y="price", color="#1f77b4", width=2, name="price")
-        .rule(x="2008-09-15", dash=[4, 3], color="#888888")
+        Trellis(six, wrap="country", cols=3, title="Each country against the others")
+        .line(x="year", y="life_expect", group="country", facet="exclude", width=1, name="others")
+        .line(x="year", y="life_expect", color="#1f77b4", width=2, name="life expectancy")
+        .rule(y=70, dash=[4, 3], color="#888888")
     )
     layered
     return (layered,)
@@ -191,7 +194,7 @@ def _(mo):
 
 @app.cell
 def _(layered):
-    layered.save_html("stocks.html")
+    layered.save_html("life_expectancy.html")
     return
 
 

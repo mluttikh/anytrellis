@@ -10,14 +10,13 @@ cars               406    name, mpg, cylinders, displacement, horsepower, weight
 gapminder          693    country, region, year, pop, life_expect, fertility (1955-2005)
 penguins           344    species, island, bill_length_mm, bill_depth_mm,
                           flipper_length_mm, body_mass_g, sex (Palmer penguins)
-population         570    year, age, sex, people (US census, 1850-2000)
 seattle_weather    1461   date, precipitation, temp_max, temp_min, wind, weather
-stocks             560    symbol, date, price (monthly, 2000-2010)
 =================  =====  ==============================================================
 
-Taken from vega-datasets 2.8.0 (BSD-3-Clause; each dataset's own source is listed there),
-with snake_case column names and readable categories (``gapminder.region``,
-``population.sex``).
+``cars`` is the UCI Machine Learning Repository's Auto MPG (CC BY 4.0); the others are
+taken from vega-datasets 2.8.0, with snake_case column names and readable categories
+(``gapminder.region``). Each keeps its source's licence: see ``SOURCES.md`` here. The
+gapminder data is based on free material from GAPMINDER.ORG, CC-BY LICENSE.
 """
 
 from __future__ import annotations
@@ -25,9 +24,8 @@ from __future__ import annotations
 from importlib import resources
 from typing import Any, Literal
 
-NAMES = ("anscombe", "barley", "cars", "gapminder", "penguins", "population", "seattle_weather",
-         "stocks")  # fmt: skip
-_DATES = {"seattle_weather": "date", "stocks": "date"}
+NAMES = ("anscombe", "barley", "cars", "gapminder", "penguins", "seattle_weather")
+_DATES = {"seattle_weather": "date"}
 
 Backend = Literal["polars", "pandas", "pyarrow"]
 
