@@ -115,6 +115,11 @@ Zooming y by hand stops it. `Trellis(..., fit_y=True)` starts with it on.
 both. It selects the marks it meets, in every panel, and the rest fade: the same range
 compared across panels. Drag the brush to move it; a click or Esc clears it.
 
+Click a colour's entry in the legend to select its marks (Shift, Cmd or Ctrl+click adds
+or removes more; a click on the only one chosen clears). With a brush too, a mark must
+meet both: brush a range, then pick a colour in it. Marks coloured by another column, or by
+none, fade.
+
 With `Trellis(..., link="country")` the brush selects in the panel you draw it in, and
 then every row sharing its link values, in all panels and layers that have the column:
 brush countries in 1955 and follow them through the years. From Python:
@@ -122,7 +127,8 @@ brush countries in 1955 and follow them through the years. From Python:
 ```python
 t.select(x=(2, 4), y=(60, 80))          # a time axis: dates; a category axis: categories
 t.select(x=(0, 3), panel="1955")        # in one panel (with link: then followed)
-t.selection                             # the brush: {"x": (2, 4), "y": (60, 80), "panel": None}
+t.select(color=["Asia", "Africa"])      # the legend's entries: these colours' marks
+t.selection                             # {"x": (2, 4), "y": (60, 80), "color": None, "panel": None}
 t.selected()                            # the selected rows, as the table you gave
 t.select()                              # clear
 ```
@@ -173,6 +179,7 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | `y` | fit y to the data in view, and stop |
 | `s` | drag draws a selection brush, and back |
 | Esc | clear the selection (else: back to all panels) |
+| click a legend entry | select its colour (Shift+click: add or remove one) |
 | Enter | open the panel under the pointer |
 | Page Up / Page Down | previous / next panel |
 | Backspace | back to all panels |

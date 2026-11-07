@@ -181,3 +181,11 @@ def test_unlink_and_errors() -> None:
     at.link(a, b)  # linked again: a's brush leads
     assert ids(b.selected()) == ["c0", "c1"]
     assert b.selection is None
+
+
+def test_a_legend_pick_shows_in_the_linked_plots() -> None:
+    scatter = Trellis(CARS).points(x="weight", y="mpg", color="cyl")
+    counts = Trellis(CARS).hist(x="hp", bins=4)
+    at.link(scatter, counts)
+    scatter.select(color="6")
+    assert ids(counts.selected()) == ["c3", "c4", "c5"]

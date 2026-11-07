@@ -24,9 +24,10 @@ def _(mo):
     **Using a plot:** click it, then scroll to zoom along x (Shift+scroll: y; over an axis:
     that axis), drag to pan, Shift+drag to zoom to a box, `u` to undo and `r` to reset. Panels
     that share a scale zoom and pan together. `y` keeps y fitted to the data in view, and `s`
-    makes drag a brush that selects (Esc clears). Hover a mark for its values. Double-click a
-    panel to see it alone (Page Up and Page Down: the next ones; Backspace: all again), and
-    press `f` (or the toolbar's button) for full screen.
+    makes drag a brush that selects (Esc clears); a click on a legend entry selects its colour
+    (Shift+click: more). Hover a mark for its values. Double-click a panel to see it alone
+    (Page Up and Page Down: the next ones; Backspace: all again), and press `f` (or the
+    toolbar's button) for full screen.
     """)
     return
 

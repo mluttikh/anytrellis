@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { layout } from "../src/core/layout";
 import { type Scene, pick, yExtent } from "../src/core/scene";
-import { FADED, filled, highlighted, select, selectionColors } from "../src/core/selection";
+import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
@@ -282,6 +282,38 @@ describe("select", () => {
     const { dim, hi } = selectionColors(l as never, new Uint8Array([0, 1]), null);
     expect(dim[3]).toBe(Math.round(200 * FADED));
     expect([...hi]).toEqual([0, 0, 0, 0, 40, 50, 60, 255]);
+  });
+});
+
+describe("legend entries", () => {
+  // points coloured by legend 0: levels 0, 1, 2; a plain line; a layer coloured by legend 1
+  const coloured = () => {
+    const points = { ...layer("points", [1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3], KIND_CAPSULE, 2), codes: new Uint16Array([0, 1, 2]) };
+    points.spec = { ...points.spec, color: { legend: 0 } } as MarkLayerSpec;
+    const plain = layer("line", [0, 0, 9, 9], KIND_CAPSULE, 1);
+    plain.spec = { ...plain.spec, color: { legend: null } } as MarkLayerSpec;
+    const other = { ...layer("points", [1, 1, 1, 1], KIND_CAPSULE, 2), codes: new Uint16Array([1]) };
+    other.spec = { ...other.spec, color: { legend: 1 } } as MarkLayerSpec;
+    return { layers: [points, plain, other] } as unknown as Scene;
+  };
+
+  it("select the marks of their colours, and with a range only those in it", () => {
+    const s = select(coloured(), { x: null, y: null, legend: { index: 0, levels: [1, 2] } });
+    expect([...s.masks[0]!]).toEqual([0, 1, 1]);
+    expect([...s.masks[1]!]).toEqual([0]); // no colour column: faded
+    expect([...s.masks[2]!]).toEqual([0]); // another legend's colours: faded
+    const both = select(coloured(), { x: [2.5, 9], y: null, legend: { index: 0, levels: [1, 2] } });
+    expect([...both.masks[0]!]).toEqual([0, 0, 1]);
+  });
+
+  it("toggle: a click picks one (again: none), Shift adds and takes away", () => {
+    expect(toggleLegend(null, 0, 2, false)).toEqual({ index: 0, levels: [2] });
+    expect(toggleLegend({ index: 0, levels: [2] }, 0, 2, false)).toBeNull();
+    expect(toggleLegend({ index: 0, levels: [2] }, 0, 1, true)).toEqual({ index: 0, levels: [1, 2] });
+    expect(toggleLegend({ index: 0, levels: [1, 2] }, 0, 1, true)).toEqual({ index: 0, levels: [2] });
+    expect(toggleLegend({ index: 0, levels: [1, 2] }, 1, 0, true)).toEqual({ index: 1, levels: [0] }); // another legend
+    expect(selects({ x: null, y: null, legend: { index: 0, levels: [] } })).toBe(false);
+    expect(selects({ x: null, y: null, legend: { index: 0, levels: [0] } })).toBe(true);
   });
 });
 

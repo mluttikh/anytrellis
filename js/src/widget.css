@@ -97,6 +97,25 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   gap: 4px;
   white-space: nowrap;
 }
+.atr-legend-pick {
+  cursor: pointer;
+  border-radius: 3px;
+  user-select: none;
+}
+.atr-legend-pick:hover {
+  color: var(--atr-text);
+}
+.atr-legend-pick:focus-visible {
+  outline: 2px solid var(--atr-accent);
+  outline-offset: 1px;
+}
+.atr-legend-on {
+  color: var(--atr-text);
+  font-weight: 600;
+}
+.atr-legend-off {
+  opacity: 0.4;
+}
 /* in a wrap's empty cells: a list (or, when it is long, rows), in the middle of the space */
 .atr-legend.atr-inset {
   position: absolute;

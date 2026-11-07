@@ -441,7 +441,7 @@ def test_select_points_in_every_panel():
     assert list(t.selected()["v"]) == [2.0, 20.0, 200.0]  # the brush holds in all panels
     t.select(x=(0.5, 1.5), y=(0, 50))
     assert list(t.selected()["v"]) == [2.0, 20.0]
-    assert t.selection == {"x": (0.5, 1.5), "y": (0.0, 50.0), "panel": None}
+    assert t.selection == {"x": (0.5, 1.5), "y": (0.0, 50.0), "color": None, "panel": None}
     t.select()
     assert t.selection is None
 
@@ -455,7 +455,7 @@ def test_select_line_segments_by_either_end():
 def test_select_bars_that_overlap():
     t = Trellis(SMALL).bars(x="h", y="v", position="dodge")
     t.select(x="y")
-    assert t.selection == {"x": ["y"], "y": None, "panel": None}
+    assert t.selection == {"x": ["y"], "y": None, "color": None, "panel": None}
     assert sorted(t.selected()["v"]) == [2.0, 20.0]
 
 
@@ -873,3 +873,43 @@ def test_smooth_per_colour_fullrange_and_on_a_log_axis():
     lg.smooth(x="x", y="y", method="linear", se=False)
     c = coords(lg)
     assert np.allclose(np.diff(c[:, 3]) / np.diff(c[:, 2]), 1.0)  # a line in log10(x)
+
+
+# ---- legend selection ---------------------------------------------------------------------
+
+
+def test_select_color_picks_the_marks_of_those_colours() -> None:
+    t = Trellis(SMALL).points(x="t", y="v", color="h")
+    t.select(color="y")
+    assert t.selected()["v"].tolist() == [2.0, 20.0]
+    assert t.selection == {"x": None, "y": None, "color": ["y"], "panel": None}
+    t.select(x=(0.5, 1.5), color=["x"])  # both: in the range and of the colour
+    assert t.selected()["v"].tolist() == [200.0]
+    legends = t._scene()[0]["legends"]
+    level = legends[0]["labels"].index("x")
+    brush = t._current_selection()
+    assert brush is not None
+    assert brush["legend"] == {"index": 0, "levels": [level]}
+
+
+def test_legend_selection_from_the_browser_and_other_layers() -> None:
+    t = (Trellis(SMALL, wrap="g").points(x="t", y="v", color="h")
+         .line(x="t", y="v", name="plain"))  # fmt: skip
+    legend = {"index": 0, "levels": [1]}  # the second of h's levels: "y"
+    t.widget.selection = {"x": None, "y": None, "panel": None, "legend": legend}
+    assert t.selected()["h"].tolist() == ["y", "y"]
+    assert t.selected("plain")["v"].tolist() == []  # not coloured by h: none of its marks
+
+
+def test_legend_selects_a_stacked_histograms_rows() -> None:
+    data = {"v": [1.0, 1.2, 2.5, 2.7, 3.1], "k": ["p", "q", "p", "q", "q"]}
+    t = Trellis(data).hist(x="v", color="k", binwidth=1)
+    t.select(color="q")
+    assert sorted(t.selected()["v"].tolist()) == [1.2, 2.7, 3.1]
+
+
+def test_select_color_errors() -> None:
+    with pytest.raises(ValueError, match="no colour legend"):
+        Trellis(SMALL).points(x="t", y="v", color="h").select(color="nope")
+    with pytest.raises(ValueError, match="needs a category colour"):
+        Trellis(SMALL).points(x="t", y="v").select(color="x")

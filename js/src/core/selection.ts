@@ -10,6 +10,8 @@
 // are never selected.
 // A summary mark drawn as several layers (a box: body, lines, outliers) selects a box
 // whole: what meets its body or its lines.
+// Clicking legend entries selects their colours: the marks of those colours (and, with a
+// range too, only those meeting it); marks coloured by another column, or by none, fade.
 
 import { KIND_RECT } from "./renderers/renderer";
 import type { LayerData, Scene } from "./scene";
@@ -21,6 +23,23 @@ export interface Brush {
   y: Range | null;
   /** The panel it selects in (index in spec.panels), or null/absent: every panel. */
   panel?: number | null;
+  /** Only marks of these colours: levels of the category legend `index` (spec.legends). */
+  legend?: { index: number; levels: number[] } | null;
+}
+
+/** A brush that selects something: a range, or legend entries. */
+export function selects(brush: Brush | null): boolean {
+  return !!brush && (!!brush.x || !!brush.y || (brush.legend?.levels.length ?? 0) > 0);
+}
+
+/** The legend entries chosen after a click on entry `level` of legend `index`: alone (again:
+ * none), or with `add` (Shift, Cmd or Ctrl) added to or taken from those chosen. */
+export function toggleLegend(current: Brush["legend"], index: number, level: number, add: boolean): Brush["legend"] {
+  const chosen = current?.index === index ? current.levels : [];
+  let levels: number[];
+  if (add) levels = chosen.includes(level) ? chosen.filter((l) => l !== level) : [...chosen, level].sort((a, b) => a - b);
+  else levels = chosen.length === 1 && chosen[0] === level ? [] : [level];
+  return levels.length ? { index, levels } : null;
 }
 
 export interface Selection {
@@ -35,6 +54,9 @@ export function select(scene: Scene, brush: Brush): Selection {
   const [x0, x1] = brush.x ? sorted(brush.x) : [-Infinity, Infinity];
   const [y0, y1] = brush.y ? sorted(brush.y) : [-Infinity, Infinity];
   const inside = (x: number, y: number): boolean => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  const legend = brush.legend?.levels.length ? brush.legend : null;
+  const chosen = new Uint8Array(65536);
+  for (const l of legend?.levels ?? []) chosen[l] = 1;
   const masks: (Uint8Array | null)[] = [];
   const keys = new Set<number>();
   let linked = false;
@@ -50,8 +72,11 @@ export function select(scene: Scene, brush: Brush): Selection {
     const band = layer.spec.type === "band" ? layer.base : null;
     const p = brush.panel ?? null;
     const from = p === null ? 0 : (layer.starts[p] ?? 0);
-    const to = p === null ? n : (layer.starts[p + 1] ?? 0);
+    // legend entries chosen: only the marks of their colours (none in another legend's colours)
+    const codes = legend && layer.spec.color.legend === legend.index ? layer.codes : null;
+    const to = legend && !codes ? from : p === null ? n : (layer.starts[p + 1] ?? 0);
     for (let i = from; i < to; i++) {
+      if (codes && !chosen[codes[i]]) continue;
       const ax = c[i * 4];
       const ay = c[i * 4 + 1];
       const bx = c[i * 4 + 2];

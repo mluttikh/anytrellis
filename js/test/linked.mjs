@@ -100,6 +100,15 @@ await page.waitForTimeout(500);
 check((await run("print(scatter.selection is None, len(power.selected()))")) === "True 0", "a click in a linked plot clears the selection");
 check((await shot(power)).equals(powerA), "the histogram is back as it was");
 
+// a legend entry in the scatter: its cars, in the others
+await scatter.scrollIntoViewIfNeeded();
+const japan = await scatter.$(".atr-legend-pick:has-text('Japan')");
+await japan.click();
+await page.waitForTimeout(1500);
+check(!(await shot(power)).equals(powerA), "a legend click in one plot highlights the others");
+check((await run("print(scatter.selection['color'], len(power.selected()) == (cars['origin'] == 'Japan').sum())")) === "['Japan'] True", "Python: the legend's colour selects its rows in the linked plots");
+await run("scatter.select(); print('cleared')");
+
 // on="country": brush high fertility in 1955, their lines light up
 const livesA = await shot(lives);
 await brush(years, [0.15, 0.2, 0.215, 0.4]); // 1955: high fertility, short lives

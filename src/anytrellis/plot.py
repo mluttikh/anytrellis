@@ -732,23 +732,28 @@ class Trellis:
 
     # ---- selecting ----------------------------------------------------------------------
 
-    def select(self, x: Any = None, y: Any = None, *, panel: Any = None) -> Self:
+    def select(self, x: Any = None, y: Any = None, *, color: Any = None,
+               panel: Any = None) -> Self:  # fmt: skip
         """Select the marks in a range of x, of y or of both, as a brush drawn in the
         browser does: in every panel, or in ``panel`` alone (a name from ``panels()``, or a
         tuple of its levels); with ``link``, also every row sharing a key with them, in all
-        panels. ``select()`` clears the selection.
+        panels. ``color``: only the marks of these colours, as clicking legend entries does.
+        ``select()`` clears the selection.
 
         ```python
         t.select(x=("2026-03-05", "2026-03-08"))   # a time axis: dates, datetimes
         t.select(x=(2, 4), y=(60, 80))             # numbers
         t.select(x=["Europe", "Asia"])             # a category axis: its categories
         t.select(x=(0, 3), panel="1955")           # with link="country": follow them
+        t.select(color=["Asia", "Africa"])         # a colour column's categories
         ```
         """
         self._scene()
         brush: Brush | None = None
-        if x is not None or y is not None:
+        if x is not None or y is not None or color is not None:
             brush = {"x": self._range_in("x", x), "y": self._range_in("y", y), "panel": None}
+            if color is not None:
+                brush["legend"] = self._legend_in(color)
             if panel is not None:
                 keys = panel if isinstance(panel, tuple) else (panel,)
                 name = " · ".join(str(k) for k in keys)
@@ -761,15 +766,18 @@ class Trellis:
 
     @property
     def selection(self) -> dict[str, Any] | None:
-        """The selection (made here or in the browser): ``{"x": ..., "y": ..., "panel":
-        ...}``, each axis a ``(low, high)`` range (times as ``datetime64``; a category axis:
-        the categories in it) or None for any, and the panel it was drawn in (a linked plot)
-        or None for all; None when nothing is selected."""
+        """The selection (made here or in the browser): ``{"x": ..., "y": ..., "color": ...,
+        "panel": ...}``, each axis a ``(low, high)`` range (times as ``datetime64``; a
+        category axis: the categories in it) or None for any, the colours chosen in the
+        legend (a list of categories) or None for any, and the panel it was drawn in (a
+        linked plot) or None for all; None when nothing is selected."""
         brush = self._current_selection()
         if brush is None:
             return None
         self._scene()
         out = {axis: range_out(brush.get(axis), *self._axes[axis]) for axis in ("x", "y")}
+        legend = self._legend_out(brush)
+        out["color"] = None if legend is None else legend[1]
         panel = brush.get("panel")
         out["panel"] = None if panel is None else self.panels()[int(panel)]
         return out
@@ -823,7 +831,18 @@ class Trellis:
         x = self._absolute("x", brush.get("x"))
         y = self._absolute("y", brush.get("y"))
         panel = None if brush.get("panel") is None else int(brush["panel"])
-        mask = row_mask(layer.mark, geom, table.n, x, y, panel)
+        legend = self._legend_out(brush)
+
+        def hit(lay: Layer, tb: Table, gm: Geometry) -> np.ndarray:
+            mask = row_mask(lay.mark, gm, tb.n, x, y, panel)
+            if legend is not None:  # only the chosen colours (another column's: none)
+                name, chosen = legend
+                if lay.color != name or name not in tb or tb.column(name).kind != "category":
+                    return np.zeros(tb.n, dtype=bool)
+                mask &= np.isin(tb.column(name).values, chosen)
+            return mask
+
+        mask = hit(layer, table, geom)
         keys = self._keys.get(id(layer))
         if keys is None:
             return mask
@@ -833,11 +852,7 @@ class Trellis:
             other_keys = self._keys.get(id(other))
             if other_geom is None or other_keys is None or other.facet == "exclude":
                 continue
-            m = (
-                mask
-                if other is layer
-                else row_mask(other.mark, other_geom, other_table.n, x, y, panel)
-            )
+            m = mask if other is layer else hit(other, other_table, other_geom)
             chosen.append(other_keys[m])
         return grow(mask, keys, np.unique(np.concatenate(chosen)) if chosen else np.array([]))
 
@@ -858,6 +873,34 @@ class Trellis:
             if lr.name == layer:
                 return lr
         raise ValueError(f"no layer {layer!r}; the layers are {[lr.name for lr in marks]}")
+
+    def _legend_in(self, color: Any) -> dict[str, Any] | None:
+        """``select(color=...)``: the category legend with these levels, and their indices."""
+        if color is None:
+            return None
+        wanted = [str(c) for c in ([color] if isinstance(color, str) else list(color))]
+        legends = self._scene()[0]["legends"]
+        for index, lg in enumerate(legends):
+            labels = lg.get("labels") or []
+            if lg["kind"] == "category" and all(w in labels for w in wanted):
+                return {"index": index, "levels": sorted({labels.index(w) for w in wanted})}
+        known = {lg["title"]: lg.get("labels") for lg in legends if lg["kind"] == "category"}
+        if not known:
+            raise ValueError("select(color=...) needs a category colour column (a legend)")
+        raise ValueError(f"no colour legend has all of {wanted}; the legends are {known}")
+
+    def _legend_out(self, brush: Brush) -> tuple[str, list[str]] | None:
+        """The brush's chosen legend entries: the colour column and its categories."""
+        legend = brush.get("legend")
+        if not legend or not legend.get("levels"):
+            return None
+        legends = self._scene()[0]["legends"]
+        index = int(legend["index"])
+        if not 0 <= index < len(legends) or legends[index]["kind"] != "category":
+            return None
+        labels = legends[index]["labels"]
+        chosen = [labels[i] for i in legend["levels"] if 0 <= i < len(labels)]
+        return legends[index]["title"], chosen
 
     def _range_in(self, axis: str, value: Any) -> list[float] | None:
         kind, levels, origin = self._axes[axis]
@@ -1356,6 +1399,8 @@ class _ColorScales:
                 if len(finite):
                     lo, hi = self.ranges.get(name, (np.inf, -np.inf))
                     self.ranges[name] = (min(lo, finite.min()), max(hi, finite.max()))
+        # a legend each: numbers with no values have none
+        self.order = [n for n in self.order if n in self.levels or n in self.ranges]
         self.colored = bool(self.order)
 
     def colors(self, name: str) -> list[str]:

@@ -28,12 +28,17 @@ import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readT
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
-import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors } from "./selection";
+import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
 
 export type { Highlight } from "./selection";
 import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { formatValue } from "./ticks";
 import type { DataSource, LegendSpec, RendererPreference, TrellisSpec } from "./types";
+
+/** Versions of the selected marks' sets: never used twice, as the renderers keep a set's
+ * buffers by key and version (a selection cleared and made again under the same key must
+ * not find the old one's colours). */
+let selectionVersion = 0;
 
 export interface ViewOptions {
   source: DataSource;
@@ -140,6 +145,8 @@ export class TrellisView {
   private selectionSets: ({ dim: InstanceSet; hi: InstanceSet } | null)[] = [];
   /** A linked plot's selection, shown when there is no brush here. */
   private highlight: Highlight | null = null;
+  /** The category legends' entries (spec.legends index, level, element). */
+  private legendItems: { index: number; level: number; el: HTMLElement }[] = [];
   /** Every y group follows its data in view as x changes. */
   private fitY = false;
   private needFit = false;
@@ -390,7 +397,8 @@ export class TrellisView {
 
   /** The selection is this brush (null: none). `user`: the reader made it (tell Python). */
   private setBrush(brush: Brush | null, user: boolean): void {
-    this.brush = brush && (brush.x || brush.y) ? brush : null;
+    this.brush = selects(brush) ? brush : null;
+    this.updateLegend();
     this.needSelect = true; // once per frame: a brush moves faster than frames come
     if (user) this.opts.onSelect?.(this.brush);
     this.request();
@@ -425,6 +433,7 @@ export class TrellisView {
     const shared = !this.brush && this.highlight ? highlighted(scene, this.highlight) : null;
     if (!scene || (!this.brush && !shared)) {
       this.selection = null;
+      this.selectionSets = []; // drawn as they are again, not faded
       return;
     }
     this.selection = shared?.selection ?? select(scene, this.brush!);
@@ -438,7 +447,7 @@ export class TrellisView {
       const coords = fraction ? filled(layer.set.coords, fraction) : layer.set.coords;
       return {
         dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords, colors: dim, base: layer.set.base },
-        hi: { key: `${layer.set.key}:hi`, version: (prev?.hi.version ?? 0) + 1, count: layer.set.count, coords, colors: hi, base: layer.set.base },
+        hi: { key: `${layer.set.key}:hi`, version: ++selectionVersion, count: layer.set.count, coords, colors: hi, base: layer.set.base },
       };
     });
   }
@@ -446,7 +455,7 @@ export class TrellisView {
   /** The brush where it shows in view `v` (px, in the panel), or null. */
   private brushRect(v: PanelView): Rect | null {
     const b = this.brush;
-    if (!b || (b.panel !== null && b.panel !== undefined && b.panel !== v.panel)) return null;
+    if (!b || (!b.x && !b.y) || (b.panel !== null && b.panel !== undefined && b.panel !== v.panel)) return null;
     const r = v.rect;
     let x0 = r.x;
     let x1 = r.x + r.w;
@@ -479,6 +488,7 @@ export class TrellisView {
       x: b.along === "y" ? null : [(r.x - v.map.ox) / v.map.sx, (r.x + r.w - v.map.ox) / v.map.sx],
       y: b.along === "x" ? null : [(r.y + r.h - v.map.oy) / v.map.sy, (r.y - v.map.oy) / v.map.sy],
       panel: linked ? v.panel : null,
+      legend: this.brush?.legend ?? null, // chosen legend entries: only their colours
     };
   }
 
@@ -914,7 +924,7 @@ export class TrellisView {
             const mx = (x - d.x) / v.map.sx;
             const my = (y - d.y) / v.map.sy;
             this.front_.hover = null;
-            this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null }, false);
+            this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null, legend: b.legend ?? null }, false);
             this.opts.onBrushing?.(this.brush);
             return;
           }
@@ -1202,7 +1212,10 @@ export class TrellisView {
 
   private renderLegend(legends: LegendSpec[]): void {
     this.legend.replaceChildren();
-    for (const lg of legends) {
+    this.legendItems = [];
+    // a category's entries select its marks: alone, or added with Shift, Cmd or Ctrl
+    const selectable = this.scene?.layers.some((l) => l.codes && !l.spec.context) ?? false;
+    legends.forEach((lg, index) => {
       const box = el("div", lg.kind === "category" ? "atr-legend-group atr-legend-cat" : "atr-legend-group");
       box.append(el("span", "atr-legend-title", lg.title));
       if (lg.kind === "category") {
@@ -1212,6 +1225,21 @@ export class TrellisView {
           sw.style.background = lg.colors[i];
           item.append(sw, document.createTextNode(label));
           box.append(item);
+          if (!selectable) return;
+          item.classList.add("atr-legend-pick");
+          item.tabIndex = 0;
+          item.setAttribute("role", "button");
+          item.setAttribute("aria-pressed", "false");
+          item.title = "Click: select its marks (Shift+click: add or remove)";
+          const pick = (add: boolean): void => this.pickLegend(index, i, add);
+          item.addEventListener("click", (e) => pick(e.shiftKey || e.metaKey || e.ctrlKey));
+          item.addEventListener("keydown", (e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            e.stopPropagation();
+            pick(e.shiftKey || e.metaKey || e.ctrlKey);
+          });
+          this.legendItems.push({ index, level: i, el: item });
         });
       } else {
         const bar = el("span", "atr-gradient");
@@ -1219,8 +1247,29 @@ export class TrellisView {
         box.append(el("span", "atr-legend-item", fmt(lg.lo ?? 0)), bar, el("span", "atr-legend-item", fmt(lg.hi ?? 1)));
       }
       this.legend.append(box);
-    }
+    });
     this.legend.style.display = legends.length ? "flex" : "none";
+    this.updateLegend();
+  }
+
+  /** A click on legend entry `level` of legend `index`: select its colour (with `add`: add
+   * it to those chosen, or take it away). A range brushed stays: both must hold. */
+  private pickLegend(index: number, level: number, add: boolean): void {
+    const b = this.brush;
+    const legend = toggleLegend(b?.legend ?? null, index, level, add);
+    this.setBrush({ x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend }, true);
+    this.selectedNotice();
+  }
+
+  /** The chosen legend entries stand out; the others fade while some are chosen. */
+  private updateLegend(): void {
+    const legend = this.brush?.legend ?? null;
+    for (const { index, level, el: item } of this.legendItems) {
+      const on = legend?.index === index && legend.levels.includes(level);
+      item.classList.toggle("atr-legend-on", on);
+      item.classList.toggle("atr-legend-off", !!legend && legend.index === index && !on);
+      item.setAttribute("aria-pressed", String(on));
+    }
   }
 
   get rendererKind(): string | null {
