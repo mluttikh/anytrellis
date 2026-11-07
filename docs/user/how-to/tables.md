@@ -1,7 +1,8 @@
 # Plot your own tables
 
-Give `Trellis` any table: a Polars, pandas or PyArrow table, a DuckDB relation, or a dict
-of columns (lists or NumPy arrays). Name its columns in the facets and the layers.
+Give `Trellis` any table: a Polars, pandas or PyArrow table, a Polars `LazyFrame`, a
+DuckDB relation, an Ibis table, or a dict of columns (lists or NumPy arrays). Name its
+columns in the facets and the layers.
 
 ```python exec="on" source="above" session="tables" html="true"
 import pandas as pd
@@ -77,7 +78,39 @@ print(plot._embed_html())  # markdown-exec: hide
 columns, and `facet="exclude"` draws the *other* panels' rows: see
 [each group against the rest](marks.md#each-group-against-the-rest).
 
+## Lazy tables and databases
+
+A Polars `LazyFrame`, a DuckDB relation or an Ibis table (on DuckDB, Postgres, Snowflake or
+any other database Ibis queries) is read when the plot is first drawn: in one query, with
+only the columns the plot uses. The summaries of each panel are computed by the database:
+the statistics the [pages](pages.md) sort and filter by, and those `order()` ranks levels
+by. The medians of millions of rows come from it, not from Python.
+
+```python
+import ibis
+
+con = ibis.duckdb.connect("readings.duckdb")
+readings = con.table("readings").filter(ibis._.year == 2025)
+plot = Trellis(readings, wrap="station").line(x="time", y="temp")
+```
+
+Ten million readings of 1,000 stations, from an Ibis table on DuckDB, are drawn in 3.3 s
+rather than 5.3 s, and their unused columns are never read.
+
+- **The rows of the columns drawn are read into Python**, as for any table, and the browser
+  gets the panels of the pages around the one shown.
+- **A column needed later** (a tooltip column of a layer added after the plot was drawn,
+  say) reads the table again, with it. The rows must come back in the same order each
+  time, as they do from Polars, DuckDB and Ibis on DuckDB. For a database that promises
+  no order, sort the table by a unique key first (`readings.order_by("id")`).
+- **`selected()`** gives every column of the selected rows, as the table the query
+  collects to: a PyArrow table from DuckDB and Ibis, a Polars `DataFrame` from a
+  `LazyFrame`.
+- A summary the database can't compute (the mean of times, on some backends) is computed
+  from the rows instead.
+
 ## Large tables
 
 anytrellis reads only the columns a plot uses, once, and sends them to the browser as
-binary arrays. See [Plot large data](large.md).
+binary arrays. Text columns are encoded by PyArrow when it is installed: tens of times
+faster than labelling millions of rows one by one. See [Plot large data](large.md).

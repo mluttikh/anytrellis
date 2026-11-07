@@ -1,5 +1,11 @@
-"""Reading columns from tables: Polars, PyArrow, pandas, DuckDB (via narwhals) or a dict of
-arrays. Every column is read as one of three kinds: numbers, times or categories."""
+"""Reading columns from tables: Polars, PyArrow, pandas, DuckDB, Ibis (via narwhals) or a
+dict of arrays. Every column is read as one of three kinds: numbers, times or categories.
+
+A lazy table (a Polars ``LazyFrame``, a DuckDB relation, an Ibis table) is read once, with
+only the columns the plot uses, when the first of them is needed; a column needed later
+reads them all again, with it. Its rows must come back in the same order each time, as
+they do from Polars, DuckDB and Ibis on DuckDB. Text columns are encoded by Arrow when
+PyArrow is installed, rather than labelled row by row."""
 
 from __future__ import annotations
 
@@ -63,20 +69,98 @@ class Table:
         if isinstance(data, Table):
             data = data.native
         self.native = data
-        self._frame = _frame(data)
+        frame = _frame(data)
         self._cache: dict[str, Column] = {}
-        self.names = _column_names(self._frame)
-        self.n = _row_count(self._frame, self.names)
+        self._lazy: Any = None
+        """A lazy table's query (narwhals ``LazyFrame``), or None: the rows are in memory."""
+        self._wanted: dict[str, None] = {}
+        """A lazy table's columns to read, in the order asked for."""
+        self._read_names: set[str] = set()
+        """The columns of the lazy table read into ``_frame``."""
+        self._n: int | None = None
+        import narwhals as nw
+
+        if isinstance(frame, nw.LazyFrame):
+            self._lazy = frame
+            self._schema = dict(frame.collect_schema())
+            self._frame: Any = None
+            self.names = list(self._schema)
+        else:
+            self._frame = frame
+            self.names = _column_names(frame)
+            self._n = _row_count(frame, self.names)
+
+    @property
+    def n(self) -> int:
+        """The number of rows."""
+        if self._n is None:
+            if self._wanted:
+                self._load()
+            else:  # nothing to read yet: count them
+                import narwhals as nw
+
+                counted = self._lazy.select(nw.len().alias("n")).collect()
+                self._n = int(counted["n"][0])
+        assert self._n is not None
+        return self._n
+
+    @property
+    def lazy(self) -> Any:
+        """The query of a lazy table (a narwhals ``LazyFrame``), or None."""
+        return self._lazy
 
     def __contains__(self, name: object) -> bool:
         return name in self.names
+
+    def want(self, *names: str | None) -> None:
+        """Columns to read with the others, in one query, when a lazy table is first read
+        (names not in the table are ignored)."""
+        if self._lazy is None:
+            return
+        for name in names:
+            if name is not None and name in self.names:
+                self._wanted[name] = None
+
+    def check(self, name: str) -> None:
+        """Raise ``NotFoundError`` for a column the table doesn't have; a lazy table's
+        column is read later, with the others."""
+        if name not in self.names:
+            raise NotFoundError(f"column {name!r} not found; available: {self.names}")
+        if self._lazy is None:
+            self.column(name)
+        else:
+            self.want(name)
+
+    def dtype(self, name: str) -> Any:
+        """A lazy table's column type (a narwhals dtype), from its schema."""
+        return self._schema[name]
+
+    def kind(self, name: str) -> Kind:
+        """A column's kind, from a lazy table's schema without reading it."""
+        if self._lazy is None or name in self._cache:
+            return self.column(name).kind
+        if name not in self.names:
+            raise NotFoundError(f"column {name!r} not found; available: {self.names}")
+        return _kind_of(self._schema[name])
 
     def column(self, name: str) -> Column:
         if name not in self._cache:
             if name not in self.names:
                 raise NotFoundError(f"column {name!r} not found; available: {self.names}")
+            if self._lazy is not None and name not in self._read_names:
+                self._wanted[name] = None
+                self._load()
             self._cache[name] = _read(self._frame, name)
         return self._cache[name]
+
+    def _load(self) -> None:
+        """Read a lazy table's wanted columns, all in one query (again, when one was added
+        since: the columns read before are dropped, so all come from the same rows)."""
+        names = list(self._wanted)
+        self._frame = self._lazy.select(names).collect()
+        self._read_names = set(names)
+        self._cache = {}
+        self._n = len(self._frame)
 
     def log_scaled(self, names: set[str]) -> Table:
         """This table with the columns ``names`` in log10 units, for a log axis: values of 0
@@ -95,35 +179,50 @@ class Table:
         return out
 
     def take(self, rows: np.ndarray) -> Any:
-        """These rows (indices), as the same kind of table as the data given."""
+        """These rows (indices), as the same kind of table as the data given (a lazy
+        table's: every column, as the table it collects to)."""
         if isinstance(self._frame, Mapping):
             return {k: np.asarray(v)[rows] for k, v in self._frame.items()}
         import narwhals as nw
 
+        if self._lazy is not None:
+            return nw.to_native(self._lazy.collect()[rows])
         return nw.to_native(self._frame[rows])
 
     def raw(self, name: str) -> np.ndarray:
         """A column's values as they are (for tooltips)."""
         if isinstance(self._frame, Mapping):
             return np.asarray(self._frame[name]).ravel()
+        if self._lazy is not None and name not in self._read_names:
+            self.column(name)
         return self._frame[name].to_numpy()
 
 
 def _frame(data: Any) -> Any:
+    """The rows in memory (a narwhals ``DataFrame``, or a dict of arrays), or a lazy
+    table's query (a narwhals ``LazyFrame``), not yet read."""
     if isinstance(data, Mapping):
         return data
     import narwhals as nw
 
     try:
-        out = nw.from_native(data)
+        return nw.from_native(data)
     except TypeError:
         raise TypeError(
-            f"unsupported data of type {type(data).__name__}; pass a Polars, PyArrow, pandas "
-            "or DuckDB table, or a dict of arrays"
+            f"unsupported data of type {type(data).__name__}; pass a Polars, PyArrow, pandas, "
+            "DuckDB or Ibis table, or a dict of arrays"
         ) from None
-    if isinstance(out, nw.LazyFrame):
-        out = out.collect()
-    return out
+
+
+def _kind_of(dtype: Any) -> Kind:
+    """The kind a column of this narwhals dtype is read as."""
+    import narwhals as nw
+
+    if isinstance(dtype, nw.Datetime | nw.Date):
+        return "time"
+    if dtype.is_numeric() or dtype == nw.Boolean:
+        return "number"
+    return "category"
 
 
 def _column_names(frame: Any) -> list[str]:
@@ -168,7 +267,32 @@ def _read(frame: Any, name: str) -> Column:
         native = nw.to_native(frame)
         if hasattr(native, "iloc"):  # pandas keeps its declared order
             levels = [str(c) for c in native[name].cat.categories]
+    elif dtype == nw.String:
+        encoded = _arrow_codes(series)
+        if encoded is not None:
+            return _coded(name, *encoded, None)
     return _categories(name, series.to_numpy(), levels)
+
+
+def _arrow_codes(series: Any) -> tuple[np.ndarray, np.ndarray] | None:
+    """A text column's distinct labels and each row's index among them, encoded by Arrow
+    (tens of times faster than labelling the rows in Python); None without PyArrow."""
+    try:
+        import pyarrow as pa
+    except ImportError:
+        return None
+    try:
+        arr = series.to_arrow()
+    except (ImportError, ModuleNotFoundError, NotImplementedError):
+        return None
+    if isinstance(arr, pa.ChunkedArray):
+        arr = arr.combine_chunks()
+    encoded = arr.dictionary_encode()
+    labels = [_label(v) for v in encoded.dictionary.to_pylist()]
+    missing = len(labels)
+    labels.append(MISSING_LABEL)  # the code of rows without a value
+    codes = encoded.indices.fill_null(missing).to_numpy(zero_copy_only=False)
+    return np.array(labels, dtype=object), codes.astype(np.int64)
 
 
 def _from_array(name: str, values: Any) -> Column:
@@ -198,8 +322,16 @@ def _from_array(name: str, values: Any) -> Column:
 
 
 def _categories(name: str, values: np.ndarray, levels: list[str] | None) -> Column:
-    distinct, codes = _labels(values)
-    seen = set(distinct[np.unique(codes)]) if len(codes) else set()
+    return _coded(name, *_labels(values), levels)
+
+
+def _coded(name: str, distinct: np.ndarray, codes: np.ndarray,
+           levels: list[str] | None) -> Column:  # fmt: skip
+    """A category column from its distinct labels (each once) and each row's index among
+    them; ``levels``: a declared order (else natural, the missing label last)."""
+    present_codes = np.flatnonzero(np.bincount(codes, minlength=len(distinct))) \
+        if len(codes) else np.zeros(0, dtype=np.int64)  # fmt: skip
+    seen = set(distinct[present_codes])
     if levels is None:
         present = sorted((t for t in seen if t != MISSING_LABEL), key=_natural)
     else:
