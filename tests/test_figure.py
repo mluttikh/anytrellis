@@ -152,6 +152,17 @@ def test_categories_logs_bars_and_labels() -> None:
     assert {"a", "b", "c", "d"} <= set(words)
 
 
+def test_x_labels_of_neighbouring_panels_do_not_run_together() -> None:
+    # a month of hours: ticks at Mar 1 and Apr 1, each at a panel's edge
+    data = sensors(stations=3, hours=24 * 31)
+    t = Trellis(data, wrap="station", cols=3).line(x="time", y="temp")
+    words = texts(figure_svg(t, width=700))
+    # the first two panels leave out the label at their right edge (the next panel's
+    # first is there); the last keeps it
+    assert words.count("Apr") == 1
+    assert words.count("Mar") == 3
+
+
 def test_ticks_as_the_browser_writes_them() -> None:
     assert [t[1] for t in ticks("number", -2, 2, 0, 4)] == ["−2", "−1", "0", "1", "2"]
     assert [t[1] for t in ticks("number", 0, 2e6, 0, 4)] == ["0", "500k", "1.0M", "1.5M", "2.0M"]

@@ -483,10 +483,12 @@ export class TrellisView {
       if (!mask) return null;
       const prev = old[i]?.dim.key === `${layer.set.key}:dim` ? old[i] : null;
       const { dim, hi } = selectionColors(layer, mask, prev?.dim.colors ?? null);
+      // a bar's selected share (a linked plot's highlight): the faded bar whole, the share
+      // filled from its base on top
       const fraction = shared?.fractions[i];
       const coords = fraction ? filled(layer.set.coords, fraction) : layer.set.coords;
       return {
-        dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords, colors: dim, base: layer.set.base },
+        dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords: layer.set.coords, colors: dim, base: layer.set.base },
         hi: { key: `${layer.set.key}:hi`, version: ++selectionVersion, count: layer.set.count, coords, colors: hi, base: layer.set.base },
       };
     });
@@ -1246,7 +1248,8 @@ export class TrellisView {
     const all = [...rows, ...extra.map(([k, v]) => [k, v] as [string, string])];
     this.tip.replaceChildren();
     if (head) this.tip.append(el("div", "atr-tip-head", head));
-    const table = el("table");
+    // a class: page styles for plain tables (a docs theme's, `table:not([class])`) leave it be
+    const table = el("table", "atr-tip-table");
     for (const [k, val] of all) {
       const tr = el("tr");
       tr.append(el("th", "", k), el("td", "", val));

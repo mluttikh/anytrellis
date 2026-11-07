@@ -1,6 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs)."""
+many.mjs, details.mjs)."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ def main(out: Path) -> None:
     cars = load("cars").with_columns(cyl=pl.col("cylinders").cast(pl.String))
     density = Trellis(cars, wrap="origin", cols=3, panel_height=150)
     density.density(x="mpg", color="cyl", fill=True).save_html(out / "density.html")
+    Trellis(cars).hist(x="mpg").save_html(out / "hist.html")
     many_plots(out / "many.html", gapminder)
 
 

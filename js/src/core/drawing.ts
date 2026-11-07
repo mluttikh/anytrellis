@@ -1,7 +1,7 @@
 // The 2D canvases around the GPU marks: behind them, panel backgrounds and gridlines; in
 // front, axes, strips, titles, rules, the crosshair and the hovered mark.
 
-import type { Layout, Rect } from "./layout";
+import type { Layout, PanelBox, Rect } from "./layout";
 import type { PanelMap, TextData } from "./scene";
 import { type Tick, minorTicks, ticks, yTickCount } from "./ticks";
 import type { RuleLayerSpec, TrellisSpec } from "./types";
@@ -178,6 +178,7 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     const v = views[i];
     const r = v.rect;
     if (box.showX) {
+      const crowded = crowdedRight(layout, box);
       ctx.textAlign = "center";
       ctx.beginPath();
       ctx.moveTo(r.x, r.y + r.h + 0.5);
@@ -189,6 +190,8 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
         ctx.moveTo(Math.round(x) + 0.5, r.y + r.h);
         ctx.lineTo(Math.round(x) + 0.5, r.y + r.h + 4);
         const w = ctx.measureText(t.label).width;
+        // next to a panel's axis: not up to its first label ("AprMar")
+        if (crowded && x + w / 2 > r.x + r.w - LABEL_ROOM) continue;
         const lx = Math.min(Math.max(x, r.x + w / 2), r.x + r.w - w / 2 + 6);
         if (lx - w / 2 < lastRight + 6) continue;
         ctx.fillText(t.label, lx, r.y + r.h + 4 + fs * 0.75);
@@ -290,6 +293,17 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.strokeStyle = theme.accent;
     ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h);
   }
+}
+
+/** Room (px) an x label leaves at its panel's right edge when another panel's x axis follows
+ * there: with the gap between them, labels of neighbours stay well apart. */
+const LABEL_ROOM = 4;
+
+/** Whether the panel right of `box` (across the gap between panels) draws an x axis too, at
+ * the same height: its first label starts where `box`'s last would end. */
+export function crowdedRight(layout: Layout, box: PanelBox): boolean {
+  const r = box.rect;
+  return layout.panels.some((b) => b !== box && b.showX && Math.abs(b.rect.y + b.rect.h - (r.y + r.h)) < 1 && b.rect.x > r.x && b.rect.x - (r.x + r.w) <= 8);
 }
 
 function drawText(ctx: CanvasRenderingContext2D, t: TextData, v: PanelView, theme: Theme): void {

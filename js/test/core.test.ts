@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
+import { crowdedRight } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
 import { type Scene, pick, yExtent } from "../src/core/scene";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
@@ -118,6 +119,20 @@ describe("layout", () => {
     // the axis fits in the space the empty cell leaves
     const above = l.panels[2].rect;
     expect(l.panels[3].strip!.y + l.panels[3].rect.h - (above.y + above.h)).toBeGreaterThan(l.xAxisHeight);
+  });
+
+  it("knows where x labels would run into the next panel's", () => {
+    // a wrap's bottom row: each x axis next to another; the last panel's has room on its right
+    const l = layout(spec([panel(0, 0), panel(0, 1), panel(0, 2)], 1, 3), opts);
+    expect(l.panels.map((b) => crowdedRight(l, b))).toEqual([true, true, false]);
+    // free y scales: the next panel's y axis between them, so room enough
+    const free = layout(spec([panel(0, 0, 0, 0), panel(0, 1, 1, 1)], 1, 2), opts);
+    expect(free.panels.map((b) => crowdedRight(free, b))).toEqual([false, false]);
+    // over a wrap's empty cells: the axes drawn into them, the last row's alone
+    const wrap = layout(spec([panel(0, 0), panel(0, 1), panel(0, 2), panel(1, 0)], 2, 3), opts);
+    const drawn = wrap.panels.filter((b) => b.showX);
+    expect(drawn.map((b) => b.index)).toEqual([1, 2, 3]);
+    expect(drawn.map((b) => crowdedRight(wrap, b))).toEqual([true, false, false]);
   });
 
   it("gives the legend a wrap's empty cells, below the axes drawn into them", () => {
