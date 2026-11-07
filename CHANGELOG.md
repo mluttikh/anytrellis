@@ -27,6 +27,12 @@ All notable changes to anytrellis. The format follows
 
 ### Fixed
 
+- Tooltips on documentation sites (Material, Zensical) are as compact as in a notebook:
+  the site's table styles no longer reach them, nor its letter spacing the plot.
+- A linked plot's highlight of part of a histogram's bars draws the faded bars whole, with
+  the selected share solid from their base (the faded part was missing).
+- x labels of neighbouring panels no longer run together at their edges ("AprMar"): a
+  label that would reach the next panel's first is left out.
 - Box plots failed in WebAssembly (marimo's in-browser notebooks, Pyodide), where indices
   are 32-bit.
 - A plot now redraws when the page switches between light and dark by

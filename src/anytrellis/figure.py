@@ -970,6 +970,7 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
         r = v.rect
         d: list[str] = []
         if box.show_x:
+            crowded = _crowded_right(lay, box)
             d.append(f"M{_n(r.x)} {_n(r.y + r.h + 0.5)}H{_n(r.x + r.w)}")
             last_right = -math.inf
             for value, label in _x_ticks(spec, v):
@@ -979,6 +980,8 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
                 tx = _round(x) + 0.5
                 d.append(f"M{_n(tx)} {_n(r.y + r.h)}V{_n(r.y + r.h + 4)}")
                 w = text_width(label)
+                if crowded and x + w / 2 > r.x + r.w - LABEL_ROOM:
+                    continue  # next to a panel's axis: not up to its first label
                 lx = min(max(x, r.x + w / 2), r.x + r.w - w / 2 + 6)
                 if lx - w / 2 < last_right + 6:
                     continue
@@ -1035,6 +1038,21 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
         svg.add(f'<rect x="{_n(edge.x)}" y="{_n(edge.y)}" width="{_n(edge.w)}" '
                 f'height="{_n(edge.h)}" fill="none" stroke="{th["accent"]}" '
                 'stroke-opacity="0.8"/>')  # fmt: skip
+
+
+LABEL_ROOM = 4
+"""Room (px) an x label leaves at its panel's right edge when another panel's x axis follows."""
+
+
+def _crowded_right(lay: Layout, box: PanelBox) -> bool:
+    """Whether the panel right of ``box`` (across the gap) draws an x axis at the same
+    height (drawing.ts: crowdedRight)."""
+    r = box.rect
+    return any(
+        b is not box and b.show_x and abs(b.rect.y + b.rect.h - (r.y + r.h)) < 1
+        and b.rect.x > r.x and b.rect.x - (r.x + r.w) <= 8
+        for b in lay.panels
+    )  # fmt: skip
 
 
 def _brush_rect(brush: dict[str, Any] | None, v: _View) -> Rect | None:

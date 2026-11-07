@@ -249,6 +249,7 @@ node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, 
 node test/select.mjs <page.html> [dir] [renderer]  # brushing, moving, clearing
 node test/legend.mjs <page.html> [dir] [renderer]  # clicking legend entries
 node test/export.mjs <page.html> [dir] [renderer]  # the Export menu: PNG, SVG, clipboard
+node test/details.mjs <dir of pages> [dir] [renderer] # page styles, a partly selected histogram
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
 node test/linked.mjs <url of 07 in JupyterLab>     # linked plots: brushing across plots
 ```
