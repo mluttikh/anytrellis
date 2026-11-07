@@ -98,6 +98,9 @@ export interface MarkLayerSpec {
    * a value for each name; `tip_rows`: each instance's row. */
   tips?: { names: string[]; values: string[][] } | null;
   tip_rows?: BufferRef | null;
+  /** A paged plot in a notebook: the panels whose instances it has (Python sends the
+   * others' when they are shown). Absent: every panel's. */
+  panels?: number[] | null;
 }
 
 export interface RuleLayerSpec {
@@ -131,6 +134,8 @@ export interface TextLayerSpec {
   dy: number;
   opacity: number;
   context: boolean;
+  /** As a mark layer's: the panels whose labels it has (absent: every panel's). */
+  panels?: number[] | null;
 }
 
 export type LayerSpec = MarkLayerSpec | RuleLayerSpec | TextLayerSpec;

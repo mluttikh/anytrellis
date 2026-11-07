@@ -14,6 +14,11 @@ All notable changes to anytrellis. The format follows
   Brushing a panel lights up its rows in every panel; `selected()` gives them as rows of
   the table, and hovering a point shows its row. `corner=True` keeps each pair once.
 - `Trellis(aspect=)`: each panel's height as a multiple of its width (`1`: square).
+- Paged wraps send only the panels near the page shown: in a notebook, the browser gets
+  the data of the page shown and the pages either side of it, and more as the pages turn,
+  are sorted or filtered, or a panel of another page opens; a page further away says it
+  is loading until its data comes. A thousand panels of a week's readings start with
+  2.2 MB instead of 46 MB. A page from `save_html` or `to_html` still holds every panel.
 
 - Level of detail: what goes to the browser grows with the pixels shown, not the rows. A
   panel of more than 20,000 points of a line sends each series thinned (M4: per column,

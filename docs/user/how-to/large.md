@@ -99,7 +99,9 @@ print(plot._embed_html())  # markdown-exec: hide
 ```
 
 A wrap of more panels shows them a page at a time, which the reader sorts and filters by
-each panel's statistics: see [Page through many panels](pages.md).
+each panel's statistics: see [Page through many panels](pages.md). In a notebook, only
+the pages near the one shown are sent to the browser, so a thousand panels start as fast
+as a hundred.
 
 ## Which renderer draws
 
@@ -120,7 +122,9 @@ explains the differences.
 - **In Python**: reading the columns once, and the summaries (`hist`, `box`, `density`,
   `smooth`) per panel. A plot with only marks takes about half a second a million rows.
 - **Sending**: the marks go to the browser once, as binary arrays, at the level of detail
-  shown: a megabyte or two for millions of rows, and more as you zoom in.
-- **Saving**: a page from `save_html` holds the marks as the plot starts. A long line or
+  shown: a megabyte or two for millions of rows, and more as you zoom in. Of a paged wrap,
+  only the pages around the one shown are sent, and more as you turn them.
+- **Saving**: a page from `save_html` holds the marks as the plot starts, of every
+  panel and page. A long line or
   dense points stay small; marks below the thresholds (bars, areas, a million points
   spread over many panels) are all in the page, about 40 bytes each.

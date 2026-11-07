@@ -221,6 +221,8 @@ export class TrellisView {
   private paging: Paging = {};
   private order: number[] | null = null;
   private pagingTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The notice says the panels shown are loading. */
+  private loading = false;
   private readonly empty: HTMLDivElement;
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private viewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -354,6 +356,7 @@ export class TrellisView {
     this.setStatus(null);
     this.updateHeader();
     this.relayout();
+    this.updateLoading();
   }
 
   /** Layers in more detail for the view shown (Python): drawn instead of the spec's, in the
@@ -368,7 +371,7 @@ export class TrellisView {
     const spec = this.spec;
     const ofSpec = (d: DetailLayer): boolean => {
       const l = spec?.layers[d.index];
-      return !!l && isMark(l) && l.coords.id === d.of;
+      return !!l && (isMark(l) || l.type === "text") && l.coords.id === d.of;
     };
     const fits = layers.filter(ofSpec);
     if (!spec || !fits.length) return;
@@ -386,7 +389,27 @@ export class TrellisView {
     this.computeSelection();
     this.clearHover();
     this.request();
+    this.updateLoading();
     this.opts.onDetail?.();
+  }
+
+  /** "Loading" while a panel shown has data Python has not sent yet (a paged plot turned
+   * to a page further than the next or the previous one). */
+  private updateLoading(): void {
+    const spec = this.spec;
+    if (!spec) return;
+    const shown = this.focused !== null ? [this.focused] : (this.pagePanels() ?? []);
+    const layers = this.shownSpec(spec).layers;
+    const missing = shown.some((p) => layers.some((l) => "panels" in l && l.panels && !l.panels.includes(p)));
+    if (missing) {
+      this.loading = true;
+      this.notice.textContent = "Loading the panels…";
+      this.notice.hidden = false;
+      clearTimeout(this.noticeTimer);
+    } else if (this.loading) {
+      this.loading = false;
+      this.notice.hidden = true;
+    }
   }
 
   /** The spec as drawn: with the layers in detail. */
@@ -415,20 +438,25 @@ export class TrellisView {
   /** Show a page, sort and filters (Python: show_page, sort_panels, filter_panels; or the
    * reader, `user`: tell Python). */
   setPaging(paging: Paging | null, user = false): void {
+    const before = this.paging;
     this.paging = { ...(paging ?? {}) };
     if (!this.spec) return;
     this.computeOrder();
-    if (user) this.reportPaging();
+    // a page turned goes to Python at once (its panels' data comes back); a filter typed,
+    // once it stays put a moment
+    const typed = before.name !== this.paging.name || JSON.stringify(before.where ?? {}) !== JSON.stringify(this.paging.where ?? {});
+    if (user) this.reportPaging(typed ? PAGING_REPORT_MS : 0);
     this.clearHover();
     this.updateHeader();
     this.relayout();
+    this.updateLoading();
   }
 
-  /** Tell Python the paging, once it has stayed put a moment (typing a filter). */
-  private reportPaging(): void {
+  /** Tell Python the paging after `ms` (typing a filter: once it has stayed put a moment). */
+  private reportPaging(ms: number): void {
     clearTimeout(this.pagingTimer);
     const sent = { ...this.paging };
-    this.pagingTimer = setTimeout(() => !this.destroyed && this.opts.onPaging?.(sent), PAGING_REPORT_MS);
+    this.pagingTimer = setTimeout(() => !this.destroyed && this.opts.onPaging?.(sent), ms);
   }
 
   /** The panels the filters keep, sorted; the page within their pages. */
@@ -808,13 +836,14 @@ export class TrellisView {
       const page = Math.floor(at / (pages.rows * pages.cols));
       if (page !== (this.paging.page ?? 0)) {
         this.paging = { ...this.paging, page };
-        this.reportPaging();
+        this.reportPaging(0);
       }
     }
     this.drag = null;
     this.clearHover();
     this.updateHeader();
     this.relayout();
+    this.updateLoading();
     if (user) {
       this.opts.onFocus?.(index === null ? null : panelName(this.spec, index));
       // a grid taller than the window: the opened panel (or the plot again) into view

@@ -207,3 +207,154 @@ def test_a_short_last_page_keeps_the_height():
     spec, _ = paged(101)._scene()
     assert layout(spec, 900, page=[100]).height == layout(spec, 900).height
     assert layout(spec, 900, page=[]).height == layout(spec, 900).height
+
+
+# ---- the panels sent: around the page shown -------------------------------------------------
+
+
+class Sent:
+    """A widget's messages to the browser."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    def __call__(self, content: dict[str, Any], buffers: Any = None) -> None:
+        self.messages.append(content)
+
+    def details(self) -> list[dict[str, Any]]:
+        return [m for m in self.messages if m["type"] == "detail"]
+
+
+def has(layer: dict[str, Any]) -> list[int]:
+    """The panels a spec layer has data of."""
+    return layer["panels"]
+
+
+def test_a_paged_plot_sends_the_pages_around_the_one_shown():
+    t = paged(300)
+    spec, _ = t._scene()
+    line = spec["layers"][0]
+    assert has(line) == list(range(48))  # pages 1 and 2: 24 panels each
+    assert line["count"] == 48 * 23  # 23 segments a station
+    full, _ = t._full_scene()  # a saved page's: every panel's, as it starts
+    assert full["layers"][0]["count"] == 300 * 23
+    assert "panels" not in full["layers"][0]
+    few = paged(30)  # it does not page: every panel's data, saved or shown
+    assert few._full_scene()[0] is few._scene()[0]
+    assert "panels" not in few._scene()[0]["layers"][0]
+
+
+def test_turning_pages_sends_their_panels_once():
+    t = paged(300)
+    sent = Sent()
+    t.widget.send = sent
+    t.show_page(5)  # pages 4 to 6
+    [message] = sent.details()
+    [layer] = message["layers"]
+    assert layer["index"] == 0
+    assert layer["of"] == t._scene()[0]["layers"][0]["coords"]["id"]
+    assert has(layer["layer"]) == list(range(72, 144))
+    assert layer["layer"]["count"] == 72 * 23
+    t.show_page(5)
+    assert len(sent.details()) == 1  # the same page: nothing new
+    t.widget.paging = {"page": 11}  # the reader, in the browser: page 12 of 13
+    assert has(sent.details()[-1]["layers"][0]["layer"]) == list(range(240, 300))
+    t.sort_panels("trend temp", descending=True)  # back to page 1: the steepest first
+    assert has(sent.details()[-1]["layers"][0]["layer"]) == list(range(252, 300))
+    # the buffers sent are there to ask for
+    coords = sent.details()[-1]["layers"][0]["layer"]["coords"]["id"]
+    t.widget._on_msg(t.widget, {"type": "need", "ids": [coords]}, [])
+    assert sent.messages[-1]["type"] == "put"
+
+
+def test_an_opened_panel_of_another_page_comes_with_its_data():
+    t = paged(300)
+    sent = Sent()
+    t.widget.send = sent
+    t.open("s250")
+    assert 250 in has(sent.details()[-1]["layers"][0]["layer"])
+    t.widget.open_panel = "s260"  # opened in the browser
+    assert 260 in has(sent.details()[-1]["layers"][0]["layer"])
+
+
+def test_labels_come_with_their_panels():
+    data = stations(150)
+    first = data.group_by("station", maintain_order=True).first()
+    t = Trellis(data, wrap="station").line(x="t", y="temp").text(first, x="t", y="temp",
+                                                                 text="station")  # fmt: skip
+    spec, _ = t._scene()
+    assert spec["layers"][1]["type"] == "text"
+    assert has(spec["layers"][1]) == list(range(48))
+    assert spec["layers"][1]["count"] == 48
+    sent = Sent()
+    t.widget.send = sent
+    t.show_page(6)
+    assert [lr["index"] for lr in sent.details()[-1]["layers"]] == [0, 1]
+    assert sent.details()[-1]["layers"][1]["layer"]["count"] == 150 - 96
+
+
+def test_tooltips_and_images_of_a_page_far_away():
+    t = paged(300).show_page(10)  # no widget: the images draw it all the same
+    assert ">s216<" in figure_svg(t, width=900)
+    shown = t._shown_layers[0]
+    assert shown["count"] == 72 * 23
+    sent = Sent()
+    t.widget.send = sent
+    t.widget._on_msg(t.widget, {"type": "tooltip", "request": 1, "layer": 0, "index": 0,
+                                "of": shown["coords"]["id"]}, [])  # fmt: skip
+    assert sent.messages[-1]["rows"] == []  # no tooltip columns: the browser shows x and y
+    geom = t._sent[0][2]
+    assert geom is not None
+    assert geom.panel[0] == 192  # the first instance: page 9's first panel
+
+
+def test_a_saved_page_has_every_panel_and_the_page_shown():
+    import json
+    import re
+
+    t = paged(300).show_page(10)
+    found = re.search(r"<script type='application/json'>(.*?)</script>", t._embed_html())
+    assert found is not None
+    payload = json.loads(found.group(1).replace("<\\/", "</"))
+    assert payload["spec"]["layers"][0]["count"] == 300 * 23
+    assert payload["paging"] == {"page": 9}
+    first = payload["spec"]["layers"][0]
+    ids = {first["coords"]["id"], first["starts"]["id"]}
+    assert ids <= set(payload["buffers"])
+
+
+def test_long_lines_in_pages_are_thinned_and_sent_by_page():
+    from anytrellis.detail import THIN
+
+    n = THIN + 5_000
+    rng = np.random.default_rng(0)
+    data = {"s": np.repeat([f"s{i}" for i in range(6)], n),
+            "t": np.tile(np.arange(n, dtype=np.float64), 6),
+            "v": np.cumsum(rng.normal(size=6 * n))}  # fmt: skip
+    t = Trellis(data, wrap="s", rows=1, cols=2).line(x="t", y="v")
+    spec, _ = t._scene()
+    assert has(spec["layers"][0]) == [0, 1, 2, 3]  # pages 1 and 2
+    thin = spec["layers"][0]["count"]
+    assert thin < 4 * n / 2  # thinned (M4)
+    sent = Sent()
+    t.widget.send = sent
+    ox = spec["x"]["origin"]
+    report = {"width": 800, "x": [[0, [1000 - ox, 2000 - ox]]], "y": [],
+              "panels": [[0, 400, 300], [1, 400, 300]]}  # fmt: skip
+    t.widget._on_msg(t.widget, {"type": "view", **report}, [])
+    zoomed = sent.details()[-1]["layers"][0]["layer"]
+    assert has(zoomed) == [0, 1, 2, 3]
+
+    def in_view(entry: Any) -> int:  # panel 0's segments between t = 1000 and 2000
+        g = entry[2]
+        return int(((g.panel == 0) & (g.x0 >= 1000) & (g.x0 <= 2000)).sum())
+
+    assert in_view(t._sent[0]) > 2 * in_view(t._start[0])  # in detail where zoomed in
+    t.show_page(3)  # panels 4 and 5: the window moves, the detail stays
+    moved = sent.details()[-1]["layers"][0]["layer"]
+    assert has(moved) == [2, 3, 4, 5]
+    full, _ = t._full_scene()
+    start = t._start[0][2]
+    assert start is not None
+    assert full["layers"][0]["count"] == start.count  # every panel, thinned as it starts
+    assert set(start.panel.tolist()) == set(range(6))
