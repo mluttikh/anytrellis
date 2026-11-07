@@ -80,10 +80,24 @@ quartiles, its count and its whiskers' reach; a smooth line, its confidence inte
 or least squares, and its band is the `level` (95%) interval for the mean. Brushing selects whole bins, boxes and violins, and
 `t.selected("hist")` gives the rows they stand for.
 
+## Every pair of columns
+
+```python
+from anytrellis import pairs
+
+p = pairs(penguins, ["bill_length_mm", "bill_depth_mm", "body_mass_g"], color="species")
+p.selected()   # brush any panel: its rows light up in every panel, and come back as rows
+```
+
+`pairs()` is a scatterplot matrix: x by column and y by row, each variable's scale shared
+along its column and its row, and each variable alone on the diagonal (`diag="density"`,
+`"hist"` or `None`). `corner=True` keeps each pair once.
+
 ## Facets and scales
 
 - `Trellis(df, row=..., col=...)`: a grid; `Trellis(df, wrap=..., cols=4)`: a wrap. Each
   takes one column or several (their combinations are the levels).
+- `aspect=1`: square panels (each panel's height as a multiple of its width).
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),
   `"row"`, `"col"` or `False` (each panel its own). Axes are drawn only where a panel's
   scale differs from its neighbour's.

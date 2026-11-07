@@ -71,6 +71,7 @@ seaborn's `relplot`, `displot`, `catplot`, `lmplot` and `FacetGrid` take `col=`,
 | `catplot(kind="violin")` | `.violin()` |
 | `catplot(kind="point")`, `pointplot(errorbar="ci")` | `.errorbar()`, `.errorbar(extent="ci")` |
 | `lineplot(drawstyle="steps-post")` | `.line(step="post")` |
+| `pairplot(df, hue="g")`, `pairplot(corner=True)` | `pairs(df, color="g")`, `pairs(df, corner=True)` |
 | `lmplot` | `.points()` and `.smooth(method="linear")` |
 | `bw_adjust=` | `bw_adjust=` |
 

@@ -97,7 +97,7 @@ def check() -> list[str]:
         if size > PAGE_BUDGET:
             problems.append(f"{page.relative_to(SITE)} weighs {size / 1e6:.1f} MB gzipped")
 
-    from anytrellis import Trellis, synthetic
+    from anytrellis import Trellis, pairs, synthetic
 
     guides = "\n".join(p.read_text(encoding="utf-8") for p in DOCS.rglob("*.md")
                        if "reference" not in p.relative_to(DOCS).parts)  # fmt: skip
@@ -111,6 +111,8 @@ def check() -> list[str]:
         if not re.search(rf"\.{short}\b|\b{short}\(", guides):
             problems.append(f"{name} is in no guide")
     problems += [f"Trellis({p}=...) is in no guide" for p in inspect.signature(Trellis).parameters
+                 if p != "data" and not re.search(rf"\b{p}=", guides)]  # fmt: skip
+    problems += [f"pairs({p}=...) is in no guide" for p in inspect.signature(pairs).parameters
                  if p != "data" and not re.search(rf"\b{p}=", guides)]  # fmt: skip
     return problems
 

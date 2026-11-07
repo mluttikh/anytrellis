@@ -246,13 +246,20 @@ def _label(value: Any) -> str:
 
 def group_order(codes: np.ndarray, n: int, within: np.ndarray | None = None) -> np.ndarray:
     """The order of rows grouped by their code (0 … n−1), in row order within a group, or
-    by ``within`` when given. Codes of under 2¹⁶ groups sort by radix: tens of times faster
-    than sorting int64 codes, or a lexsort of codes and values."""
-    small = codes.astype(np.uint16) if n <= 1 << 16 else codes
-    if within is None:
-        return np.argsort(small, kind="stable")
-    first = np.argsort(within)
-    return first[np.argsort(small[first], kind="stable")]
+    by ``within`` when given. Codes sort by radix, 16 bits at a time (one pass for under
+    2¹⁶ groups, two for under 2³²): tens of times faster than sorting int64 codes, or a
+    lexsort of codes and values."""
+    order = np.argsort(within) if within is not None else None
+    if n > 1 << 32:  # too many groups for two passes
+        c = codes if order is None else codes[order]
+        step = np.argsort(c, kind="stable")
+        return step if order is None else order[step]
+    for shift in (0,) if n <= 1 << 16 else (0, 16):  # low bits first; each pass is stable
+        c = codes if order is None else codes[order]
+        step = np.argsort(((c >> shift) & 0xFFFF).astype(np.uint16), kind="stable")
+        order = step if order is None else order[step]
+    assert order is not None
+    return order
 
 
 def _natural(text: str) -> tuple[Any, ...]:

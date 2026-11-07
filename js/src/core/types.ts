@@ -155,6 +155,8 @@ export interface TrellisSpec {
   legends: LegendSpec[];
   height: number | null;
   panel_height: number | null;
+  /** Each panel's height as a multiple of its width (unless height or panel_height). */
+  aspect?: number | null;
   /** auto: in a wrap's empty cells when it fits, else under the plot; bottom: under it. */
   legend_position?: "auto" | "bottom";
   /** Start with y fitted to the data in view (it follows x zooms). */

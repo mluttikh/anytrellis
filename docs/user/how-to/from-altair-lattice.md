@@ -24,6 +24,7 @@ independent with `resolve_scale`:
 | `alt.Scale(type="log")` | `y_scale="log"` |
 | `alt.selection_interval()` | a brush: built in (**s**, then drag) |
 | `alt.selection_point(fields=["region"], bind="legend")` | a legend click: built in |
+| `.repeat(row=[...], column=[...])` of a scatter plot | `pairs(df, [...])` |
 
 ```python
 alt.Chart(three).mark_point().encode(x="fertility", y="life_expect", color="region") \
@@ -62,6 +63,7 @@ panels, labels in strips over the panels, and panels ordered by what they show.
 | `layout = c(2, 3)` | `cols=2` |
 | `type = c("p", "r")` | `.points()` and `.smooth(method="linear")` |
 | `dotplot`, `bwplot`, `histogram`, `densityplot` | `.points()`, `.box()`, `.hist()`, `.density()` |
+| `splom(~ df[1:4], groups = g)` | `pairs(df, ["a", "b", "c", "d"], color="g")` |
 | `scales = list(y = "free")` | `share_y=False` |
 | `index.cond`, `reorder()` | `.order(...)` |
 
