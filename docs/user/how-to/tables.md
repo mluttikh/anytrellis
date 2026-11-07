@@ -109,6 +109,44 @@ rather than 5.3 s, and their unused columns are never read.
 - A summary the database can't compute (the mean of times, on some backends) is computed
   from the rows instead.
 
+### Reading a page at a time
+
+With `load="pages"`, a paged wrap reads only the rows of the panels of the page shown and
+the pages either side of it: Python never holds the whole table. Turning the page reads the
+rows of the next panels (a query of the facet columns' values), and the browser draws them
+as it draws any paged plot's.
+
+```python
+import duckdb
+
+con = duckdb.connect("readings.duckdb")
+plot = Trellis(con.table("readings"), wrap="station", load="pages")
+plot.line(x="time", y="temp", color="humidity")
+```
+
+What a page needs of the other rows comes from the database, so every page looks as it
+would with every row read: the panels (the facet columns' combinations), their statistics
+(and their trend, as a window query), each panel's range of x and y, the levels of the
+category columns and the range of the number colours.
+
+Ten million readings of 1,000 stations, from DuckDB, are drawn in 1.0 s rather than 3.9 s,
+from 480,000 rows read rather than all of them. Turning a page reads the rows of the three
+pages around it (720,000) in 0.3 s; the last few pages read are kept, to turn back to.
+
+- **Lines, points and text** are drawn from the plot's data a page at a time. A summary
+  (`hist`, `box`, `smooth`, ...) needs every row of its panel: give it a table of its own,
+  which is read whole (the database can compute it: `con.sql("select ...")`).
+- **`selected()`** is a query of the selected rows, in every panel, not yet read: a DuckDB
+  relation, an Ibis table or a `LazyFrame`. Read the rows when you need them
+  (`selected().pl()`, `.to_pandas()`, `.collect()`), or count them first.
+- **`save_html`** and `to_html` read every row, as `load="all"` does: the page holds every
+  panel.
+- Not yet: `link=` and `anytrellis.link`. A wrap of 100 panels or fewer, which doesn't
+  page, reads every row; give `rows=` to page it.
+- A database that can't compute the panels' statistics (a median, a standard deviation)
+  gives an error: use `load="all"`. Without the trend's window query (Ibis, over a time x),
+  the statistics have no trend.
+
 ## Large tables
 
 anytrellis reads only the columns a plot uses, once, and sends them to the browser as

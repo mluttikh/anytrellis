@@ -216,7 +216,7 @@ def ordered_levels(name: str, order: Order, tables: Sequence[Table]) -> list[str
 def _summaries(name: str, levels: list[str], order: Order, tables: Sequence[Table]) -> np.ndarray:
     from anytrellis.query import level_summary
 
-    table = tables[0]
+    table = tables[0] if tables[0].whole is None else tables[0].whole  # load="pages": all rows
     if order.by != "count":
         if order.of is None:
             raise ValueError(f"order(..., by={order.by!r}) needs of=<a number column>")

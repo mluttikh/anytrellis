@@ -5,11 +5,15 @@ A lazy table (a Polars ``LazyFrame``, a DuckDB relation, an Ibis table) is read 
 only the columns the plot uses, when the first of them is needed; a column needed later
 reads them all again, with it. Its rows must come back in the same order each time, as
 they do from Polars, DuckDB and Ibis on DuckDB. Text columns are encoded by Arrow when
-PyArrow is installed, rather than labelled row by row."""
+PyArrow is installed, rather than labelled row by row.
+
+A plot that reads a lazy table a page at a time (``load="pages"``) reads some of its rows
+into a table of their own, whose ``whole`` is the lazy table: its category columns have the
+whole table's levels, so axes and colours stay the same from page to page."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -78,6 +82,9 @@ class Table:
         self._read_names: set[str] = set()
         """The columns of the lazy table read into ``_frame``."""
         self._n: int | None = None
+        self.whole: Table | None = None
+        """The lazy table these rows were read from (``load="pages"``), or None."""
+        self._memo: dict[Any, Any] = {}
         import narwhals as nw
 
         if isinstance(frame, nw.LazyFrame):
@@ -150,8 +157,45 @@ class Table:
             if self._lazy is not None and name not in self._read_names:
                 self._wanted[name] = None
                 self._load()
-            self._cache[name] = _read(self._frame, name)
+            column = _read(self._frame, name)
+            if self.whole is not None and column.kind == "category":
+                column = _recoded(column, self.whole.levels(name))
+            self._cache[name] = column
         return self._cache[name]
+
+    def memo(self, key: Any, compute: Callable[[], Any]) -> Any:
+        """A lazy table's answer to a query, computed once (its rows are taken not to
+        change while it is plotted)."""
+        if key not in self._memo:
+            self._memo[key] = compute()
+        return self._memo[key]
+
+    def levels(self, name: str) -> tuple[str, ...]:
+        """A category column's levels: of all its rows (a lazy table: from a query for its
+        distinct values; not read)."""
+        if self._lazy is None:
+            return self.column(name).levels
+        from anytrellis.query import distinct
+
+        return self.memo(("levels", name), lambda: distinct(self, [name]).column(name).levels)
+
+    def span(self, name: str) -> tuple[float, float] | None:
+        """The finite range of a number or time column over the whole table these rows
+        were read from (None: these rows are the whole table, or it has no such values)."""
+        if self.whole is None:
+            return None
+        from anytrellis.query import span
+
+        whole = self.whole
+        return whole.memo(("span", name), lambda: span(whole, name))
+
+    def values(self, name: str) -> list[Any]:
+        """A column's values as Python objects (rows in memory)."""
+        if isinstance(self._frame, Mapping):
+            return np.asarray(self._frame[name]).ravel().tolist()
+        if self._lazy is not None and name not in self._read_names:
+            self.column(name)
+        return self._frame[name].to_list()
 
     def _load(self) -> None:
         """Read a lazy table's wanted columns, all in one query (again, when one was added
@@ -341,6 +385,16 @@ def _coded(name: str, distinct: np.ndarray, codes: np.ndarray,
     position = {lv: i for i, lv in enumerate(present)}
     level_of = np.array([position.get(t, -1) for t in distinct], dtype=np.int64)
     return Column(name, "category", distinct[codes], tuple(present), level_of[codes])
+
+
+def _recoded(column: Column, levels: tuple[str, ...]) -> Column:
+    """A category column with the given levels (a superset of its own), in their order."""
+    if levels == column.levels:
+        return column
+    position = {lv: i for i, lv in enumerate(levels)}
+    level_of = np.array([position.get(lv, -1) for lv in column.levels] + [-1], dtype=np.int64)
+    codes = level_of[column.level_codes()]
+    return Column(column.name, "category", column.values, levels, codes)
 
 
 def _labels(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
