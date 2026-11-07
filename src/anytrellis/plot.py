@@ -216,6 +216,13 @@ class Trellis:
         self._scene_cache: tuple[dict[str, Any], Buffers] | None = None
         self._geometry: list[tuple[Layer, Table, Geometry | None]] = []
         self._drawn: list[_Drawn] = []
+        self._window: frozenset[int] | None = None
+        """A paged plot's panels whose data the widget has (None: every panel's)."""
+        self._full: list[_Sent] = []
+        """Each spec layer's entry for every panel (``_sent``: the window's of it)."""
+        self._start: list[_Sent] = []
+        """``_full`` as the plot starts (a saved page's)."""
+        self._full_scene_cache: tuple[dict[str, Any], Buffers] | None = None
 
     # ---- layers -------------------------------------------------------------------------
 
@@ -1009,6 +1016,7 @@ class Trellis:
         self._focus = name
         if self._widget is not None:
             self._widget.open_panel = name
+        self._send_detail()  # an opened panel of another page: its data
 
     # ---- pages --------------------------------------------------------------------------
 
@@ -1129,6 +1137,7 @@ class Trellis:
         self._paging = state  # ty: ignore[invalid-assignment]
         if self._widget is not None:
             self._widget.paging = state
+        self._send_detail()  # the data of the panels around the page shown
         return self
 
     def _pages(self, grid: Grid) -> dict[str, Any] | None:
@@ -1438,7 +1447,7 @@ class Trellis:
     def _embed_html(self) -> str:
         """The plot's data in a ``<div class="anytrellis-embed">``, for a page that loads
         ``standalone.js`` and ``widget.css`` once (the documentation's pages)."""
-        spec, buffers = self._scene()
+        spec, buffers = self._full_scene()
         payload = {
             "spec": spec,
             "buffers": {k: base64.b64encode(v).decode("ascii") for k, v in buffers.data.items()},
@@ -1760,20 +1769,23 @@ class Trellis:
         layers_spec = []
         self._npanels = npanels
         self._sent = []
+        self._full = []
+        self._full_scene_cache = None
+        self._window = self._wanted(spec)  # a paged plot: the pages around the one shown
         for i, (d, (layer, _table, geom)) in enumerate(zip(drawn, built, strict=True)):
             if geom is None:
                 origin = x_origin if layer.axis == "x" else y_origin
                 layers_spec.append(_rule_spec(layer, rule_values[layer.name], origin))
+                self._full.append((layer, _table, None, None))
                 self._sent.append((layer, _table, None, None))
                 continue
-            if layer.mark == "text":
-                layers_spec.append(_text_spec(layer, _table, geom, npanels, buffers, x_origin,
-                                              y_origin))  # fmt: skip
-                self._sent.append((layer, _table, geom, None))
-                continue
-            entry = sent.get(i, (layer, _table, geom, d.part))
+            full = (layer, _table, geom, None) if layer.mark == "text" else \
+                sent.get(i, (layer, _table, geom, d.part))  # fmt: skip
+            self._full.append(full)
+            entry = self._windowed(full)
             self._sent.append(entry)
-            layers_spec.append(self._mark_spec(d, entry, buffers))
+            layers_spec.append(self._layer_spec(d, entry, buffers, self._window))
+        self._start = list(self._full)
         # what each layer shows (zoomed in: in more detail), and its tooltips by coords
         self._shown_layers = list(layers_spec)
         self._detail_buffers = Buffers()
@@ -1782,6 +1794,47 @@ class Trellis:
             self._remember(i, spec_layer)
         spec["layers"] = layers_spec
         return spec, buffers
+
+    def _layer_spec(self, d: _Drawn, entry: _Sent, buffers: Buffers,
+                    panels: frozenset[int] | None = None) -> dict[str, Any]:  # fmt: skip
+        """A text or mark layer in the spec, as sent; ``panels``: the only ones it has data
+        of (a paged plot's window)."""
+        layer, table, geom, _ = entry
+        if layer.mark != "text":
+            out = self._mark_spec(d, entry, buffers)
+        else:
+            assert geom is not None
+            out = _text_spec(layer, table, geom, self._npanels, buffers, self._axes["x"][2],
+                             self._axes["y"][2])  # fmt: skip
+        if panels is not None:
+            out["panels"] = sorted(panels)
+        return out
+
+    def _wanted(self, spec: dict[str, Any]) -> frozenset[int] | None:
+        """The panels whose data a paged plot sends (None: it does not page): those of the
+        page shown and of the pages either side of it (turned to at once), and an opened
+        panel."""
+        pages = spec.get("pages")
+        if pages is None:
+            return None
+        names = [_panel_name(p, i) for i, p in enumerate(spec["panels"])]
+        paging = self.paging
+        shown = panel_order(self._stats, names, paging)
+        per = pages["rows"] * pages["cols"]
+        page = min(max(int(paging.get("page", 0)), 0), page_count(len(shown), per) - 1)
+        want = set(shown[max(0, (page - 1) * per) : (page + 2) * per])
+        if self.focused in names:
+            want.add(names.index(self.focused))
+        return frozenset(want)
+
+    def _windowed(self, entry: _Sent) -> _Sent:
+        """A layer's entry with only the instances of the window's panels."""
+        layer, table, geom, part = entry
+        if self._window is None or geom is None:
+            return entry
+        inside = np.zeros(self._npanels, dtype=bool)
+        inside[list(self._window)] = True
+        return (layer, table, geom.take(np.flatnonzero(inside[geom.panel])), part)
 
     def _mark_spec(self, d: _Drawn, entry: _Sent, buffers: Buffers) -> dict[str, Any]:
         """A mark layer in the spec, as sent (``entry``: zoomed in, in more detail)."""
@@ -1860,24 +1913,34 @@ class Trellis:
         """The layers to show in more (or less) detail for a view the browser reports, as a
         ``detail`` message; None: none changed."""
         spec, _ = self._scene()
-        if not self._details or not view or not view.get("panels"):
-            return None
-        shown = self._shown_panels(spec, view)
+        changed: set[int] = set()
+        if self._details and view and view.get("panels"):
+            shown = self._shown_panels(spec, view)
+            for index, detail in self._details:
+                if not detail.update(shown):
+                    continue
+                user = self._drawn[index].user
+                for i, entry in self._sent_of(index, user, self._full[index][1], detail).items():
+                    self._full[i] = entry
+                    d = self._drawn[i]
+                    if d.cells:  # the drawn layer's table and part: the cells', for selection
+                        self._drawn[i] = replace(d, layer=entry[0], table=entry[1],
+                                                 part=entry[3])  # fmt: skip
+                    changed.add(i)
+        window = self._wanted(spec)
+        if window != self._window:  # another page: its panels' data, and its neighbours'
+            self._window = window
+            changed |= {i for i, entry in enumerate(self._full) if entry[2] is not None}
         layers: list[dict[str, Any]] = []
-        for index, detail in self._details:
-            if not detail.update(shown):
-                continue
-            user = self._drawn[index].user
-            for i, entry in self._sent_of(index, user, self._sent[index][1], detail).items():
-                self._sent[i] = entry
-                d = self._drawn[i]
-                spec_layer = self._mark_spec(d, entry, self._detail_buffers)
-                self._shown_layers[i] = spec_layer
-                if d.cells:  # the drawn layer's table and part: the cells', for selection
-                    self._drawn[i] = replace(d, layer=entry[0], table=entry[1], part=entry[3])
-                self._remember(i, spec_layer)
-                of = spec["layers"][i]["coords"]["id"]
-                layers.append({"index": i, "of": of, "layer": spec_layer})
+        for i in sorted(changed):
+            entry = self._windowed(self._full[i])
+            self._sent[i] = entry
+            spec_layer = self._layer_spec(self._drawn[i], entry, self._detail_buffers,
+                                          self._window)  # fmt: skip
+            self._shown_layers[i] = spec_layer
+            self._remember(i, spec_layer)
+            of = spec["layers"][i]["coords"]["id"]
+            layers.append({"index": i, "of": of, "layer": spec_layer})
         if not layers:
             return None
         # keep the buffers of the layers shown
@@ -1905,21 +1968,37 @@ class Trellis:
         return out
 
     def _send_detail(self) -> None:
-        """Send the layers in detail for the view the browser reported, if any changed."""
-        if self._widget is None:
+        """Send the layers in detail for the view the browser reported, and a paged plot's
+        panels around the page shown, if any changed (without a widget: for the images)."""
+        if self._scene_cache is None:  # not built yet: it starts as it is now
             return
         message = self._detail(self._view)
-        if message is not None:
+        if message is not None and self._widget is not None:
             self._widget.send(message)
 
     def _shown_scene(self) -> tuple[dict[str, Any], Buffers]:
         """The spec and buffers as shown: layers zoomed in, in their detail (images)."""
         spec, buffers = self._scene()
-        if not self._details:
+        if not self._details and self._window is None:
             return spec, buffers
         both = Buffers()
         both.data = {**buffers.data, **self._detail_buffers.data}
         return {**spec, "layers": list(self._shown_layers)}, both
+
+    def _full_scene(self) -> tuple[dict[str, Any], Buffers]:
+        """The spec and buffers with every panel's data, as the plot starts: a saved page's
+        (a paged plot's widget gets the panels around the page shown, as they are shown)."""
+        spec, buffers = self._scene()
+        if self._window is None:  # it does not page: the spec has every panel's data
+            return spec, buffers
+        if self._full_scene_cache is None:
+            out = Buffers()
+            layers = [
+                spec["layers"][i] if entry[2] is None else self._layer_spec(d, entry, out)
+                for i, (d, entry) in enumerate(zip(self._drawn, self._start, strict=True))
+            ]
+            self._full_scene_cache = ({**spec, "layers": layers}, out)
+        return self._full_scene_cache
 
     def _highlight_entries(self) -> list[tuple[Layer, Any, Any]]:
         """Each spec layer's user layer, summary part and geometry, as sent."""

@@ -34,6 +34,11 @@ buffers, drawn in the browser. This module is the protocol between them.
   is zoomed in: spec layer ``index`` is drawn as ``layer`` instead, while the spec's has
   coords ``of``. Its buffers come as any others do. A ``highlight``'s layer has the coords
   it is for (``of``).
+* A paged wrap's layers hold the data of some panels only: those of the page shown, the
+  pages either side of it and the opened panel, listed in the layer's ``panels``. When
+  ``paging`` or ``open_panel`` changes, Python sends a ``detail`` with the layers for the
+  new panels; until it comes, the browser says the page is loading. A page saved with
+  ``save_html`` has every panel's data, and its layers no ``panels``.
 
 Bulk data never goes into synced traits, so it is not saved into the notebook and only sent
 to views that ask for it.
@@ -89,9 +94,11 @@ class TrellisWidget(anywidget.AnyWidget):
 
     def _on_paging(self, change: dict[str, Any]) -> None:
         self._plot._paging = Paging(**change["new"])  # turned in the browser: save_html keeps it
+        self._plot._send_detail()  # the data of the panels around the page shown
 
     def _on_focus(self, change: dict[str, Any]) -> None:
         self._plot._focus = change["new"]  # opened in the browser: save_html keeps it
+        self._plot._send_detail()  # an opened panel of another page: its data
 
     def _on_msg(self, _widget: Any, content: dict[str, Any], buffers: Any) -> None:
         kind = content.get("type")

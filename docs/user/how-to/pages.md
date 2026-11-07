@@ -87,6 +87,21 @@ A statistic's name with a space goes in a dict, as above; one without can be a k
 `save_png` and `save_svg` draw the page shown, sorted and filtered as it is, and a page
 from `save_html` opens on it.
 
+## Only the pages near you are sent
+
+In a notebook, the browser gets the data of the page shown and of the pages either side of
+it, not of every panel: a thousand panels of a week's readings start with about 2 MB
+instead of 46 MB. The next or previous page draws at once, and Python then sends the pages
+around it. A page further away (a jump, a sort, a filter) says *Loading the panels…* until
+its data comes, a moment later. Opening a panel of another page brings its data too.
+
+A page from `save_html` (or `to_html`) has no Python to ask, so it holds every panel's
+data: all its pages turn, sort and filter as in the notebook.
+
+Two things count only the panels whose data the browser has: `fit_y=True` with a shared
+y fits the panels sent, and the count of selected marks in the corner is of the marks
+sent. `selected()` in Python uses every row.
+
 ## The page's size
 
 `cols=` sets the columns and `rows=` the rows of a page. `rows=` also pages a wrap of fewer
