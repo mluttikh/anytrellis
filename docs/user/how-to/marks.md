@@ -35,6 +35,33 @@ print(plot._embed_html())  # markdown-exec: hide
 
 `group=["station", "sensor"]` takes several columns: a line per combination.
 
+### Steps
+
+`step=` draws a line as steps: flat between rows, then straight up or down. Use it for a
+value that holds until the next row (a price, a setting) or a total over each period, as
+each month's rain here, centred on its month:
+
+```python exec="on" source="above" session="marks" html="true"
+import polars as pl
+
+weather = load("seattle_weather")
+monthly = weather.group_by(
+    year=pl.col("date").dt.year().cast(pl.String), month=pl.col("date").dt.month()
+).agg(pl.col("precipitation").sum())
+plot = Trellis(monthly, wrap="year", cols=2, panel_height=120, y_title="rain (mm)")
+plot.line(x="month", y="precipitation", step="mid")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+| `step=` | Each row's value |
+| --- | --- |
+| `"post"` | from its x to the next row's |
+| `"pre"` | from the row before's x to its own |
+| `"mid"` | from half way to the row before to half way to the next |
+
+Hovering a step shows the row it starts from.
+
 ## Bars
 
 Bars go from zero to y at each x. With a category `color=`, they stack by default;

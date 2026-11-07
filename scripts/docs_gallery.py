@@ -46,6 +46,7 @@ def _gallery() -> list[Entry]:
 
     cars = load("cars")
     penguins = load("penguins")
+    known = penguins.drop_nulls("sex")
     gapminder = load("gapminder")
     weather = load("seattle_weather").with_columns(year=pl.col("date").dt.year())
     barley = load("barley").with_columns(pl.col("year").cast(pl.String))
@@ -58,6 +59,12 @@ def _gallery() -> list[Entry]:
     def regions_area() -> Trellis:
         by_region = gapminder.group_by("region", "year").agg(pl.col("pop").sum())
         return Trellis(by_region).area(x="year", y="pop", color="region")
+
+    def monthly_rain() -> Trellis:
+        monthly = weather.group_by("year", month=pl.col("date").dt.month()).agg(
+            pl.col("precipitation").sum()
+        )
+        return Trellis(monthly, wrap="year", cols=2).line(x="month", y="precipitation", step="mid")
 
     def heatmap() -> Trellis:
         daily = weather.with_columns(month=pl.col("date").dt.month(), day=pl.col("date").dt.day())
@@ -82,6 +89,7 @@ def _gallery() -> list[Entry]:
         Entry("lines", "A line per group", "how-to/marks.md#lines",
               lambda: Trellis(gapminder, wrap="region", cols=3).line(
                   x="year", y="life_expect", group="country", width=1)),
+        Entry("steps", "Step lines", "how-to/marks.md#steps", monthly_rain),
         Entry("dodged-bars", "Bars side by side", "how-to/marks.md#bars",
               lambda: Trellis(barley, wrap="site", cols=3).bars(
                   x="variety", y="yield", color="year", position="dodge")),
@@ -111,9 +119,15 @@ def _gallery() -> list[Entry]:
                   x="flipper_length_mm", binwidth=2, color="sex")),
         Entry("boxes", "Box plots", "how-to/distributions.md#box-plots",
               lambda: Trellis(by_cyl, wrap="origin", cols=3).box(x="mpg", y="cyl")),
+        Entry("violins", "Violins", "how-to/distributions.md#violins",
+              lambda: Trellis(known, wrap="species", cols=3).violin(
+                  x="sex", y="flipper_length_mm", color="sex")),
         Entry("densities", "Densities", "how-to/distributions.md#densities",
               lambda: Trellis(by_cyl, wrap="origin", cols=3).density(
                   x="mpg", color="cyl", fill=True)),
+        Entry("error-bars", "Error bars", "how-to/distributions.md#error-bars",
+              lambda: Trellis(known, wrap="species", cols=3).errorbar(
+                  x="sex", y="body_mass_g", color="sex")),
         Entry("smooth", "Smooth fits", "how-to/smooth.md",
               lambda: Trellis(cars, wrap="origin", cols=3)
               .points(x="horsepower", y="mpg", size=4, opacity=0.5)

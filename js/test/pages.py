@@ -33,6 +33,10 @@ def main(out: Path) -> None:
     density = Trellis(cars, wrap="origin", cols=3, panel_height=150)
     density.density(x="mpg", color="cyl", fill=True).save_html(out / "density.html")
     Trellis(cars).hist(x="mpg").save_html(out / "hist.html")
+    steps = {"t": [0.0, 1.0, 3.0], "v": [1.0, 2.0, 5.0]}
+    Trellis(steps).line(x="t", y="v", step="post").save_html(out / "steps.html")
+    Trellis(cars).violin(x="origin", y="mpg").save_html(out / "violin.html")
+    Trellis(cars).errorbar(x="origin", y="mpg").save_html(out / "errorbar.html")
     many_plots(out / "many.html", gapminder)
 
 

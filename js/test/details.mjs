@@ -1,7 +1,8 @@
 // Details the eye catches, on save_html pages: a page's own styles (a documentation
 // theme's tables, its letter spacing) leave the plot and its tooltip as they are, and a
 // linked plot's highlight of part of a histogram's bars draws the faded bars whole, the
-// selected share solid from their base; with a renderer (?renderer=) each backend.
+// selected share solid from their base; hovering a step line, a violin and an error bar
+// shows its row; with a renderer (?renderer=) each backend.
 //   node test/details.mjs <dir of the pages> [dir for screenshots] [renderer]
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -116,6 +117,50 @@ async function open(name) {
   await page.screenshot({ path: join(out, `details-${tag}-hist.png`) });
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join("; ")}` : ""}`);
   await page.close();
+}
+
+// the tooltip's rows as { name: value }, after hovering (x, y) in data units of panel 0
+async function hover(page, x, y) {
+  const at = await page.evaluate(([x, y]) => {
+    const v = window.anytrellisViews[0];
+    const view = v.views[0];
+    const stage = document.querySelector(".atr-stage").getBoundingClientRect();
+    return [stage.left + view.map.ox + x * view.map.sx, stage.top + view.map.oy + y * view.map.sy];
+  }, [x, y]);
+  await page.mouse.move(at[0] - 3, at[1] - 3);
+  await page.mouse.move(at[0], at[1]);
+  await page.waitForTimeout(100);
+  return page.$$eval(".atr-tip tr", (rows) => Object.fromEntries(rows.map((r) => [...r.children].map((c) => c.textContent.trim()))));
+}
+
+{
+  // a step line (post: 0-1 at 1, 1-3 at 2, then 5 at 3): a level shows the point it starts
+  // from, not the nearer end
+  const { page, errors } = await open("steps.html");
+  const level = await hover(page, 2.2, 2);
+  check(Number(level.t) === 1 && Number(level.v) === 2, `a step's level shows the point it starts from (${JSON.stringify(level)})`);
+  const first = await hover(page, 0.9, 1);
+  check(Number(first.t) === 0 && Number(first.v) === 1, `and near its end, still that point (${JSON.stringify(first)})`);
+  check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join("; ")}` : ""}`);
+  await page.close();
+}
+
+{
+  // a violin: filled, and hovering it shows its group; an error bar: its mean and interval
+  const { page, errors } = await open("violin.html");
+  const stats = await page.evaluate(() => window.anytrellisViews[0].spec.layers[0].tips.values[0]);
+  const median = Number(stats[2]);
+  const tip = await hover(page, 0.05, median + 1);
+  check(tip.origin === stats[0] && tip.n === stats[1], `hovering a violin shows its group (${JSON.stringify(tip)})`);
+  await page.screenshot({ path: join(out, `details-${tag}-violin.png`) });
+  check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join("; ")}` : ""}`);
+  await page.close();
+  const eb = await open("errorbar.html");
+  const means = await eb.page.evaluate(() => window.anytrellisViews[0].spec.layers[0].tips.values[1]);
+  const bar = await hover(eb.page, 1, Number(means[2]));
+  check(bar.origin === means[0] && bar["95% CI"] === means[3], `hovering an error bar shows its mean and interval (${JSON.stringify(bar)})`);
+  check(eb.errors.length === 0, `no page errors${eb.errors.length ? `: ${eb.errors.join("; ")}` : ""}`);
+  await eb.page.close();
 }
 
 await browser.close();

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
-import { type Scene, pick, yExtent } from "../src/core/scene";
+import { type Scene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { drawMarks } from "../src/core/renderers/canvas2d";
@@ -231,6 +231,22 @@ describe("pick", () => {
     const hit = pick(scene, 0, map, 10, 80, 4)!;
     expect(hit.layer).toBe(bars);
     expect(hit.distance).toBe(0);
+  });
+
+  it("follows a step line's levels and shows the point each starts at", () => {
+    // step="post" through (0, 1), (1, 2), (3, 5): levels, risers and the last point
+    const steps = layer("line", [0, 1, 1, 1, 1, 2, 3, 2, 1, 2, 1, 1, 3, 5, 3, 2, 3, 5, 3, 5], KIND_CAPSULE, 1);
+    steps.spec.step = "post";
+    const scene = { layers: [steps] } as unknown as Scene;
+    const level = pick(scene, 0, map, 25, 80, 4)!; // x 2.5 on the level at 2
+    expect(level.instance).toBe(1);
+    expect(hitPoint(level, map, 25, 80)).toEqual({ x: 1, y: 2, y0: 0 });
+    const end = pick(scene, 0, map, 9, 87, 4)!; // by the riser at x 1: the level at 1
+    expect(end.instance).toBe(0);
+    expect(hitPoint(end, map, 9, 87)).toEqual({ x: 0, y: 1, y0: 0 }); // its point, not its end
+    expect(pick(scene, 0, map, 30, 65, 4)).toBeNull(); // half way up the riser at x 3
+    const last = pick(scene, 0, map, 30, 50, 4)!;
+    expect(hitPoint(last, map, 30, 50)).toEqual({ x: 3, y: 5, y0: 0 });
   });
 });
 

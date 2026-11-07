@@ -17,7 +17,9 @@ redo well-known figures of both.
 | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()` |
 | `geom_area()`, `geom_ribbon()`, `geom_tile()`, `geom_text()` | `.area()`, `.band()`, `.rect()`, `.text()` |
 | `geom_hline()`, `geom_vline()` | `.rule(y=...)`, `.rule(x=...)` |
-| `geom_histogram()`, `geom_boxplot()`, `geom_density()` | `.hist()`, `.box()`, `.density()` |
+| `geom_histogram()`, `geom_boxplot()`, `geom_violin()`, `geom_density()` | `.hist()`, `.box()`, `.violin()`, `.density()` |
+| `geom_errorbar()`, `geom_pointrange()`, `stat_summary()` | `.errorbar()` |
+| `geom_step()` | `.line(step="post")` |
 | `geom_smooth()`, `geom_smooth(method = "lm")` | `.smooth()`, `.smooth(method="linear")` |
 | `aes(colour = g)`, `aes(group = g)` | `color="g"`, `group="g"` |
 | `scale_y_log10()` | `Trellis(..., y_scale="log")` |
@@ -66,6 +68,9 @@ seaborn's `relplot`, `displot`, `catplot`, `lmplot` and `FacetGrid` take `col=`,
 | `relplot(kind="scatter")`, `relplot(kind="line")` | `.points()`, `.line()` |
 | `displot(kind="hist")`, `displot(kind="kde")` | `.hist()`, `.density()` |
 | `catplot(kind="box")`, `catplot(kind="bar")` | `.box()`, `.bars()` (of means you compute) |
+| `catplot(kind="violin")` | `.violin()` |
+| `catplot(kind="point")`, `pointplot(errorbar="ci")` | `.errorbar()`, `.errorbar(extent="ci")` |
+| `lineplot(drawstyle="steps-post")` | `.line(step="post")` |
 | `lmplot` | `.points()` and `.smooth(method="linear")` |
 | `bw_adjust=` | `bw_adjust=` |
 

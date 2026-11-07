@@ -210,6 +210,11 @@ export function pick(scene: Scene, p: number, map: PanelMap, px: number, py: num
         const dx = Math.max(Math.min(ax, bx) - px, 0, px - Math.max(ax, bx));
         const dy = Math.max(Math.min(ay, by) - py, 0, py - Math.max(ay, by));
         d = Math.hypot(dx, dy);
+      } else if (layer.spec.step) {
+        // a step line: its levels, each starting at its point (not its risers)
+        if (ax === bx && ay !== by) continue;
+        const t = bx !== ax ? Math.max(0, Math.min(1, (px - ax) / (bx - ax))) : 0;
+        d = Math.hypot(px - (ax + t * (bx - ax)), py - ay);
       } else {
         // the nearest end of a segment: lines report their points
         const da = Math.hypot(px - ax, py - ay);
@@ -232,7 +237,7 @@ export function hitPoint(hit: Hit, map: PanelMap, px: number, py: number): { x: 
   if (hit.layer.kind === KIND_RECT) return { x: (c[i * 4] + c[i * 4 + 2]) / 2, y: c[i * 4 + 3], y0: c[i * 4 + 1] };
   // y0: an area's base there (its value is y - y0); 0 otherwise
   const base = hit.layer.base;
-  if (type === "line" || type === "area" || type === "band") {
+  if ((type === "line" && !hit.layer.spec.step) || type === "area" || type === "band") {
     const da = Math.hypot(px - (map.ox + c[i * 4] * map.sx), py - (map.oy + c[i * 4 + 1] * map.sy));
     const db = Math.hypot(px - (map.ox + c[i * 4 + 2] * map.sx), py - (map.oy + c[i * 4 + 3] * map.sy));
     if (db < da) return { x: c[i * 4 + 2], y: c[i * 4 + 3], y0: base ? base[i * 2 + 1] : 0 };
