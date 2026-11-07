@@ -6,6 +6,8 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-07
+
 ### Added
 
 - Export images of a plot (toolbar button, or `e`): copy a PNG, or an SVG with a PNG beside
@@ -39,6 +41,9 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- A wrap of more than 100 panels now shows them a page at a time (it drew them all, small);
+  `Trellis(..., rows="all")` draws them all as before. See
+  [Upgrading](https://mluttikh.github.io/anytrellis/reference/upgrading.html).
 - A page of many plots (`standalone.js`) starts each plot as it scrolls near, so a long
   page stays within the browser's limit of GPU contexts.
 
@@ -84,5 +89,6 @@ The first release.
 - `anytrellis.datasets.load`: six small example datasets, with their sources and licences
   in `datasets/SOURCES.md`; example notebooks for Jupyter and marimo.
 
-[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mluttikh/anytrellis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mluttikh/anytrellis/releases/tag/v0.1.0
