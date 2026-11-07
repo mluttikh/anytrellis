@@ -84,7 +84,7 @@ function highlightOf(msg: any, buffers: (DataView | ArrayBuffer)[]): Highlight |
 const LIVE_MS = 50;
 
 /** Ask Python and wait for its answer (a message with the same request number). */
-function ask(model: AnyModel, s: ModelState, content: Record<string, unknown>): Promise<any> {
+function ask(model: AnyModel, s: ModelState, content: Record<string, unknown>, buffers?: ArrayBuffer[]): Promise<any> {
   const request = ++s.nextRequest;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -97,7 +97,7 @@ function ask(model: AnyModel, s: ModelState, content: Record<string, unknown>): 
       else resolve(msg);
     });
     try {
-      model.send({ ...content, request });
+      model.send({ ...content, request }, undefined, buffers);
     } catch (err) {
       clearTimeout(timer);
       s.pending.delete(request);
@@ -140,6 +140,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       model.save_changes();
     },
     onClear: () => model.send({ type: "clear" }),
+    // the Export menu's "Save ... next to the notebook": Python writes the file
+    onSaveFile: async (name, data) => {
+      const msg = await ask(model, s, { type: "save", name }, [await data.arrayBuffer()]);
+      return String(msg.path);
+    },
   });
   s.views.add(view);
   view.setHighlight(s.highlight);

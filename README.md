@@ -174,6 +174,12 @@ linked: back in the grid, the panels that share its scales show what the opened 
 showed. From Python: `t.open("station 3")` (a grid's panel: `t.open("north", "s1")`),
 `t.close()`, `t.focused`, and `t.panels()` lists the names.
 
+**Images.** The toolbar's Export button (or `e`) copies the plot as shown, its zoom,
+selection and theme, to the clipboard as a PNG (or as an SVG with a PNG beside it, where
+the browser allows), downloads it as a PNG (at twice the screen's size) or an SVG, or, in
+a notebook, saves either next to the notebook. The toolbar and what the pointer points at
+are left out.
+
 **Full screen.** The toolbar's button or `f` shows the plot on the whole screen (`f` or Esc
 leaves). Browsers allow it only from a click or a key, so not from Python; where a page
 forbids it (some notebook frames, iPhone Safari) the button is not shown.
@@ -181,6 +187,7 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | key | |
 |---|---|
 | `f` | full screen, and back |
+| `e` | the Export menu: copy or download a PNG or SVG |
 | `r`, `0` | reset the zoom |
 | `u`, Cmd/Ctrl+Z | undo the last zoom |
 | `z` | drag draws a zoom box, and back (Shift+drag: the other) |
@@ -238,6 +245,7 @@ node test/interact.mjs <page.html>                 # hover, linked zoom, pan, re
 node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, undo
 node test/select.mjs <page.html> [dir] [renderer]  # brushing, moving, clearing
 node test/legend.mjs <page.html> [dir] [renderer]  # clicking legend entries
+node test/export.mjs <page.html> [dir] [renderer]  # the Export menu: PNG, SVG, clipboard
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots
 node test/linked.mjs <url of 07 in JupyterLab>     # linked plots: brushing across plots
 ```
@@ -260,10 +268,10 @@ page over 3 MB gzipped, and on a public method or parameter that no guide uses.
 
 CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff
 and ty, the TypeScript checks, pytest on Python 3.12 to 3.15 (Linux; macOS and Windows on
-3.15), the select, legend and zoom checks in headless Chromium (WebGL2 and Canvas 2D), and
-builds the documentation (kept as the run's `github-pages` artifact), and builds the sdist
-and wheel, checked by `scripts/check_dist.py` (contents, version, a clean install that
-draws a plot).
+3.15), the select, legend, zoom and export checks in headless Chromium (WebGL2 and Canvas
+2D); it builds the documentation (kept as the run's `github-pages` artifact), and builds
+the sdist and wheel, checked by `scripts/check_dist.py` (contents, version, a clean install
+that draws a plot).
 
 ## Releasing
 

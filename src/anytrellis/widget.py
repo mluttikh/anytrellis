@@ -21,6 +21,9 @@ buffers, drawn in the browser. This module is the protocol between them.
   ``{"type": "clear"}`` for a click that clears the link's selection.
 * ``{"type": "tooltip", "request", "layer", "index"}`` asks for the tooltip columns of one
   instance of a layer; Python answers ``{"type": "answer", "request", "rows"}``.
+* ``{"type": "save", "request", "name"}`` with the file's bytes as its buffer: an image from
+  the Export menu, saved in Python's working folder (the notebook's, usually) without
+  overwriting; Python answers ``{"type": "answer", "request", "path"}``.
 
 Bulk data never goes into synced traits, so it is not saved into the notebook and only sent
 to views that ask for it.
@@ -83,6 +86,13 @@ class TrellisWidget(anywidget.AnyWidget):
             except Exception as err:  # the browser shows what it has; the kernel carries on
                 answer["error"] = str(err)
             self.send(answer)
+        elif kind == "save":  # the Export menu's "Save ... next to the notebook"
+            answer = {"type": "answer", "request": content.get("request")}
+            try:
+                answer["path"] = str(save_export(str(content.get("name", "")), buffers))
+            except Exception as err:  # the browser says what went wrong
+                answer["error"] = str(err)
+            self.send(answer)
         elif kind == "ready":  # a view started: what a link highlights in it
             self._plot._send_highlight()
         elif kind == "clear":  # a click in a linked plot with no brush of its own
@@ -111,3 +121,19 @@ class TrellisWidget(anywidget.AnyWidget):
 
     def __repr__(self) -> str:
         return f"TrellisWidget of {self._plot!r}"
+
+
+def save_export(name: str, buffers: Any) -> Path:
+    """Write an image from the Export menu to the working folder, without overwriting:
+    ``plot.png``, then ``plot-2.png``, ... Only a plain ``.png`` or ``.svg`` file name."""
+    if not buffers:
+        raise ValueError("no image data")
+    path = Path(Path(name).name or "anytrellis.png")  # a file name, no folders
+    if path.suffix.lower() not in (".png", ".svg"):
+        path = path.with_suffix(".png")
+    target, n = path, 1
+    while target.exists():
+        n += 1
+        target = path.with_name(f"{path.stem}-{n}{path.suffix}")
+    target.write_bytes(bytes(buffers[0]))
+    return target.resolve()
