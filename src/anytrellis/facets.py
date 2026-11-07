@@ -214,16 +214,26 @@ def ordered_levels(name: str, order: Order, tables: Sequence[Table]) -> list[str
 
 
 def _summaries(name: str, levels: list[str], order: Order, tables: Sequence[Table]) -> np.ndarray:
+    from anytrellis.query import level_summary
+
     table = tables[0]
+    if order.by != "count":
+        if order.of is None:
+            raise ValueError(f"order(..., by={order.by!r}) needs of=<a number column>")
+        if table.kind(order.of) == "category":
+            raise ValueError(f"order: {order.of!r} is not a number or time column")
+    found = level_summary(table, name, order.by or "count", order.of)
+    if found is not None:  # a lazy table: each level's summary from the database
+        out = np.full(len(levels), np.nan)
+        level = _index(found, name, {name: levels})
+        ok = level >= 0
+        out[level[ok]] = found.column("v").values[ok]
+        return out
     if order.by == "count":
         values = np.ones(table.n)
     else:
-        if order.of is None:
-            raise ValueError(f"order(..., by={order.by!r}) needs of=<a number column>")
-        col = table.column(order.of)
-        if col.kind == "category":
-            raise ValueError(f"order: {order.of!r} is not a number or time column")
-        values = col.values
+        assert order.of is not None
+        values = table.column(order.of).values
     fn = {
         "median": np.median, "mean": np.mean, "min": np.min, "max": np.max,
         "sum": np.sum, "count": np.sum,

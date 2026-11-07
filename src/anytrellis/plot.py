@@ -59,8 +59,11 @@ from anytrellis.pages import (
     builtin_stats,
     given_stats,
     page_count,
+    queried_stats,
+    trends,
 )
 from anytrellis.pages import order as panel_order
+from anytrellis.query import panel_summaries
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
 from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
 from anytrellis.stats import Members, Part
@@ -97,9 +100,11 @@ class Trellis:
     ```
 
     Args:
-        data: The table the layers draw (Polars, PyArrow, pandas, DuckDB, or a dict of
-            arrays). A layer may bring its own; a layer whose data lacks the facet columns
-            is drawn in every panel.
+        data: The table the layers draw (Polars, PyArrow, pandas, DuckDB, Ibis, or a dict
+            of arrays). A layer may bring its own; a layer whose data lacks the facet
+            columns is drawn in every panel. A lazy table (a Polars ``LazyFrame``, a
+            DuckDB relation, an Ibis table) is read in one query, with only the columns
+            the plot uses, and computes the panels' summaries itself.
         row: Facet column(s) whose levels are the grid's rows.
         col: Facet column(s) whose levels are the grid's columns.
         wrap: Facet column(s) whose levels are panels wrapped into ``cols`` columns (not
@@ -1176,10 +1181,17 @@ class Trellis:
             if not numeric:
                 continue
             name = numeric[0]
-            x = None
-            if name == layer.y and layer.x is not None and table.column(layer.x).kind != "category":
-                x = table.column(layer.x).values
-            stats = builtin_stats(n, panel_of, table.column(name).values, name, x)
+            x_name = None
+            if name == layer.y and layer.x is not None and table.kind(layer.x) != "category":
+                x_name = layer.x
+            values = table.column(name).values
+            x = None if x_name is None else table.column(x_name).values
+            found = panel_summaries(table, grid.columns, name, x_name)
+            if found is None:
+                stats = builtin_stats(n, panel_of, values, name, x)
+            else:  # the database's medians; the trend from the rows, without sorting them
+                trend = None if x is None else trends(n, panel_of, values, x)
+                stats = queried_stats(n, grid.assign, found, name, trend)
             break
         if self._given_stats is not None:
             where = grid.assign(self._given_stats)
@@ -1566,7 +1578,7 @@ class Trellis:
             for name in [layer.x, layer.y, layer.x2, layer.y2, *layer.group, *layer.tooltip,
                          *ends]:  # fmt: skip
                 if name is not None:
-                    table.column(name)
+                    table.check(name)
             if layer.color is not None and layer.color not in table and not is_color(layer.color):
                 raise ValueError(f"color={layer.color!r} is neither a column nor a colour")
             self._tables[id(layer)] = table
@@ -1604,7 +1616,25 @@ class Trellis:
                 out[name] = tuple(ordered_levels(name, order, having))
         return out
 
+    def _want_columns(self) -> None:
+        """Tell each lazy table the columns the plot reads, so it reads them in one query."""
+        shared: list[str | None] = [*self._row, *self._col, *self._wrap, *self._link]
+        for name, order in self._orders.items():
+            shared += [name, order.of]
+        tables = [] if self._data is None else [self._data]
+        for layer in self._layers:
+            if layer.mark == "rule":
+                continue
+            table = self._table(layer)
+            tables.append(table)
+            ends = [*layer.stat_args.get("x_columns", ()), *layer.stat_args.get("y_columns", ())]
+            table.want(layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text,
+                       *layer.group, *layer.tooltip, *ends)  # fmt: skip
+        for table in tables:
+            table.want(*shared)
+
     def _build(self) -> tuple[dict[str, Any], Buffers]:
+        self._want_columns()
         marks = [layer for layer in self._layers if layer.mark != "rule"]
         tables = [self._table(layer) for layer in marks]
         if self._data is not None:

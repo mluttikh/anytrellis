@@ -66,7 +66,7 @@ def pairs(
     ```
 
     Args:
-        data: The table (Polars, PyArrow, pandas, DuckDB, or a dict of arrays).
+        data: The table (Polars, PyArrow, pandas, DuckDB, Ibis, or a dict of arrays).
         columns: The number columns, in order (default: every number column but
             ``color``).
         color: A colour column (categories: a colour each, and a curve or a bar each on the
@@ -126,8 +126,9 @@ class Pairs(Trellis):
         if color is not None and color_column is None and not is_color(color):
             raise ValueError(f"color={color!r} is neither a column nor a colour")
         names = _columns(source, columns, color_column)
+        source.want(*names, color_column, *tooltip)  # a lazy table: read in one query
         for name in tooltip:
-            source.column(name)
+            source.check(name)
         super().__init__(
             None, row=ROW, col=COL, share_x="col", share_y="row", x_title="", y_title="",
             height=height, panel_height=panel_height,
@@ -208,11 +209,11 @@ class Pairs(Trellis):
 
 def _columns(source: Table, columns: Sequence[str] | None, color: str | None) -> list[str]:
     if columns is None:
-        names = [n for n in source.names if n != color and source.column(n).kind == "number"]
+        names = [n for n in source.names if n != color and source.kind(n) == "number"]
     else:
         names = list(dict.fromkeys(columns))
     for name in names:
-        kind = source.column(name).kind
+        kind = source.kind(name)
         if kind != "number":
             raise ValueError(f"pairs() plots number columns; {name!r} holds {kind}s")
     if len(names) < 2:

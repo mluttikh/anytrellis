@@ -14,6 +14,12 @@ All notable changes to anytrellis. The format follows
   Brushing a panel lights up its rows in every panel; `selected()` gives them as rows of
   the table, and hovering a point shows its row. `corner=True` keeps each pair once.
 - `Trellis(aspect=)`: each panel's height as a multiple of its width (`1`: square).
+- Lazy tables and databases: a Polars `LazyFrame`, a DuckDB relation or an Ibis table (on
+  any database Ibis queries) is read in one query, with only the columns the plot uses,
+  when the plot is first drawn. The database computes the panels' summaries: the pages'
+  statistics (rows, mean, median, min, max, sd) and `order()`'s summaries; the trend comes
+  from the rows without sorting them. Ten million rows in 1,000 panels build in 3.3 s
+  rather than 5.3 s from Ibis on DuckDB (3.2 s rather than 6.6 s from a `LazyFrame`).
 - Paged wraps send only the panels near the page shown: in a notebook, the browser gets
   the data of the page shown and the pages either side of it, and more as the pages turn,
   are sorted or filtered, or a panel of another page opens; a page further away says it
@@ -41,6 +47,9 @@ All notable changes to anytrellis. The format follows
   million rows of a line in four panels build in 1.2 s instead of 2.2 s (by a column of
   numbers: 1 s instead of 4.2 s), and in 1,000 panels ordered by a median, with statistics
   to sort pages by, in 3.5 s instead of 93 s.
+- Text columns are encoded by PyArrow when it is installed, not labelled row by row in
+  Python: ten million rows of text facets read in 0.15 s instead of 4 s. A Polars
+  `DataFrame` of ten million rows in 1,000 panels builds in 4.2 s instead of 6.1 s.
 - Rects edge to edge (heatmap tiles, cells) show no seams between them in Canvas 2D, the
   browser's image export, `save_png` and `save_svg`: their edges fall on whole pixels.
 

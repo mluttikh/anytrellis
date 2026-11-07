@@ -6,7 +6,7 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 **Getting started**
 
 - [Install anytrellis](install.md)
-- [Plot your own tables](tables.md): Polars, pandas, PyArrow, DuckDB or a dict of columns.
+- [Plot your own tables](tables.md): Polars, pandas, PyArrow, DuckDB, Ibis or a dict of columns.
 
 **Panels and scales**
 

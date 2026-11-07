@@ -10,7 +10,7 @@ for ``shown_panels()`` and the images drawn in Python, and must stay in step wit
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
@@ -80,9 +80,60 @@ def builtin_stats(npanels: int, panel_of: np.ndarray, values: np.ndarray, name: 
                 dt = t - t.mean()
                 slope = float((dt * (s - s.mean())).sum() / (dt * dt).sum())
                 out["trend"][i] = slope * span
+    if x is None:
+        del out["trend"]
+    return _stat_list(rows, out, name)
+
+
+def queried_stats(npanels: int, assign: Callable[[Table], np.ndarray | None],
+                  found: tuple[Table, Table], name: str,
+                  trend: np.ndarray | None) -> list[Stat]:  # fmt: skip
+    """The statistics of ``builtin_stats`` from a lazy table's grouped queries
+    (``query.panel_summaries``): a row per combination of the facet columns, each placed
+    in its panel by ``assign``; the trend, computed from the rows, as given."""
+    from anytrellis.query import SUMMARIES
+
+    counts, summaries = found
+    rows = np.zeros(npanels)
+    at = assign(counts)
+    assert at is not None  # the counts have the facet columns
+    ok = at >= 0
+    np.add.at(rows, at[ok], counts.column("rows").values[ok])
+    out = {k: np.full(npanels, np.nan) for k in SUMMARIES}
+    at = assign(summaries)
+    assert at is not None
+    ok = at >= 0
+    for key in SUMMARIES:
+        out[key][at[ok]] = summaries.column(key).values[ok]
+    if trend is not None:
+        out["trend"] = trend
+    return _stat_list(rows, out, name)
+
+
+def trends(npanels: int, panel_of: np.ndarray, values: np.ndarray,
+           x: np.ndarray) -> np.ndarray:  # fmt: skip
+    """Each panel's trend, as in ``builtin_stats`` (the change of the least-squares line of
+    its finite values over its x), in one pass over the rows, without sorting them."""
+    ok = (panel_of >= 0) & np.isfinite(values) & np.isfinite(x)
+    p, v, t = panel_of[ok], values[ok], x[ok]
+    n = np.bincount(p, minlength=npanels).astype(np.float64)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        dt = t - (np.bincount(p, t, npanels) / n)[p]  # centred in each panel: exact sums
+        dv = v - (np.bincount(p, v, npanels) / n)[p]
+        sxy = np.bincount(p, dt * dv, npanels)
+        sxx = np.bincount(p, dt * dt, npanels)
+        lo = np.full(npanels, np.inf)
+        hi = np.full(npanels, -np.inf)
+        np.minimum.at(lo, p, t)
+        np.maximum.at(hi, p, t)
+        span = hi - lo
+        return np.where((n > 0) & (span > 0), sxy / sxx * span, np.nan)
+
+
+def _stat_list(rows: np.ndarray, out: dict[str, np.ndarray], name: str) -> list[Stat]:
     stats = [Stat("rows", "number", rows.tolist(), [str(int(r)) for r in rows])]
     for key in ("mean", "median", "min", "max", "sd", "trend"):
-        if key == "trend" and x is None:
+        if key not in out:
             continue
         vals = out[key].tolist()
         stats.append(Stat(f"{key} {name}", "number", vals, [short(v) for v in vals]))
