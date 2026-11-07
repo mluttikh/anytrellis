@@ -35,7 +35,7 @@ jobs:
       - name: Build the JavaScript bundle
         working-directory: js
         run: npm ci && npm run build
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes no moving major tag
         with:
           python-version: "3.12"
           enable-cache: true
@@ -89,7 +89,7 @@ jobs:
       - name: Build the JavaScript bundle
         working-directory: js
         run: npm ci && npm run build
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes no moving major tag
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
@@ -112,7 +112,7 @@ jobs:
           npm ci
           npm run build
           npx playwright install --with-deps chromium
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes no moving major tag
         with:
           python-version: "3.12"
           enable-cache: true
@@ -157,7 +157,7 @@ jobs:
       - name: Install the JavaScript build tools
         working-directory: js
         run: npm ci
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes no moving major tag
         with:
           python-version: "3.12"
           enable-cache: true
