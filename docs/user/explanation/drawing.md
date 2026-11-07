@@ -11,6 +11,12 @@ Zooming or panning changes a few numbers per panel, the transforms, and redraws.
 is sent again, and nothing is recomputed in Python. That is why a plot of a million
 points zooms as smoothly as one of a hundred.
 
+The one exception never holds the plot up. A long line, or a panel of dense points, comes
+at the level of detail its pixels need (thinned, or as cells). When the zoom settles, the
+plot tells Python what it shows, and Python sends those panels in more detail, which
+replace what was drawn when they arrive. Until then, and in a saved page, the plot zooms
+what it has. [Plot large data](../how-to/large.md#level-of-detail) has the details.
+
 The canvas sits between two others: one behind it with the panels' backgrounds, grid lines
 and axes, and one in front with the brush, the crosshair and the tooltip's highlight.
 Those are drawn with the browser's 2D canvas, which is fast for the few hundred shapes they

@@ -2,7 +2,8 @@
 // theme's tables, its letter spacing) leave the plot and its tooltip as they are, and a
 // linked plot's highlight of part of a histogram's bars draws the faded bars whole, the
 // selected share solid from their base; hovering a step line, a violin and an error bar
-// shows its row; with a renderer (?renderer=) each backend.
+// shows its row; dense points come as cells that tell their points; with a renderer
+// (?renderer=) each backend.
 //   node test/details.mjs <dir of the pages> [dir for screenshots] [renderer]
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -161,6 +162,27 @@ async function hover(page, x, y) {
   check(bar.origin === means[0] && bar["95% CI"] === means[3], `hovering an error bar shows its mean and interval (${JSON.stringify(bar)})`);
   check(eb.errors.length === 0, `no page errors${eb.errors.length ? `: ${eb.errors.join("; ")}` : ""}`);
   await eb.page.close();
+}
+
+{
+  // dense points (dense.html: 150000 a panel): drawn as cells, which tell their points
+  const { page, errors } = await open("dense.html");
+  const layers = await page.evaluate(() => window.anytrellisViews[0].scene.layers.map((l) => [l.spec.type, l.set.count]));
+  check(layers[0][1] === 0 && layers[1][0] === "rect" && layers[1][1] > 1000, `dense points come as cells (${JSON.stringify(layers)})`);
+  const at = await page.evaluate(() => {
+    const view = window.anytrellisViews[0].views[0];
+    const stage = document.querySelector(".atr-stage").getBoundingClientRect();
+    return [stage.left + view.rect.x + view.rect.w / 2, stage.top + view.rect.y + view.rect.h / 2];
+  });
+  await page.mouse.move(at[0] - 3, at[1] - 3);
+  await page.mouse.move(at[0], at[1]);
+  await page.waitForTimeout(100);
+  const cell = await page.$$eval(".atr-tip tr", (rows) => Object.fromEntries(rows.map((r) => [...r.children].map((c) => c.textContent.trim()))));
+  const sum = Number(cell["kind a"]) + Number(cell["kind b"]);
+  check(Number(cell.points) > 0 && sum === Number(cell.points), `a cell tells its points, of each colour (${JSON.stringify(cell)})`);
+  await page.screenshot({ path: join(out, `details-${tag}-dense.png`) });
+  check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join("; ")}` : ""}`);
+  await page.close();
 }
 
 await browser.close();

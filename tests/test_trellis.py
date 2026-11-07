@@ -362,7 +362,8 @@ def test_widget_saves_an_exported_image_next_to_the_notebook(
 
 def test_large_buffers_go_in_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
     n = CHUNK_BYTES // 32 + 10  # 32 bytes per instance: just over one chunk
-    t = Trellis({"x": np.arange(n, dtype=float), "y": np.zeros(n)}).points(x="x", y="y")
+    data = {"x": np.arange(n, dtype=float), "y": np.zeros(n), "g": np.arange(n) % 2}
+    t = Trellis(data, wrap="g").points(x="x", y="y")  # two panels: not dense
     w = t.widget
     sent = Sent()
     monkeypatch.setattr(w, "send", sent)

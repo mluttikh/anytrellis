@@ -20,6 +20,15 @@ import numpy as np
 
 from anytrellis.codec import Buffers
 from anytrellis.data import Table
+from anytrellis.detail import (
+    DENSE,
+    START_WIDTH,
+    THIN,
+    Detail,
+    LineDetail,
+    PointDetail,
+    Shown,
+)
 from anytrellis.facets import Grid, Order, Summary, build_grid, ordered_levels
 from anytrellis.layers import (
     FACET_MODES,
@@ -54,7 +63,7 @@ from anytrellis.pages import (
 from anytrellis.pages import order as panel_order
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
 from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
-from anytrellis.stats import Part
+from anytrellis.stats import Members, Part
 from anytrellis.stats import parts as summary_parts
 from anytrellis.styling import (
     CONTEXT_COLOR,
@@ -1379,10 +1388,12 @@ class Trellis:
             return
         entries: list[tuple[Layer, Any, Any]] = []
         if self._highlight is not None:
-            self._scene()
-            drawn = zip(self._drawn, self._geometry, strict=True)
-            entries = [(d.user, d.part, geom) for d, (_, _, geom) in drawn]
+            entries = self._highlight_entries()
         message, buffers = highlight_message(entries, self._highlight)
+        if message.get("layers"):  # as sent: the browser leaves a mask for other data alone
+            for entry, of in zip(message["layers"], self._shown_ids(), strict=True):
+                if entry is not None:
+                    entry["of"] = of
         self._widget.send(message, buffers=buffers)
 
     def _live(self, on: bool) -> None:
@@ -1624,8 +1635,14 @@ class Trellis:
         }  # fmt: skip
         built: list[tuple[Layer, Table, Geometry | None]] = []
         rule_values: dict[str, list[float]] = {}
+        self._plain = _plain_indices(drawn)
+        self._colors = colors
+        details: list[tuple[int, Detail]] = []
+        sent: dict[int, _Sent] = {}
+        with_cells: list[_Drawn] = []
         for d in drawn:
             layer = d.layer
+            with_cells.append(d)
             if layer.mark == "rule":
                 values = [_scalar(v, x_kind if layer.axis == "x" else y_kind,
                                   x_levels if layer.axis == "x" else y_levels)
@@ -1635,11 +1652,13 @@ class Trellis:
                 built.append((layer, d.table, None))
                 continue
             table = d.table
+            detail: Detail | None = None
             if d.part is not None:
                 geom = d.part.build(x_levels, y_levels, colors.levels)
                 _paint(layer, table, geom, colors)
             else:
-                geom = _geometry(layer, table, grid, x_levels, y_levels, colors, steps)
+                geom, detail = _geometry(layer, table, grid, x_levels, y_levels, colors, steps,
+                                         self._cell_colors(layer, table))  # fmt: skip
             extents["x"].add(geom.panel, geom.x0)
             extents["x"].add(geom.panel, geom.x1)
             extents["y"].add(geom.panel, geom.y0)
@@ -1648,7 +1667,21 @@ class Trellis:
                 extents["y"].add(geom.panel, geom.base0)
                 extents["y"].add(geom.panel, geom.base1)
             built.append((layer, table, geom))
+            if detail is None:
+                continue
+            index = len(built) - 1
+            details.append((index, detail))
+            if isinstance(detail, LineDetail):
+                sent.update(self._sent_of(index, layer, table, detail))
+            else:  # its dense panels' cells, a layer after it: once the panels' sizes are known
+                none = Table({"points": np.zeros(0)})
+                cells = _cells_layer(layer, none)
+                with_cells.append(_Drawn(d.user, cells, none, None, cells=True))
+                built.append((cells, none, _no_geometry()))
+        drawn = with_cells
+        self._drawn = drawn
         self._geometry = built
+        self._details = details
         zero = any(lr.mark in ("bars", "area") or lr.stat == "density" for lr in shown)
         xg = group_ids(grid, self._share["x"])
         yg = group_ids(grid, self._share["y"])
@@ -1664,43 +1697,6 @@ class Trellis:
             if all(k is None for k in keys):
                 raise ValueError(f"link={list(self._link)}: no layer's data has these columns")
             self._keys = {id(lr): k for (lr, _), k in zip(mark_entries, keys, strict=True)}
-        buffers = Buffers()
-        layers_spec = []
-        plain = 0  # layers drawn in a default colour so far (a summary's parts: one)
-        last: Layer | None = None
-        for d, (layer, _table, geom) in zip(drawn, built, strict=True):
-            if last is not None and d.user is not last:
-                plain += last.mark != "text" and last.color is None and last.facet != "exclude"
-            last = d.user if layer.mark != "rule" else last
-            if geom is None:
-                origin = x_origin if layer.axis == "x" else y_origin
-                layers_spec.append(_rule_spec(layer, rule_values[layer.name], origin))
-                continue
-            if layer.mark == "text":
-                layers_spec.append(_text_spec(layer, _table, geom, npanels, buffers, x_origin,
-                                              y_origin))  # fmt: skip
-                continue
-            spec_layer = _layer_spec(
-                layer, geom, npanels, buffers, colors, x_origin, y_origin, plain
-            )
-            spec_layer["tooltip"] = bool(_tooltip_columns(layer, _table))
-            keys = self._keys.get(id(layer))
-            spec_layer["link"] = (
-                None if keys is None else buffers.add(keys[geom.rows].astype(np.uint32), "uint32")
-            )
-            part = d.part
-            spec_layer["hide"] = (
-                list(part.hide) if part is not None else ["y"] if layer.mark == "band" else []
-            )  # a band's y: its ymin and ymax, from Python
-            family = part is not None and part.family
-            # a summary's parts drawing the same rows (a box's body and lines) select together
-            spec_layer["family"] = self._layers.index(d.user) if family else None
-            spec_layer["groups"] = (
-                buffers.add(geom.rows.astype(np.uint32), "uint32") if family else None
-            )
-            if part is not None:
-                spec_layer.update(_inline_tips(layer, _table, geom, buffers))
-            layers_spec.append(spec_layer)
         first = shown[0] if shown else None
         x_title = self.x_title if self.x_title is not None else (first.x or "" if first else "")
         y_title = self.y_title if self.y_title is not None else (first.y or "" if first else "")
@@ -1723,7 +1719,7 @@ class Trellis:
             ],
             "x": _axis_spec(x_kind, x_levels, x_origin, self._share["x"], x_title),
             "y": _axis_spec(y_kind, y_levels, y_origin, self._share["y"], y_title),
-            "layers": layers_spec,
+            "layers": [],
             "legends": colors.legends(),
             "height": self.height,
             "panel_height": self.panel_height,
@@ -1731,12 +1727,201 @@ class Trellis:
             "fit_y": self.fit_y,
             "pages": pages,
         }
+        # dense points' cells: over each panel's domain, sized for the panel's pixels
+        cell_details = [(i, dt) for i, dt in details if isinstance(dt, PointDetail)]
+        if cell_details:
+            from anytrellis.figure import layout
+
+            boxes = {b.index: (b.rect.w, b.rect.h) for b in layout(spec, START_WIDTH).panels}
+            size = next(iter(boxes.values()), (START_WIDTH, START_WIDTH / 2))
+            sizes = [boxes.get(i, size) for i in range(npanels)]
+            doms = [(*xd[i], *yd[i]) for i in range(npanels)]
+            for index, detail in cell_details:
+                assert isinstance(detail, PointDetail)
+                detail.start_at(doms, sizes)
+                layer, table = drawn[index].layer, drawn[index].table
+                sent.update(self._sent_of(index, layer, table, detail))
+                cells, cells_table, cells_geom, cells_part = sent[index + 1]
+                drawn[index + 1] = replace(drawn[index + 1], layer=cells, table=cells_table,
+                                           part=cells_part)  # fmt: skip
+                built[index + 1] = (cells, cells_table, cells_geom)
+        buffers = Buffers()
+        layers_spec = []
+        self._npanels = npanels
+        self._sent = []
+        for i, (d, (layer, _table, geom)) in enumerate(zip(drawn, built, strict=True)):
+            if geom is None:
+                origin = x_origin if layer.axis == "x" else y_origin
+                layers_spec.append(_rule_spec(layer, rule_values[layer.name], origin))
+                self._sent.append((layer, _table, None, None))
+                continue
+            if layer.mark == "text":
+                layers_spec.append(_text_spec(layer, _table, geom, npanels, buffers, x_origin,
+                                              y_origin))  # fmt: skip
+                self._sent.append((layer, _table, geom, None))
+                continue
+            entry = sent.get(i, (layer, _table, geom, d.part))
+            self._sent.append(entry)
+            layers_spec.append(self._mark_spec(d, entry, buffers))
+        # what each layer shows (zoomed in: in more detail), and its tooltips by coords
+        self._shown_layers = list(layers_spec)
+        self._detail_buffers = Buffers()
+        self._history = {}
+        for i, spec_layer in enumerate(layers_spec):
+            self._remember(i, spec_layer)
+        spec["layers"] = layers_spec
         return spec, buffers
 
-    def _tooltip(self, layer_index: int, instance: int) -> list[list[str]]:
-        """The tooltip columns of one instance: ``[[name, value], ...]``."""
+    def _mark_spec(self, d: _Drawn, entry: _Sent, buffers: Buffers) -> dict[str, Any]:
+        """A mark layer in the spec, as sent (``entry``: zoomed in, in more detail)."""
+        layer, table, geom, part = entry
+        assert geom is not None
+        _, _, x_origin = self._axes["x"]
+        _, _, y_origin = self._axes["y"]
+        spec_layer = _layer_spec(layer, geom, self._npanels, buffers, self._colors, x_origin,
+                                 y_origin, self._plain[id(d.user)])  # fmt: skip
+        spec_layer["tooltip"] = bool(_tooltip_columns(layer, table))
+        keys = self._keys.get(id(layer))
+        spec_layer["link"] = (
+            None if keys is None else buffers.add(keys[geom.rows].astype(np.uint32), "uint32")
+        )
+        spec_layer["hide"] = (
+            list(part.hide) if part is not None else ["y"] if layer.mark == "band" else []
+        )  # a band's y: its ymin and ymax, from Python
+        family = part is not None and part.family
+        # a summary's parts drawing the same rows (a box's body and lines) select together
+        spec_layer["family"] = self._layers.index(d.user) if family else None
+        spec_layer["groups"] = (
+            buffers.add(geom.rows.astype(np.uint32), "uint32") if family else None
+        )
+        if part is not None:
+            spec_layer.update(_inline_tips(layer, table, geom, buffers))
+        return spec_layer
+
+    def _cell_colors(self, layer: Layer, table: Table) -> Any:
+        """RGBA of a points layer's cells, from their colour levels and mean numbers."""
+        colors = self._colors
+        name = layer.color
+
+        def paint(n: int, mix: np.ndarray | None, means: np.ndarray | None) -> np.ndarray:
+            if name is not None and name in table:
+                if mix is not None:  # the levels' colours in proportion
+                    palette = np.array([rgba(c) for c in colors.colors(name)], dtype=np.float64)
+                    rgb = mix @ palette[:, :3] / np.maximum(mix.sum(axis=1), 1)[:, None]
+                    out = np.full((n, 4), 255, dtype=np.uint8)
+                    out[:, :3] = np.round(rgb).astype(np.uint8)
+                    return out
+                lo, hi = colors.ranges.get(name, (0.0, 1.0))
+                assert means is not None
+                return colormap_rgba(means, "viridis", lo, hi)
+            solid = name if name is not None else colors.default(layer, self._plain[id(layer)])
+            return np.tile(np.array(rgba(solid), dtype=np.uint8), (n, 1))
+
+        return paint
+
+    def _sent_of(self, index: int, layer: Layer, table: Table,
+                 detail: Detail) -> dict[int, _Sent]:  # fmt: skip
+        """What a layer in detail sends, at its windows: a line thinned; points, and the
+        cells of its dense panels (the layer after it)."""
+        if isinstance(detail, LineDetail):
+            return {index: (layer, table, detail.geometry(), None)}
+        cells_table, cells_geom, starts, rows = detail.cells()
+        cells = _cells_layer(layer, cells_table)
+        part = Part(cells, cells_table, _no_build, Members(starts, rows))
+        return {index: (layer, table, detail.points(), None),
+                index + 1: (cells, cells_table, cells_geom, part)}  # fmt: skip
+
+    def _remember(self, index: int, spec_layer: dict[str, Any]) -> None:
+        """Keep what spec layer ``index`` sent, by its coords: a tooltip asked for as the
+        browser showed it finds it (the last ``TIP_HISTORY``)."""
+        coords = spec_layer.get("coords")
+        if coords is None:
+            return
+        self._history[(index, coords["id"])] = self._sent[index]
+        while len(self._history) > TIP_HISTORY + len(self._sent):
+            del self._history[next(iter(self._history))]
+
+    def _shown_ids(self) -> list[str | None]:
+        """The coords of each spec layer as shown."""
+        return [(lr.get("coords") or {}).get("id") for lr in self._shown_layers]
+
+    def _detail(self, view: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The layers to show in more (or less) detail for a view the browser reports, as a
+        ``detail`` message; None: none changed."""
+        spec, _ = self._scene()
+        if not self._details or not view or not view.get("panels"):
+            return None
+        shown = self._shown_panels(spec, view)
+        layers: list[dict[str, Any]] = []
+        for index, detail in self._details:
+            if not detail.update(shown):
+                continue
+            user = self._drawn[index].user
+            for i, entry in self._sent_of(index, user, self._sent[index][1], detail).items():
+                self._sent[i] = entry
+                d = self._drawn[i]
+                spec_layer = self._mark_spec(d, entry, self._detail_buffers)
+                self._shown_layers[i] = spec_layer
+                if d.cells:  # the drawn layer's table and part: the cells', for selection
+                    self._drawn[i] = replace(d, layer=entry[0], table=entry[1], part=entry[3])
+                self._remember(i, spec_layer)
+                of = spec["layers"][i]["coords"]["id"]
+                layers.append({"index": i, "of": of, "layer": spec_layer})
+        if not layers:
+            return None
+        # keep the buffers of the layers shown
+        live = {ref for lr in self._shown_layers for ref in _buffer_ids(lr)}
+        for buffer_id in [b for b in self._detail_buffers.data if b not in live]:
+            del self._detail_buffers.data[buffer_id]
+        return {"type": "detail", "layers": layers}
+
+    def _shown_panels(self, spec: dict[str, Any], view: dict[str, Any]) -> dict[int, Shown]:
+        """The panels a view shows: their ranges (axis units) and sizes."""
+        _, _, x_origin = self._axes["x"]
+        _, _, y_origin = self._axes["y"]
+        xs = {int(g): r for g, r in view.get("x") or []}
+        ys = {int(g): r for g, r in view.get("y") or []}
+        out: dict[int, Shown] = {}
+        for item in view.get("panels") or []:
+            p, w, h = int(item[0]), float(item[1]), float(item[2])
+            if not 0 <= p < len(spec["panels"]):
+                continue
+            panel = spec["panels"][p]
+            x = xs.get(panel["xg"], panel["x"])
+            y = ys.get(panel["yg"], panel["y"])
+            out[p] = Shown(min(x) + x_origin, max(x) + x_origin, min(y) + y_origin,
+                           max(y) + y_origin, w, h)  # fmt: skip
+        return out
+
+    def _send_detail(self) -> None:
+        """Send the layers in detail for the view the browser reported, if any changed."""
+        if self._widget is None:
+            return
+        message = self._detail(self._view)
+        if message is not None:
+            self._widget.send(message)
+
+    def _shown_scene(self) -> tuple[dict[str, Any], Buffers]:
+        """The spec and buffers as shown: layers zoomed in, in their detail (images)."""
+        spec, buffers = self._scene()
+        if not self._details:
+            return spec, buffers
+        both = Buffers()
+        both.data = {**buffers.data, **self._detail_buffers.data}
+        return {**spec, "layers": list(self._shown_layers)}, both
+
+    def _highlight_entries(self) -> list[tuple[Layer, Any, Any]]:
+        """Each spec layer's user layer, summary part and geometry, as sent."""
         self._scene()
-        layer, table, geom = self._geometry[layer_index]
+        return [(d.user, part, geom)
+                for d, (_, _, geom, part) in zip(self._drawn, self._sent, strict=True)]  # fmt: skip
+
+    def _tooltip(self, layer_index: int, instance: int, of: str | None = None) -> list[list[str]]:
+        """The tooltip columns of one instance: ``[[name, value], ...]``; ``of``: the
+        layer's coords as the browser showed it."""
+        self._scene()
+        entry = self._history.get((layer_index, of)) if of else None
+        layer, table, geom, _ = entry or self._sent[layer_index]
         names = _tooltip_columns(layer, table)
         if geom is None or not names:
             return []
@@ -1782,6 +1967,58 @@ class _Drawn:
     layer: Layer
     table: Table
     part: Part | None
+    cells: bool = False
+    """The cells of a points layer's dense panels (``detail``)."""
+
+
+_Sent = tuple[Layer, Table, "Geometry | None", "Part | None"]
+"""What a spec layer sends: its layer, table, geometry and summary part."""
+
+TIP_HISTORY = 32
+"""Layers sent in detail before that a tooltip can still be asked for."""
+
+
+def _plain_indices(drawn: list[_Drawn]) -> dict[int, int]:
+    """Per drawn layer (by id), the layers drawn in a default colour before it (a summary's
+    parts: one)."""
+    out: dict[int, int] = {}
+    plain = 0
+    last: Layer | None = None
+    for d in drawn:
+        if last is not None and d.user is not last:
+            plain += last.mark != "text" and last.color is None and last.facet != "exclude"
+        last = d.user if d.layer.mark != "rule" else last
+        out.setdefault(id(d.layer), plain)
+        out.setdefault(id(d.user), plain)
+    return out
+
+
+def _cells_layer(layer: Layer, table: Table) -> Layer:
+    """The cells of a points layer's dense panels: rects of its colour, telling their
+    points (and their colour)."""
+    tips = [n for n in table.names if n != "points"]
+    return Layer(mark="rect", name=layer.name, color=layer.color, facet=layer.facet,
+                 opacity=layer.opacity, tooltip=["points", *tips])  # fmt: skip
+
+
+def _no_geometry() -> Geometry:
+    empty = np.zeros(0)
+    return Geometry(np.zeros(0, dtype=np.int64), empty, empty, empty, empty,
+                    np.zeros(0, dtype=np.int64))  # fmt: skip
+
+
+def _no_build(*_: Any) -> Geometry:
+    raise AssertionError("cells are built by their detail")
+
+
+def _buffer_ids(spec_layer: dict[str, Any]) -> list[str]:
+    """The buffers a spec layer refers to."""
+    refs = [spec_layer.get(k) for k in ("coords", "starts", "base", "link", "groups",
+                                         "tip_rows", "labels", "offsets", "colors")]  # fmt: skip
+    color = spec_layer.get("color")
+    if isinstance(color, dict):
+        refs += [color.get("rgba"), color.get("codes")]
+    return [r["id"] for r in refs if isinstance(r, dict) and "id" in r]
 
 
 def _panel_name(panel: dict[str, Any], index: int) -> str:
@@ -1925,7 +2162,10 @@ def _geometry(
     y_levels: list[str] | None,
     colors: _ColorScales,
     steps: dict[str, float],
-) -> Geometry:
+    cell_colors: Any = None,
+) -> tuple[Geometry, Detail | None]:
+    """A plain layer's geometry, and its level of detail: a line of many points thinned,
+    points drawn as cells where dense (the geometry: what Python selects, all of it)."""
     assert layer.x is not None
     assert layer.y is not None
     x = axis_values(table.column(layer.x), x_levels)
@@ -1944,7 +2184,16 @@ def _geometry(
         extra = list(layer.group)
         if color_col is not None and color_col.kind == "category":
             extra.append(color_col.name)
-        geom = line_geometry(rows, panel, x, y, series_codes(table, extra), layer.step)
+        series = series_codes(table, extra)
+        if len(panel) and np.bincount(panel).max() > THIN:
+            xs, ys, ss = x[rows], y[rows], series[rows]
+            order = np.lexsort((xs, ss, panel))
+            detail = LineDetail(rows[order], panel[order], xs[order], ys[order], ss[order],
+                                len(grid.panels), layer.step,
+                                lambda g: _paint(layer, table, g, colors))  # fmt: skip
+            if detail.thin.any():
+                return detail.points, detail
+        geom = line_geometry(rows, panel, x, y, series, layer.step)
     elif layer.mark == "area":
         extra = list(layer.group)
         if color_col is not None and color_col.kind == "category":
@@ -1960,6 +2209,17 @@ def _geometry(
         geom = band_geometry(rows, panel, x, y, upper, series_codes(table, extra))
     elif layer.mark in ("points", "text"):
         geom = point_geometry(rows, panel, x, y)
+        numbers = x_levels is None and y_levels is None
+        dense = len(geom.panel) > DENSE and np.bincount(geom.panel).max() > DENSE
+        if layer.mark == "points" and numbers and cell_colors is not None and dense:
+            _paint(layer, table, geom, colors)
+            values = None
+            if color_col is not None and color_col.kind == "number":
+                values = color_col.values[geom.rows]
+            levels = colors.levels.get(color_col.name) if color_col is not None else None
+            name = None if color_col is None else color_col.name
+            detail = PointDetail(geom, len(grid.panels), values, cell_colors, name, levels)
+            return geom, detail
     elif layer.mark == "rect":
         x2 = axis_values(table.column(layer.x2), x_levels) if layer.x2 else None
         y2 = axis_values(table.column(layer.y2), y_levels) if layer.y2 else None
@@ -1971,7 +2231,7 @@ def _geometry(
         geom = bar_geometry(rows, panel, x, y, step=step, width=layer.bar_width, codes=codes,
                             ncodes=ncodes, position=layer.position)  # fmt: skip
     _paint(layer, table, geom, colors)
-    return geom
+    return geom, None
 
 
 def _paint(layer: Layer, table: Table, geom: Geometry, colors: _ColorScales) -> None:

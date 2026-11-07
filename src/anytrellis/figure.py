@@ -913,7 +913,10 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
                         f'stroke-width="{_n(width)}" stroke-linecap="round"'
                         f'{_alpha("stroke-opacity", alpha)}/>')  # fmt: skip
             else:
-                svg.add(f'<path d="{d}" fill="{_hex(color)}"{_alpha("fill-opacity", alpha)}/>')
+                # rects edge to edge (tiles, cells): no seams between them
+                crisp = ' shape-rendering="crispEdges"' if kind == KIND_RECT else ""
+                svg.add(f'<path d="{d}" fill="{_hex(color)}"{_alpha("fill-opacity", alpha)}'
+                        f"{crisp}/>")  # fmt: skip
         svg.close()
 
 
@@ -1290,7 +1293,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     if theme not in THEMES:
         raise ValueError(f"theme must be one of {list(THEMES)}, got {theme!r}")
     th = THEMES[theme]
-    spec, buffers = plot._scene()
+    spec, buffers = plot._shown_scene()
     shown = _shown(plot)
     width = float(width or shown["width"] or DEFAULT_WIDTH)
     if width < 100:
@@ -1387,9 +1390,7 @@ def _highlighted(plot: Trellis, marks: list[_Marks]) -> tuple[Masks, Masks]:
     mask, and a histogram bar's selected share."""
     from anytrellis.linking import highlight_message
 
-    entries = [(d.user, d.part, geom)
-               for d, (_, _, geom) in zip(plot._drawn, plot._geometry, strict=True)]  # fmt: skip
-    message, buffers = highlight_message(entries, plot._highlight)
+    message, buffers = highlight_message(plot._highlight_entries(), plot._highlight)
     masks: list[np.ndarray | None] = []
     fractions: list[np.ndarray | None] = []
     for layer in marks:

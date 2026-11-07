@@ -86,7 +86,9 @@ function view(source: DataSource, ref: BufferRef): ArrayBufferView {
   }
 }
 
-export function buildScene(spec: TrellisSpec, source: DataSource): Scene {
+/** The scene of a spec; `previous`: a scene of the same spec with other layers in detail,
+ * whose layers that did not change are kept as they are. */
+export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Scene | null): Scene {
   const np = spec.panels.length;
   const baseX = new Float64Array(np);
   const baseY = new Float64Array(np);
@@ -97,6 +99,11 @@ export function buildScene(spec: TrellisSpec, source: DataSource): Scene {
   const layers: LayerData[] = [];
   spec.layers.forEach((l, index) => {
     if (!isMark(l)) return;
+    const kept = previous?.layers.find((old) => old.index === index && old.spec === l);
+    if (kept) {
+      layers.push(kept);
+      return;
+    }
     const coords = view(source, l.coords) as Float64Array;
     const starts = view(source, l.starts) as Uint32Array;
     const n = l.count;

@@ -158,7 +158,13 @@ def line_geometry(
     ``_steps``)."""
     xs, ys, ss = x[rows], y[rows], series[rows]
     order = np.lexsort((xs, ss, panel))
-    rows, panel, xs, ys, ss = rows[order], panel[order], xs[order], ys[order], ss[order]
+    return polyline(rows[order], panel[order], xs[order], ys[order], ss[order], step)
+
+
+def polyline(rows: np.ndarray, panel: np.ndarray, xs: np.ndarray, ys: np.ndarray,
+             ss: np.ndarray, step: str | None = None) -> Geometry:  # fmt: skip
+    """``line_geometry`` of points already sorted by panel, series and x: their rows, panel,
+    x, y and series (a point that is not finite breaks its series)."""
     valid = np.isfinite(xs) & np.isfinite(ys)
     same = (panel[1:] == panel[:-1]) & (ss[1:] == ss[:-1]) & valid[1:] & valid[:-1]
     pairs = np.flatnonzero(same)

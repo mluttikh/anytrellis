@@ -162,7 +162,8 @@ export function selectionColors(layer: LayerData, mask: Uint8Array, dim: Uint8Ar
  * a mask of its instances, the selected share of each bar (filled from its base), or null:
  * drawn as it is. */
 export interface Highlight {
-  layers: ({ mask: Uint8Array } | { fraction: Float32Array } | null)[];
+  /** Per spec layer; `of`: the id of the coords it is for (a layer in detail). */
+  layers: (({ mask: Uint8Array } | { fraction: Float32Array }) & { of?: string | null } | null)[];
 }
 
 /** A highlight as a selection of the scene's layers, or null when it fits none of them (a
@@ -175,7 +176,8 @@ export function highlighted(scene: Scene | null, h: Highlight): { selection: Sel
   let total = 0;
   let any = false;
   scene.layers.forEach((layer) => {
-    const entry = h.layers[layer.index];
+    const given = h.layers[layer.index];
+    const entry = given && (!given.of || given.of === layer.spec.coords.id) ? given : null;
     const n = layer.set.count;
     let mask: Uint8Array | null = null;
     let fraction: Float32Array | null = null;
