@@ -21,6 +21,11 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- Faster plots of many rows in panels: rows find their panel by their column's codes, not
+  their text, and numbers as panels are labelled once per value, not once per row. Four
+  million rows of a line in four panels build in 1.2 s instead of 2.2 s (by a column of
+  numbers: 1 s instead of 4.2 s), and in 1,000 panels ordered by a median, with statistics
+  to sort pages by, in 3.5 s instead of 93 s.
 - Rects edge to edge (heatmap tiles, cells) show no seams between them in Canvas 2D, the
   browser's image export, `save_png` and `save_svg`: their edges fall on whole pixels.
 

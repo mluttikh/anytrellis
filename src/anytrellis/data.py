@@ -244,6 +244,17 @@ def _label(value: Any) -> str:
     return str(value)
 
 
+def group_order(codes: np.ndarray, n: int, within: np.ndarray | None = None) -> np.ndarray:
+    """The order of rows grouped by their code (0 … n−1), in row order within a group, or
+    by ``within`` when given. Codes of under 2¹⁶ groups sort by radix: tens of times faster
+    than sorting int64 codes, or a lexsort of codes and values."""
+    small = codes.astype(np.uint16) if n <= 1 << 16 else codes
+    if within is None:
+        return np.argsort(small, kind="stable")
+    first = np.argsort(within)
+    return first[np.argsort(small[first], kind="stable")]
+
+
 def _natural(text: str) -> tuple[Any, ...]:
     """Sort key: numbers in text by value ("site 2" before "site 10")."""
     import re

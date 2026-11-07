@@ -303,6 +303,21 @@ def test_missing_categories_get_a_panel() -> None:
     assert [p["label"] for p in spec["panels"]] == ["a", "(missing)"]
 
 
+def test_number_facets_index_rows_by_their_labels() -> None:
+    from anytrellis.data import Table
+    from anytrellis.facets import Order, build_grid
+
+    first = Table({"g": [2.0, 1.0, np.nan, 2.5, 1.0], "v": [5.0, 1.0, 2.0, np.nan, 3.0]})
+    second = Table({"g": [1.0, 2.5, 9.0], "v": [0.0, 0.0, 0.0]})
+    grid = build_grid([first, second], row=(), col=(), wrap=("g",), cols=None, orders={})
+    assert [p.label for p in grid.panels] == ["1", "2", "2.5", "9", "(missing)"]
+    assert grid.assign(first).tolist() == [1, 0, 4, 2, 0]
+    assert grid.assign(second).tolist() == [0, 2, 3]
+    by_median = {"g": Order(by="median", of="v", descending=True)}
+    grid = build_grid([first], row=(), col=(), wrap=("g",), cols=None, orders=by_median)
+    assert [p.label for p in grid.panels] == ["2", "(missing)", "1", "2.5"]  # 2.5: no values
+
+
 def test_unknown_column_is_an_error() -> None:
     with pytest.raises(KeyError):
         Trellis(SMALL).line(x="t", y="nope")
