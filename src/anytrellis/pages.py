@@ -16,7 +16,7 @@ from typing import Any, Literal, TypedDict
 
 import numpy as np
 
-from anytrellis.data import Table
+from anytrellis.data import Table, group_order
 
 AUTO_PANELS = 100
 """A wrap of more panels than this pages by itself."""
@@ -60,7 +60,7 @@ def builtin_stats(npanels: int, panel_of: np.ndarray, values: np.ndarray, name: 
     if x is not None:
         ok &= np.isfinite(x)
     p, v = panel_of[ok], values[ok]
-    order = np.lexsort((v, p))
+    order = group_order(p, npanels, within=v)
     p, v = p[order], v[order]
     xs = x[ok][order] if x is not None else None
     counts = np.bincount(p, minlength=npanels)

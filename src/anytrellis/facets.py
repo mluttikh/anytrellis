@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from anytrellis.data import MISSING_LABEL, Column, Table
+from anytrellis.data import MISSING_LABEL, Column, Table, group_order
 
 Summary = Literal["median", "mean", "min", "max", "sum", "count"]
 
@@ -159,16 +159,6 @@ def _used(grid: Grid, tables: Sequence[Table]) -> set[int]:
     return used
 
 
-def labels_of(column: Column) -> np.ndarray:
-    """A column's values as the text of its levels."""
-    if column.kind == "category":
-        return column.values
-    out = np.empty(len(column.values), dtype=object)
-    for i, v in enumerate(column.values):
-        out[i] = _format(v, column.kind)
-    return out
-
-
 def _format(v: float, kind: str) -> str:
     if v != v:
         return MISSING_LABEL
@@ -217,7 +207,6 @@ def ordered_levels(name: str, order: Order, tables: Sequence[Table]) -> list[str
 
 def _summaries(name: str, levels: list[str], order: Order, tables: Sequence[Table]) -> np.ndarray:
     table = tables[0]
-    labels = labels_of(table.column(name))
     if order.by == "count":
         values = np.ones(table.n)
     else:
@@ -228,25 +217,37 @@ def _summaries(name: str, levels: list[str], order: Order, tables: Sequence[Tabl
             raise ValueError(f"order: {order.of!r} is not a number or time column")
         values = col.values
     fn = {
-        "median": np.nanmedian, "mean": np.nanmean, "min": np.nanmin, "max": np.nanmax,
-        "sum": np.nansum, "count": np.nansum,
+        "median": np.median, "mean": np.mean, "min": np.min, "max": np.max,
+        "sum": np.sum, "count": np.sum,
     }[order.by or "count"]  # fmt: skip
+    level = _index(table, name, {name: levels})
+    keep = (level >= 0) & ~np.isnan(values)
+    level, values = level[keep], values[keep]
+    rows = group_order(level, len(levels))
+    starts = np.searchsorted(level[rows], np.arange(len(levels) + 1))
     out = np.full(len(levels), np.nan)
-    for i, level in enumerate(levels):
-        picked = values[labels == level]
-        picked = picked[~np.isnan(picked)]
-        if len(picked):
-            out[i] = fn(picked)
+    for i in range(len(levels)):
+        if starts[i] < starts[i + 1]:
+            out[i] = fn(values[rows[starts[i] : starts[i + 1]]])
     return out
 
 
 def _index(table: Table, name: str, levels: dict[str, list[str]]) -> np.ndarray:
     """Each row's level index in ``levels[name]`` (−1 when not a level)."""
-    labels = labels_of(table.column(name))
+    labels, codes = _codes(table.column(name))
     lookup = {v: i for i, v in enumerate(levels[name])}
-    uniq, inverse = np.unique(labels.astype(str), return_inverse=True)
-    mapped = np.array([lookup.get(u, -1) for u in uniq], dtype=np.int64)
-    return mapped[inverse.ravel()]
+    mapped = np.array([lookup.get(t, -1) for t in labels] + [-1], dtype=np.int64)
+    return mapped[codes]  # a code of −1 picks the −1 at the end
+
+
+def _codes(column: Column) -> tuple[list[str], np.ndarray]:
+    """A column's distinct labels, and each row's index among them (−1: none of them).
+
+    Each distinct value is labelled once, so rows are never turned into text one by one."""
+    if column.kind == "category":
+        return list(column.levels), column.level_codes()
+    uniq, inverse = np.unique(column.values, return_inverse=True)  # NaNs: one, at the end
+    return [_format(v, column.kind) for v in uniq], inverse.ravel()
 
 
 def _present(
