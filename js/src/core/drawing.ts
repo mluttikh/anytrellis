@@ -220,7 +220,7 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
   });
 
   // strips
-  const strip = (rect: Rect, label: string, vertical: boolean): void => {
+  const strip = (rect: Rect, label: string, vertical: boolean, note = ""): void => {
     ctx.fillStyle = theme.strip;
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
     ctx.fillStyle = theme.stripText;
@@ -233,13 +233,21 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
       ctx.rotate(Math.PI / 2);
       ctx.textAlign = "center";
       ctx.fillText(fit(ctx, label, rect.h - 6), 0, 0);
+    } else if (note) {
+      // the name at the left, cut to leave the value whole at the right
+      const y = rect.y + rect.h / 2 + 0.5;
+      const w = ctx.measureText(note).width;
+      ctx.textAlign = "right";
+      ctx.fillText(note, rect.x + rect.w - STRIP_PAD, y);
+      ctx.textAlign = "left";
+      ctx.fillText(fit(ctx, label, rect.w - 3 * STRIP_PAD - w), rect.x + STRIP_PAD, y);
     } else {
       ctx.textAlign = "center";
       ctx.fillText(fit(ctx, label, rect.w - 6), rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
     }
     ctx.restore();
   };
-  for (const box of layout.panels) if (box.strip) strip(box.strip, box.label, false);
+  for (const box of layout.panels) if (box.strip) strip(box.strip, box.label, false, box.note);
   for (const s of layout.strips) strip(s.rect, s.label, s.vertical);
 
   // titles
@@ -367,6 +375,9 @@ function drawRule(ctx: CanvasRenderingContext2D, l: RuleLayerSpec, v: PanelView)
 }
 
 /** `text` cut with an ellipsis to fit `width` px. */
+/** A strip's room at either end, and between a name and its value. */
+const STRIP_PAD = 4;
+
 export function fit(ctx: CanvasRenderingContext2D, text: string, width: number): string {
   if (ctx.measureText(text).width <= width) return text;
   let lo = 0;

@@ -177,6 +177,14 @@ linked: back in the grid, the panels that share its scales show what the opened 
 showed. From Python: `t.open("station 3")` (a grid's panel: `t.open("north", "s1")`),
 `t.close()`, `t.focused`, and `t.panels()` lists the names.
 
+**Many panels.** A wrap of more than 100 panels shows them a page at a time (6 by 4;
+`rows=` and `cols=` set it, `rows="all"` turns it off), with a bar to turn the pages
+(‹ ›, Page Up and Page Down), sort the panels by a statistic of each (rows, mean, median,
+min, max, sd and trend of the values drawn, plus any given with `t.panel_stats(table)`),
+filter them by name and by a statistic's range. The strips show the value sorted by. From
+Python: `t.sort_panels("trend temp", descending=True)`, `t.filter_panels("north")`,
+`t.show_page(2)`, `t.shown_panels()`; images and saved pages show the page shown.
+
 **Images.** The toolbar's Export button (or `e`) copies the plot as shown, its zoom,
 selection and theme, to the clipboard as a PNG (or as an SVG with a PNG beside it, where
 the browser allows), downloads it as a PNG (at twice the screen's size) or an SVG, or, in
@@ -201,7 +209,7 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | Esc | clear the selection (else: back to all panels) |
 | click a legend entry | select its colour (Shift+click: add or remove one) |
 | Enter | open the panel under the pointer |
-| Page Up / Page Down | previous / next panel |
+| Page Up / Page Down | previous / next panel (with none opened: page) |
 | Backspace | back to all panels |
 
 These keys stay in the plot, so JupyterLab's own shortcuts don't also act on them.

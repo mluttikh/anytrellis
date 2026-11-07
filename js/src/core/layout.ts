@@ -27,6 +27,8 @@ export interface PanelBox {
   /** A strip over the panel (a wrap's, or an opened panel's), and its label. */
   strip: Rect | null;
   label: string;
+  /** A paged wrap's value of the statistic sorted by, at the strip's right end. */
+  note?: string;
   /** Where its x and y axes are drawn (tick labels included), or null: the pointer zooms
    * and pans one axis there. */
   xAxis: Rect | null;
@@ -66,6 +68,9 @@ export interface LayoutOptions {
   focused?: number | null;
   /** Draw the title in the canvas (false: the page shows it). */
   title?: boolean;
+  /** A paged wrap's panels on the page shown (indices in spec.panels, in order; default:
+   * the first page's). */
+  page?: number[] | null;
 }
 
 /** A panel's name: its level of each facet column. */
@@ -80,10 +85,15 @@ const MIN_PANEL = 24;
 
 export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   if (opts.focused !== null && opts.focused !== undefined && spec.panels[opts.focused]) return focusLayout(spec, opts, opts.focused);
-  const { grid, panels } = spec;
+  const { grid } = spec;
+  // a paged wrap: the page's panels, placed in turn on a grid of the page's size (the same
+  // on every page, so turning pages does not move the plot)
+  const pages = spec.pages ?? null;
+  const shown = pages ? (opts.page ?? spec.panels.slice(0, pages.rows * pages.cols).map((_, i) => i)) : null;
+  const panels = shown ? shown.map((index, k) => ({ ...spec.panels[index], row: Math.floor(k / pages!.cols), col: k % pages!.cols })) : spec.panels;
   const fs = opts.fontSize;
-  const rows = Math.max(1, grid.rows);
-  const cols = Math.max(1, grid.cols);
+  const rows = Math.max(1, pages ? pages.rows : grid.rows);
+  const cols = Math.max(1, pages ? pages.cols : grid.cols);
   const at = new Map<string, number>();
   panels.forEach((p, i) => at.set(`${p.row},${p.col}`, i));
   const cell = (r: number, c: number): number | undefined => at.get(`${r},${c}`);
@@ -114,6 +124,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   panels.forEach((p, i) => {
     if (showX[i] && (p.row === rows - 1 || cell(p.row + 1, p.col) !== undefined)) rowHasX[p.row] = true;
   });
+  if (pages) rowHasX[rows - 1] = true; // a short last page keeps the full pages' height
 
   const stripH = Math.round(fs * 1.5 + 4);
   const wrapStrip = grid.kind === "wrap" ? stripH : 0;
@@ -169,7 +180,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   const boxes: PanelBox[] = panels.map((p, i) => {
     const rect = { x: colX[p.col], y: rowY[p.row], w: pw, h: ph };
     return {
-      index: i,
+      index: shown ? shown[i] : i,
       rect,
       showX: showX[i],
       showY: showY[i],
@@ -194,7 +205,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
 
   // the empty cells after a wrap's last panel, below the axes of the panels above them
   let spare: Rect | null = null;
-  if (grid.kind === "wrap" && panels.length) {
+  if (grid.kind === "wrap" && panels.length && !pages) {
     const last = rows - 1;
     const used = panels.filter((p) => p.row === last).reduce((a, p) => Math.max(a, p.col + 1), 0);
     if (used > 0 && used < cols) {

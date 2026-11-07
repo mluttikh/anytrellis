@@ -12,7 +12,7 @@ import base64
 import html
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -41,6 +41,17 @@ from anytrellis.layers import (
     step_of,
 )
 from anytrellis.linking import Link, Masks, highlight_message
+from anytrellis.pages import (
+    AUTO_PANELS,
+    PAGE_COLS,
+    PAGE_ROWS,
+    Paging,
+    Stat,
+    builtin_stats,
+    given_stats,
+    page_count,
+)
+from anytrellis.pages import order as panel_order
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
 from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
 from anytrellis.stats import Part
@@ -84,7 +95,11 @@ class Trellis:
         col: Facet column(s) whose levels are the grid's columns.
         wrap: Facet column(s) whose levels are panels wrapped into ``cols`` columns (not
             with ``row`` or ``col``).
-        cols: Columns of a wrap (default: about the square root of the panels).
+        cols: Columns of a wrap (default: about the square root of the panels; 6 a page).
+        rows: Rows of panels a page of a wrap shows: a wrap of more than 100 panels shows 4
+            at a time, and the reader turns the pages, sorts and filters the panels (by
+            their statistics: see ``panel_stats``). ``rows=3`` pages any wrap; ``"all"``
+            never pages.
         share_x: Share the x scale: ``True`` (all panels), ``"row"``, ``"col"`` or
             ``False`` (each panel its own).
         share_y: The same for y.
@@ -118,6 +133,7 @@ class Trellis:
         col: str | Sequence[str] | None = None,
         wrap: str | Sequence[str] | None = None,
         cols: int | None = None,
+        rows: int | str | None = None,
         share_x: bool | str = True,
         share_y: bool | str = True,
         x_scale: str = "linear",
@@ -142,6 +158,14 @@ class Trellis:
         if cols is not None and cols < 1:
             raise ValueError("cols must be at least 1")
         self._cols = cols
+        if rows is not None and rows != "all" and (not isinstance(rows, int) or rows < 1):
+            raise ValueError(f"rows must be at least 1, or 'all', got {rows!r}")
+        if isinstance(rows, int) and not self._wrap:
+            raise ValueError("rows= pages a wrap: give wrap= (a grid shows all its cells)")
+        self._rows = rows
+        self._given_stats: Table | None = None
+        self._paging: Paging = {}
+        self._stats: list[Stat] = []
         self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
         self._scales: dict[str, str] = {"x": _scale(x_scale), "y": _scale(y_scale)}
         self._orders: dict[str, Order] = {}
@@ -968,6 +992,176 @@ class Trellis:
         if self._widget is not None:
             self._widget.open_panel = name
 
+    # ---- pages --------------------------------------------------------------------------
+
+    def panel_stats(self, data: Any) -> Self:
+        """Statistics of each panel, to sort and filter a paged wrap's panels by: a table
+        with the facet columns and one row per panel; each other column is a statistic
+        (numbers, or text). They join the ones the plot computes (``rows``, and the mean,
+        median, min, max, sd and trend of the values drawn).
+
+        ```python
+        info = df.group_by("station").agg(pl.col("temp").quantile(0.9).alias("p90 temp"),
+                                          pl.col("region").first())
+        t.panel_stats(info)
+        ```
+        """
+        table = Table(data)
+        missing = [c for c in self._wrap if c not in table]
+        if not self._wrap:
+            raise ValueError("panel_stats() is for a wrap (wrap=), whose pages it sorts")
+        if missing:
+            raise ValueError(f"panel_stats(): the table needs the facet columns {missing}")
+        self._given_stats = table
+        return self._changed()
+
+    def stats(self) -> dict[str, list[Any]]:
+        """The panels' statistics, to sort and filter by: ``{name: [a value per panel]}``,
+        in the order of ``panels()`` (empty when the plot does not page)."""
+        self._scene()
+        return {"panel": self.panels(), **{s.name: list(s.values) for s in self._stats}}
+
+    def sort_panels(self, by: str | None = None, *, descending: bool = False) -> Self:
+        """Sort a paged wrap's panels by a statistic (a name from ``stats()``), as the
+        reader can in the browser; ``None``: as given (``order``). Panels without a value
+        go last.
+
+        ```python
+        t.sort_panels("trend temp", descending=True)   # the steepest rise first
+        ```
+        """
+        if by is not None:
+            self._stat_named(by)
+        return self._set_paging(sort=by, descending=bool(descending), page=0)
+
+    def filter_panels(self, name: str = "", **where: Any) -> Self:
+        """Show only the panels whose name has every word of ``name``, and whose
+        statistics are in the ranges given: ``(low, high)`` for numbers (``None``: open),
+        a piece of text for text. ``filter_panels()`` shows them all again. A statistic's
+        name with spaces goes in a dict: ``filter_panels(**{"mean temp": (20, None)})``.
+
+        ```python
+        t.filter_panels("north")
+        t.filter_panels(rows=(100, None), region="Europe")
+        ```
+        """
+        for key in where:
+            self._stat_named(key)
+        clean = {k: (list(v) if isinstance(v, tuple | list) else v) for k, v in where.items()}
+        return self._set_paging(name=str(name), where=clean, page=0)
+
+    def show_page(self, page: int) -> Self:
+        """Turn to a page (from 1) of a paged wrap."""
+        self._scene()
+        if self._pages_spec() is None:
+            raise ValueError("this plot does not page: give rows= (and wrap=)")
+        if not 1 <= page <= self.pages:
+            raise ValueError(f"page must be from 1 to {self.pages}, got {page!r}")
+        return self._set_paging(page=page - 1)
+
+    @property
+    def pages(self) -> int:
+        """The number of pages, with the panels the filters keep (1 when it does not page)."""
+        spec = self._pages_spec()
+        if spec is None:
+            return 1
+        return page_count(len(self._shown_order()), spec["rows"] * spec["cols"])
+
+    @property
+    def page(self) -> int:
+        """The page shown, from 1."""
+        return min(int(self.paging.get("page", 0)), self.pages - 1) + 1
+
+    @property
+    def paging(self) -> Paging:
+        """The page, sort and filters shown (set here or in the browser)."""
+        if self._widget is not None:
+            return dict(self._widget.paging)  # ty: ignore[invalid-return-type]
+        return dict(self._paging)  # ty: ignore[invalid-return-type]
+
+    def shown_panels(self) -> list[str]:
+        """The names of the panels on the page shown, in order (all panels when it does not
+        page)."""
+        spec = self._pages_spec()
+        names = self.panels()
+        if spec is None:
+            return names
+        per = spec["rows"] * spec["cols"]
+        start = (self.page - 1) * per
+        return [names[i] for i in self._shown_order()[start : start + per]]
+
+    def _shown_order(self) -> list[int]:
+        return panel_order(self._stats, self.panels(), self.paging)
+
+    def _pages_spec(self) -> dict[str, Any] | None:
+        spec, _ = self._scene()
+        return spec["pages"]
+
+    def _stat_named(self, name: str) -> Stat:
+        self._scene()
+        for s in self._stats:
+            if s.name == name:
+                return s
+        if self._pages_spec() is None:
+            raise ValueError("this plot does not page: give rows= (and wrap=)")
+        raise ValueError(f"no statistic {name!r}; there are {[s.name for s in self._stats]}")
+
+    def _set_paging(self, **changes: Any) -> Self:
+        state: dict[str, Any] = {**self.paging, **changes}
+        self._paging = state  # ty: ignore[invalid-assignment]
+        if self._widget is not None:
+            self._widget.paging = state
+        return self
+
+    def _pages(self, grid: Grid) -> dict[str, Any] | None:
+        """A paged wrap's page size and its panels' statistics (None: it does not page), its
+        panels placed on the first page."""
+        n = len(grid.panels)
+        self._stats = []
+        if grid.kind != "wrap" or self._rows == "all":
+            return None
+        if self._rows is None and n <= AUTO_PANELS:
+            return None
+        cols = max(1, min(self._cols or PAGE_COLS, n))
+        rows = max(1, min(self._rows if isinstance(self._rows, int) else PAGE_ROWS,
+                          -(-n // cols)))  # fmt: skip
+        per = rows * cols
+        grid.panels = [replace(p, row=(i % per) // cols, col=i % cols)
+                       for i, p in enumerate(grid.panels)]  # fmt: skip
+        grid.rows, grid.cols = rows, cols
+        self._stats = self._panel_stats(grid)
+        return {"rows": rows, "cols": cols, "stats": [s.spec() for s in self._stats]}
+
+    def _panel_stats(self, grid: Grid) -> list[Stat]:
+        """The built-in statistics, of the first layer drawing numbers from rows (its y, or
+        its x), and those given with ``panel_stats``, which replace any of the same name."""
+        n = len(grid.panels)
+        stats: list[Stat] = []
+        for layer in self._layers:
+            if layer.mark == "rule" or layer.facet == "exclude":
+                continue
+            table = self._table(layer)
+            panel_of = grid.assign(table)
+            if panel_of is None:
+                continue
+            numeric = [a for a in (layer.y, layer.x)
+                       if a is not None and table.column(a).kind == "number"]  # fmt: skip
+            if not numeric:
+                continue
+            name = numeric[0]
+            x = None
+            if name == layer.y and layer.x is not None and table.column(layer.x).kind != "category":
+                x = table.column(layer.x).values
+            stats = builtin_stats(n, panel_of, table.column(name).values, name, x)
+            break
+        if self._given_stats is not None:
+            where = grid.assign(self._given_stats)
+            assert where is not None  # it has the facet columns
+            given = given_stats(self._given_stats, where, n, grid.columns)
+            names = {s.name for s in given}
+            stats = [s for s in stats if s.name not in names] + given
+        return stats
+
     # ---- selecting ----------------------------------------------------------------------
 
     def select(self, x: Any = None, y: Any = None, *, color: Any = None,
@@ -1207,7 +1401,7 @@ class Trellis:
 
             spec, _ = self._scene()
             state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus,
-                     "selection": self._selection,
+                     "selection": self._selection, "paging": dict(self._paging),
                      "_live": self._link_group is not None}  # fmt: skip
             self._widget = TrellisWidget(self, state)
         return self._widget
@@ -1231,6 +1425,7 @@ class Trellis:
             "renderer": self.renderer,
             "focus": self.focused,
             "selection": self._current_selection(),
+            "paging": self.paging,
         }
         data = json.dumps(payload).replace("</", "<\\/")
         script = f"<script type='application/json'>{data}</script>"
@@ -1388,6 +1583,7 @@ class Trellis:
         grid = build_grid(tables, row=self._row, col=self._col, wrap=self._wrap,
                           cols=self._cols, orders=self._orders)  # fmt: skip
         npanels = len(grid.panels)
+        pages = self._pages(grid)
         given = self._given_orders(tables)
         # every layer as the plain layers it draws: a summary (hist, box, ...) as its parts
         drawn: list[_Drawn] = []
@@ -1533,6 +1729,7 @@ class Trellis:
             "panel_height": self.panel_height,
             "legend_position": self.legend,
             "fit_y": self.fit_y,
+            "pages": pages,
         }
         return spec, buffers
 

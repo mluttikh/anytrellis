@@ -135,6 +135,7 @@ jobs:
             node test/many.mjs "$pages/many.html" "$shots" "$r"
             node test/export.mjs "$pages/years.html" "$shots" "$r"
             node test/details.mjs "$pages" "$shots" "$r"
+            node test/paging.mjs "$pages/paged.html" "$shots" "$r"
             echo "::endgroup::"
           done
           node test/zoom.mjs "$pages/sensors.html" "$shots"

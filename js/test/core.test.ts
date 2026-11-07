@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
+import { pageCount, panelOrder } from "../src/core/pages";
 import { type Scene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { drawMarks } from "../src/core/renderers/canvas2d";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
-import type { MarkLayerSpec, PanelSpec, TrellisSpec } from "../src/core/types";
+import type { MarkLayerSpec, PanelSpec, PanelStat, Paging, TrellisSpec } from "../src/core/types";
 
 const DAY = 86_400_000;
 
@@ -542,5 +543,53 @@ describe("exported images", () => {
     expect(fileName("", null, "png")).toBe("anytrellis.png");
     expect(svgMessage("Copied", 2_500_000)).toContain("large");
     expect(svgMessage("Copied", 40_000)).toBe("Copied as SVG (40 kB)");
+  });
+});
+
+describe("pages", () => {
+  // the same cases as tests/test_pages.py's test_order_filters_then_sorts (Python's order)
+  const names = ["north a", "north b", "south a", "south b", "east"];
+  const stats: PanelStat[] = [
+    { name: "v", kind: "number", values: [3, 1, null, 1, 2], text: [] },
+    { name: "zone", kind: "text", values: ["cold", "cold", "warm", "", "warm"], text: [] },
+  ];
+  const cases: [Paging, number[]][] = [
+    [{}, [0, 1, 2, 3, 4]],
+    [{ name: "North" }, [0, 1]],
+    [{ name: "a north" }, [0]],
+    [{ sort: "v" }, [1, 3, 4, 0, 2]],
+    [{ sort: "v", descending: true }, [0, 4, 1, 3, 2]],
+    [{ sort: "zone" }, [0, 1, 2, 4, 3]],
+    [{ sort: "zone", descending: true }, [2, 4, 0, 1, 3]],
+    [{ where: { v: [1.5, null] } }, [0, 4]],
+    [{ where: { v: [null, 2] } }, [1, 3, 4]],
+    [{ where: { zone: "WAR" } }, [2, 4]],
+    [{ where: { zone: "", v: [null, null] } }, [0, 1, 2, 3, 4]],
+    [{ where: { nothing: [1, 2] } }, [0, 1, 2, 3, 4]],
+    [{ name: "south", sort: "v", descending: true }, [3, 2]],
+  ];
+  it.each(cases)("orders %j as Python does", (paging, expected) => {
+    expect(panelOrder(stats, names, paging)).toEqual(expected);
+  });
+
+  it("counts pages, at least one", () => {
+    expect([pageCount(0, 24), pageCount(24, 24), pageCount(25, 24)]).toEqual([1, 1, 2]);
+  });
+
+  it("lays out a page's panels in turn, on a page of the same size every time", () => {
+    const many = Array.from({ length: 10 }, (_, i) => panel(Math.floor((i % 6) / 3), i % 3));
+    const paged = { ...spec(many, 2, 3), pages: { rows: 2, cols: 3, stats: [] } };
+    const first = layout(paged, opts);
+    expect(first.panels.map((b) => b.index)).toEqual([0, 1, 2, 3, 4, 5]);
+    const last = layout(paged, { ...opts, page: [9, 6] });
+    expect(last.panels.map((b) => b.index)).toEqual([9, 6]);
+    expect(last.panels[0].rect).toEqual(first.panels[0].rect);
+    expect(last.panels[1].rect).toEqual(first.panels[1].rect);
+    expect(last.height).toBe(first.height); // the page does not shrink
+    expect(last.panels.map((b) => b.showX)).toEqual([true, true]); // nothing under them
+    expect(last.spare).toBeNull(); // the legend goes under every page alike
+    const none = layout(paged, { ...opts, page: [] });
+    expect(none.panels).toEqual([]);
+    expect(none.height).toBe(first.height);
   });
 });

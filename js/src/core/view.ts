@@ -33,6 +33,8 @@ import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readT
 import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fileName, NO_DOWNLOADS, PNG_SCALE, pageMeasure, paintHtml, SvgContext, svgMessage } from "./export";
 import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
+import { Pager } from "./pager";
+import { pageCount, panelOrder } from "./pages";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
 import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
@@ -40,7 +42,7 @@ import { type Brush, type Highlight, type Selection, filled, highlighted, select
 export type { Highlight } from "./selection";
 import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { formatValue } from "./ticks";
-import type { DataSource, LegendSpec, RendererPreference, TrellisSpec } from "./types";
+import type { DataSource, LegendSpec, Paging, RendererPreference, TrellisSpec } from "./types";
 
 /** Versions of the selected marks' sets: never used twice, as the renderers keep a set's
  * buffers by key and version (a selection cleared and made again under the same key must
@@ -66,6 +68,8 @@ export interface ViewOptions {
   /** What the plot shows, a moment after it changes: its width and each scale group's
    * range (Python draws the same view in its images). */
   onView?: (view: ShownView) => void;
+  /** The reader turned a page, sorted or filtered a paged wrap's panels. */
+  onPaging?: (paging: Paging) => void;
 }
 
 export interface ShownView {
@@ -76,6 +80,8 @@ export interface ShownView {
 
 /** How long the view stays put before it is reported. */
 const VIEW_REPORT_MS = 250;
+/** How long the paging stays put before Python hears of it (typing a filter). */
+const PAGING_REPORT_MS = 200;
 
 type ExportHow = "copy" | "copy-svg" | "png" | "svg" | "save-png" | "save-svg";
 
@@ -192,6 +198,13 @@ export class TrellisView {
   /** A panel to open once the spec is in (the name Python asked for). */
   private pendingFocus: string | null = null;
   private gridHeight = 0;
+  private readonly pager: Pager;
+  /** A paged wrap's page, sort and filters, and the panels they show, in order (null: it
+   * does not page). */
+  private paging: Paging = {};
+  private order: number[] | null = null;
+  private pagingTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly empty: HTMLDivElement;
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private viewTimer: ReturnType<typeof setTimeout> | undefined;
   /** The view last reported (as JSON), so an unchanged one is not sent again. */
@@ -231,6 +244,8 @@ export class TrellisView {
     this.exportMenu.hidden = true;
     this.toolbar.append(this.backButton, this.selectButton, this.boxButton, this.fitButton, this.resetButton, this.exportButton, this.fullButton);
     this.header.append(this.heading, this.toolbar);
+    this.pager = new Pager((paging) => this.setPaging(paging, true));
+    this.pager.el.hidden = true;
     this.legend = el("div", "atr-legend");
     this.stage = el("div", "atr-stage");
     this.back = el("canvas", "atr-canvas");
@@ -240,8 +255,10 @@ export class TrellisView {
     this.notice = el("div", "atr-notice");
     this.notice.hidden = true;
     this.badge = el("div", "atr-badge");
-    this.stage.append(this.back, this.front, this.tip, this.status, this.notice);
-    this.root.append(this.header, this.stage, this.legend, this.badge, this.exportMenu);
+    this.empty = el("div", "atr-empty", "No panel matches the filters");
+    this.empty.hidden = true;
+    this.stage.append(this.back, this.front, this.tip, this.status, this.notice, this.empty);
+    this.root.append(this.header, this.pager.el, this.stage, this.legend, this.badge, this.exportMenu);
     host.append(this.root);
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
@@ -314,6 +331,7 @@ export class TrellisView {
     // the opened panel stays open when the new spec still has it
     this.pendingFocus = null;
     this.focused = this.indexOf(openName);
+    this.computeOrder();
     this.renderLegend(spec.legends);
     this.setStatus(null);
     this.updateHeader();
@@ -328,6 +346,70 @@ export class TrellisView {
     }
     const index = this.indexOf(name);
     if (index !== this.focused) this.setFocus(index, false);
+  }
+
+  // ---- pages ------------------------------------------------------------------------------
+
+  /** Show a page, sort and filters (Python: show_page, sort_panels, filter_panels; or the
+   * reader, `user`: tell Python). */
+  setPaging(paging: Paging | null, user = false): void {
+    this.paging = { ...(paging ?? {}) };
+    if (!this.spec) return;
+    this.computeOrder();
+    if (user) this.reportPaging();
+    this.clearHover();
+    this.updateHeader();
+    this.relayout();
+  }
+
+  /** Tell Python the paging, once it has stayed put a moment (typing a filter). */
+  private reportPaging(): void {
+    clearTimeout(this.pagingTimer);
+    const sent = { ...this.paging };
+    this.pagingTimer = setTimeout(() => !this.destroyed && this.opts.onPaging?.(sent), PAGING_REPORT_MS);
+  }
+
+  /** The panels the filters keep, sorted; the page within their pages. */
+  private computeOrder(): void {
+    const spec = this.spec;
+    const pages = spec?.pages;
+    if (!spec || !pages) {
+      this.order = null;
+      return;
+    }
+    const names = spec.panels.map((_, i) => panelName(spec, i));
+    this.order = panelOrder(pages.stats, names, this.paging);
+    const last = pageCount(this.order.length, pages.rows * pages.cols) - 1;
+    this.paging.page = Math.max(0, Math.min(this.paging.page ?? 0, last));
+  }
+
+  /** The panels on the page shown (null: it does not page). */
+  private pagePanels(): number[] | null {
+    const pages = this.spec?.pages;
+    if (!pages || !this.order) return null;
+    const per = pages.rows * pages.cols;
+    const start = (this.paging.page ?? 0) * per;
+    return this.order.slice(start, start + per);
+  }
+
+  /** The previous or next page (Page Up, Page Down). */
+  private turnPage(step: number): void {
+    const pages = this.spec?.pages;
+    if (!pages || !this.order) return;
+    const count = pageCount(this.order.length, pages.rows * pages.cols);
+    const next = (this.paging.page ?? 0) + step;
+    if (next < 0 || next >= count) {
+      this.notify(next < 0 ? "This is the first page" : "This is the last page");
+      return;
+    }
+    this.setPaging({ ...this.paging, page: next }, true);
+  }
+
+  /** A paged wrap's strips: each panel's value of the statistic sorted by, at the right. */
+  private noteSorted(lay: Layout): void {
+    const stat = this.spec?.pages?.stats.find((s) => s.name === this.paging.sort);
+    if (!stat) return;
+    for (const box of lay.panels) box.note = stat.text[box.index] || undefined;
   }
 
   private indexOf(name: string | null): number | null {
@@ -655,7 +737,18 @@ export class TrellisView {
     if (!this.spec || this.spec.panels.length < 2) return;
     if (index !== null && !this.spec.panels[index]) return;
     if (index === this.focused) return;
+    const was = this.focused;
     this.focused = index;
+    // back to a paged wrap: the page that has the panel that was open
+    const at = index === null && was !== null && this.order ? this.order.indexOf(was) : -1;
+    const pages = this.spec.pages;
+    if (at >= 0 && pages) {
+      const page = Math.floor(at / (pages.rows * pages.cols));
+      if (page !== (this.paging.page ?? 0)) {
+        this.paging = { ...this.paging, page };
+        this.reportPaging();
+      }
+    }
     this.drag = null;
     this.clearHover();
     this.updateHeader();
@@ -667,17 +760,25 @@ export class TrellisView {
     }
   }
 
+  /** The panels an opened one steps through: a paged wrap's, as sorted and filtered (when
+   * they hold the opened one); all of them otherwise. */
+  private sequence(): number[] {
+    if (this.order && this.focused !== null && this.order.includes(this.focused)) return this.order;
+    return this.spec ? this.spec.panels.map((_, i) => i) : [];
+  }
+
   /** The previous or next panel, opened at the same zoom (Page Up, Page Down, ‹ ›). */
   private stepPanel(step: number): void {
     if (!this.spec || this.focused === null) return;
-    const n = this.spec.panels.length;
-    const next = this.focused + step;
-    if (next < 0 || next >= n) {
+    const seq = this.sequence();
+    const at = seq.indexOf(this.focused);
+    const next = at + step;
+    if (next < 0 || next >= seq.length) {
       this.notify(`${panelName(this.spec, this.focused)} is the ${next < 0 ? "first" : "last"} panel`);
       return;
     }
-    this.setFocus(next, true);
-    this.notify(`${panelName(this.spec, next)} · ${next + 1} of ${n}`);
+    this.setFocus(seq[next], true);
+    this.notify(`${panelName(this.spec, seq[next])} · ${next + 1} of ${seq.length}`);
   }
 
   private isFullscreen(): boolean {
@@ -716,6 +817,13 @@ export class TrellisView {
     if (spec?.title) this.heading.append(el("span", "atr-title", spec.title));
     const open = spec !== null && this.focused !== null;
     this.backButton.hidden = !open;
+    const paged = !open && !!spec?.pages && this.order !== null;
+    this.pager.el.hidden = !paged;
+    if (paged) {
+      const pages = spec!.pages!;
+      const count = pageCount(this.order!.length, pages.rows * pages.cols);
+      this.pager.update(pages, this.paging, this.order!.length, spec!.panels.length, count);
+    } else this.pager.toggleMenu(false);
     this.root.classList.toggle("atr-open", open);
     if (!spec || this.focused === null) return;
     const crumb = el("span", "atr-crumb");
@@ -725,8 +833,9 @@ export class TrellisView {
     all.addEventListener("click", () => this.setFocus(null, true));
     const prev = button(ICONS.prev, "Previous panel (Page Up)", () => this.stepPanel(-1));
     const next = button(ICONS.next, "Next panel (Page Down)", () => this.stepPanel(1));
-    prev.disabled = this.focused === 0;
-    next.disabled = this.focused === spec.panels.length - 1;
+    const seq = this.sequence();
+    prev.disabled = seq[0] === this.focused;
+    next.disabled = seq[seq.length - 1] === this.focused;
     crumb.append(all, el("span", "atr-sep", "›"), prev, el("span", "atr-panel-name", panelName(spec, this.focused)), next);
     this.heading.append(crumb);
   }
@@ -752,14 +861,18 @@ export class TrellisView {
       height = Math.max(200, this.root.clientHeight - pad - this.header.offsetHeight - 4);
     }
     if (this.focused === null) {
-      this.lay = computeLayout(this.spec, { ...base, height });
+      const page = this.pagePanels();
+      this.lay = computeLayout(this.spec, { ...base, height, page });
       const spare = this.spec.legend_position === "bottom" ? null : this.lay.spare;
       if (!this.placeLegend(spare) && height !== null) {
         // under the plot after all: full screen leaves it room
-        this.lay = computeLayout(this.spec, { ...base, height: height - this.legend.offsetHeight });
+        this.lay = computeLayout(this.spec, { ...base, height: height - this.legend.offsetHeight, page });
       }
       this.gridHeight = this.lay.height;
+      this.noteSorted(this.lay);
+      this.empty.hidden = page === null || page.length > 0;
     } else {
+      this.empty.hidden = true;
       this.placeLegend(null);
       if (height !== null) height -= this.legend.offsetHeight;
       if (height === null) this.gridHeight = computeLayout(this.spec, base).height;
@@ -899,14 +1012,14 @@ export class TrellisView {
     const signal = this.abort.signal;
     // entering or leaving full screen (the button, f, Esc or the browser's own controls)
     document.addEventListener("fullscreenchange", () => this.fullscreenChanged(), { signal });
-    // a click outside the Export menu closes it (its path, not its target: in a shadow root,
+    // a click outside the Export menu (or the filters) closes it (its path, not its target: in a shadow root,
     // marimo's, the document sees the target as the shadow's host)
     document.addEventListener(
       "pointerdown",
       (e) => {
-        if (this.exportMenu.hidden) return;
         const path = e.composedPath();
-        if (!path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
+        if (!this.exportMenu.hidden && !path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
+        if (this.pager.menuOpen && !path.includes(this.pager.el)) this.pager.toggleMenu(false);
       },
       { signal, capture: true },
     );
@@ -1086,6 +1199,16 @@ export class TrellisView {
         }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         if ((e.key === "Enter" || e.key === " ") && (e.target as HTMLElement).closest("button")) return;
+        // typing in the pager's fields: Escape closes the filters, other keys are the field's
+        if ((e.target as HTMLElement).closest("input, select, textarea")) {
+          if (e.key === "Escape" && this.pager.menuOpen) {
+            this.pager.toggleMenu(false);
+            this.root.focus();
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          return;
+        }
         if (this.key(e.key)) {
           e.preventDefault();
           e.stopPropagation();
@@ -1135,6 +1258,10 @@ export class TrellisView {
           this.toggleExport(false);
           return true;
         }
+        if (this.pager.menuOpen) {
+          this.pager.toggleMenu(false);
+          return true;
+        }
         if (this.brush) {
           this.setBrush(null, true);
           return true;
@@ -1152,7 +1279,11 @@ export class TrellisView {
         return true;
       case "PageUp":
       case "PageDown":
-        if (this.focused === null) return false;
+        if (this.focused === null) {
+          if (!this.order) return false;
+          this.turnPage(key === "PageDown" ? 1 : -1);
+          return true;
+        }
         this.stepPanel(key === "PageDown" ? 1 : -1);
         return true;
       default:
@@ -1495,6 +1626,7 @@ export class TrellisView {
     this.abort.abort();
     clearTimeout(this.noticeTimer);
     clearTimeout(this.viewTimer);
+    clearTimeout(this.pagingTimer);
     if (this.isFullscreen()) document.exitFullscreen().catch(() => {});
     this.resizeObserver.disconnect();
     this.themeObserver.disconnect();
