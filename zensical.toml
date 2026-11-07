@@ -1,0 +1,146 @@
+# User documentation (https://zensical.org). Build with: uv run python scripts/build_docs.py
+# The pages are in docs/user/, organized as tutorials, how-to guides, reference and
+# explanation (https://diataxis.fr/). Examples run while building, and their plots are live.
+
+[project]
+site_name = "anytrellis"
+site_description = "Trellis, facet and small-multiple plots for notebooks, drawn on the GPU."
+site_url = "https://mluttikh.github.io/anytrellis/"
+repo_url = "https://github.com/mluttikh/anytrellis"
+repo_name = "mluttikh/anytrellis"
+edit_uri = "edit/main/docs/user/"
+copyright = "Copyright &copy; 2026 mluttikh · MIT licence"
+docs_dir = "docs/user"
+site_dir = "site"
+# links to page.html, not page/: the built site also works opened from disk (file://), e.g.
+# the "docs" artifact of a CI run
+use_directory_urls = false
+extra_css = ["assets/anytrellis/widget.css", "stylesheets/extra.css"]
+extra_javascript = ["assets/anytrellis/standalone.js"]
+nav = [
+  { "Home" = "index.md" },
+  { "Gallery" = "gallery.md" },
+  { "At a glance" = "glance.md" },
+  { "Tutorials" = [
+    "tutorials/index.md",
+    { "Your first trellis plot" = "tutorials/first-plot.md" },
+    { "Facets and scales" = "tutorials/facets-and-scales.md" },
+    { "Select data and use it in Python" = "tutorials/select.md" },
+  ] },
+  { "How-to guides" = [
+    "how-to/index.md",
+    { "Install anytrellis" = "how-to/install.md" },
+    { "Plot your own tables" = "how-to/tables.md" },
+    { "Choose a facet layout" = "how-to/layout.md" },
+    { "Share or free the scales" = "how-to/scales.md" },
+    { "Use a log scale" = "how-to/log.md" },
+    { "Draw lines, points and bars" = "how-to/marks.md" },
+    { "Draw areas, bands, rects and text" = "how-to/more-marks.md" },
+    { "Show distributions" = "how-to/distributions.md" },
+    { "Fit a smooth line" = "how-to/smooth.md" },
+    { "Colours, legends and order" = "how-to/colours.md" },
+    { "Link plots" = "how-to/link.md" },
+    { "Plot large data" = "how-to/large.md" },
+    { "Share a plot" = "how-to/share.md" },
+    { "Use anytrellis in marimo" = "how-to/marimo.md" },
+    { "Coming from ggplot2 or seaborn" = "how-to/from-ggplot2-seaborn.md" },
+    { "Coming from Altair or lattice" = "how-to/from-altair-lattice.md" },
+    { "Fix a plot that doesn't show" = "how-to/troubleshooting.md" },
+  ] },
+  { "Reference" = [
+    "reference/index.md",
+    { "Trellis" = "reference/trellis.md" },
+    { "link and Link" = "reference/link.md" },
+    { "anytrellis.datasets" = "reference/datasets.md" },
+    { "anytrellis.synthetic" = "reference/synthetic.md" },
+    { "Mouse and keys" = "reference/mouse-and-keys.md" },
+    { "Changelog" = "reference/changelog.md" },
+    { "Upgrading" = "reference/upgrading.md" },
+  ] },
+  { "Explanation" = [
+    "explanation/index.md",
+    { "Why small multiples" = "explanation/small-multiples.md" },
+    { "How scales are shared" = "explanation/scales.md" },
+    { "How selection works" = "explanation/selection.md" },
+    { "How the plot is drawn" = "explanation/drawing.md" },
+    { "Compared with other libraries" = "explanation/compared.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+# no navigation.instant: it swaps pages without loading them, and the plots of a page are
+# started by standalone.js when the page loads
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.tabs",
+  "navigation.top",
+  "search.highlight",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.tables]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.highlight]
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.snippets]
+base_path = ["."]
+check_paths = true
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.superfences]
+# ```python exec="on" blocks run while building (markdown-exec): examples are real code
+[[project.markdown_extensions.pymdownx.superfences.custom_fences]]
+name = "python"
+class = "python"
+validator = "markdown_exec.validator"
+format = "markdown_exec.formatter"
+
+# search also when the site is opened from disk (file://)
+[project.plugins.offline]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+docstring_section_style = "list"
+filters = "public"
+heading_level = 2
+merge_init_into_class = true
+members_order = "source"
+separate_signature = true
+show_root_heading = true
+show_root_full_path = false
+show_signature_annotations = true
+show_source = false
+show_symbol_type_heading = true
+signature_crossrefs = true

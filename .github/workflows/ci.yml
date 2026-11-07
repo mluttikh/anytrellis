@@ -1,6 +1,7 @@
-# Lint, test (Python on Linux, macOS and Windows; TypeScript; the plots in a browser), and
-# build the sdist and wheel, checked and uploaded as the "dist" artifact. The release
-# workflow runs this first and publishes that artifact.
+# Lint, test (Python on Linux, macOS and Windows; TypeScript; the plots in a browser), build
+# the documentation (the "github-pages" artifact), and build the sdist and wheel, checked
+# and uploaded as the "dist" artifact. The release workflow runs this first and publishes
+# both.
 name: CI
 
 on:
@@ -119,7 +120,7 @@ jobs:
       - run: uv sync
       - name: Write the test pages
         run: uv run python js/test/pages.py "$RUNNER_TEMP/pages"
-      - name: Select, legend and zoom, in each renderer
+      - name: Select, legend, zoom and a page of many plots, in each renderer
         working-directory: js
         run: |
           pages="$RUNNER_TEMP/pages"
@@ -131,6 +132,7 @@ jobs:
             node test/select.mjs "$pages/gap-link.html" "$shots" "$r"
             node test/legend.mjs "$pages/years.html" "$shots" "$r"
             node test/legend.mjs "$pages/density.html" "$shots" "$r"
+            node test/many.mjs "$pages/many.html" "$shots" "$r"
             echo "::endgroup::"
           done
           node test/zoom.mjs "$pages/sensors.html" "$shots"
@@ -142,6 +144,9 @@ jobs:
           name: browser-screenshots
           path: ${{ runner.temp }}/shots
           if-no-files-found: ignore
+
+  docs:
+    uses: ./.github/workflows/docs-build.yml
 
   build:
     name: Build and check the sdist and wheel

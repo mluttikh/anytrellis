@@ -1,17 +1,17 @@
 """Small, well-known datasets for the examples: ``load("barley")``.
 
-=================  =====  ==============================================================
-name               rows   columns
-=================  =====  ==============================================================
-anscombe           44     dataset, x, y (Anscombe's quartet)
-barley             120    site, variety, year, yield (Immer et al. 1934; Cleveland 1993)
-cars               406    name, mpg, cylinders, displacement, horsepower, weight,
-                          acceleration, year, origin (the classic auto-mpg data)
-gapminder          693    country, region, year, pop, life_expect, fertility (1955-2005)
-penguins           344    species, island, bill_length_mm, bill_depth_mm,
-                          flipper_length_mm, body_mass_g, sex (Palmer penguins)
-seattle_weather    1461   date, precipitation, temp_max, temp_min, wind, weather
-=================  =====  ==============================================================
+name | rows | columns
+--- | --- | ---
+anscombe | 44 | dataset, x, y
+barley | 120 | site, variety, year, yield
+cars | 406 | name, mpg, cylinders, displacement, horsepower, weight, acceleration, year, origin
+gapminder | 693 | country, region, year, pop, life_expect, fertility
+penguins | 344 | species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex
+seattle_weather | 1461 | date, precipitation, temp_max, temp_min, wind, weather
+
+``anscombe`` is Anscombe's quartet; ``barley`` is Immer et al. (1934), made famous by
+Cleveland (1993); ``cars`` is the classic auto-mpg data; ``gapminder`` runs from 1955 to
+2005; ``penguins`` are the Palmer penguins.
 
 ``cars`` is the UCI Machine Learning Repository's Auto MPG (CC BY 4.0); the others are
 taken from vega-datasets 2.8.0, with snake_case column names and readable categories

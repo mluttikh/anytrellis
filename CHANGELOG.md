@@ -6,6 +6,23 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Documentation at [mluttikh.github.io/anytrellis](https://mluttikh.github.io/anytrellis/):
+  tutorials, how-to guides, a gallery, the API reference and explanations, with live plots.
+
+### Changed
+
+- A page of many plots (`standalone.js`) starts each plot as it scrolls near, so a long
+  page stays within the browser's limit of GPU contexts.
+
+### Fixed
+
+- Box plots failed in WebAssembly (marimo's in-browser notebooks, Pyodide), where indices
+  are 32-bit.
+- A plot now redraws when the page switches between light and dark by
+  `data-md-color-scheme` (Material and Zensical sites).
+
 ## [0.1.0] - 2026-11-07
 
 The first release.
