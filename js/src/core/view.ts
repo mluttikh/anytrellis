@@ -63,7 +63,19 @@ export interface ViewOptions {
   /** Save an exported image where Python runs (a notebook's folder); resolves with its
    * path. Absent (a saved page): the Export menu only copies and downloads. */
   onSaveFile?: (name: string, data: Blob) => Promise<string>;
+  /** What the plot shows, a moment after it changes: its width and each scale group's
+   * range (Python draws the same view in its images). */
+  onView?: (view: ShownView) => void;
 }
+
+export interface ShownView {
+  width: number;
+  x: [number, [number, number]][];
+  y: [number, [number, number]][];
+}
+
+/** How long the view stays put before it is reported. */
+const VIEW_REPORT_MS = 250;
 
 type ExportHow = "copy" | "copy-svg" | "png" | "svg" | "save-png" | "save-svg";
 
@@ -181,6 +193,9 @@ export class TrellisView {
   private pendingFocus: string | null = null;
   private gridHeight = 0;
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  private viewTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The view last reported (as JSON), so an unchanged one is not sent again. */
+  private reportedView = "";
   private readonly resizeObserver: ResizeObserver;
   private readonly themeObserver: MutationObserver;
   private readonly abort = new AbortController();
@@ -277,6 +292,7 @@ export class TrellisView {
   async setSpec(spec: TrellisSpec): Promise<void> {
     const version = ++this.specVersion;
     if (!spec || !spec.panels) return;
+    this.reportedView = ""; // a new spec: report the view again
     await Promise.all([this.opts.source.ensure(bufferIds(spec)), this.rendererReady]);
     if (version !== this.specVersion || this.destroyed) return;
     const old = this.spec;
@@ -802,6 +818,22 @@ export class TrellisView {
     this.front_.texts = this.scene.texts;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.theme, this.front_);
+    this.reportView();
+  }
+
+  /** Tell Python what the plot shows, once it has stayed put a moment. */
+  private reportView(): void {
+    if (!this.opts.onView || !this.spec) return;
+    const ranges = (views: Map<number, Range>): [number, Range][] => [...views].map(([g, r]) => [g, [r[0], r[1]]]);
+    const view: ShownView = { width: this.width, x: ranges(this.xView), y: ranges(this.yView) };
+    const json = JSON.stringify(view);
+    if (json === this.reportedView) return;
+    clearTimeout(this.viewTimer);
+    this.viewTimer = setTimeout(() => {
+      if (this.destroyed) return;
+      this.reportedView = json;
+      this.opts.onView?.(view);
+    }, VIEW_REPORT_MS);
   }
 
   /** The marks of every layer in `views`, for a renderer: faded under a selection, the
@@ -1459,6 +1491,7 @@ export class TrellisView {
     this.destroyed = true;
     this.abort.abort();
     clearTimeout(this.noticeTimer);
+    clearTimeout(this.viewTimer);
     if (this.isFullscreen()) document.exitFullscreen().catch(() => {});
     this.resizeObserver.disconnect();
     this.themeObserver.disconnect();

@@ -13,6 +13,10 @@ All notable changes to anytrellis. The format follows
   notebook, save either next to the notebook without overwriting. The image is the plot as
   shown (zoom, selection, opened panel, theme), without the toolbar. It works in pages
   saved with `save_html` too.
+- `Trellis.save_png` and `Trellis.save_svg`: the same image drawn in Python, without a
+  browser (scripts, reports, CI): the zoom last shown in the notebook, the selection, a
+  linked plot's highlight and an opened panel, in the light or dark theme, at any size.
+  PNGs need the new `png` extra (`pip install "anytrellis[png]"`, with resvg-py).
 - Documentation at [mluttikh.github.io/anytrellis](https://mluttikh.github.io/anytrellis/):
   tutorials, how-to guides, a gallery, the API reference and explanations, with live plots.
 

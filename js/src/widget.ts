@@ -145,6 +145,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       const msg = await ask(model, s, { type: "save", name }, [await data.arrayBuffer()]);
       return String(msg.path);
     },
+    // what it shows: Trellis.save_png and save_svg draw the same view
+    onView: (shown) => model.send({ type: "view", ...shown }),
   });
   s.views.add(view);
   view.setHighlight(s.highlight);

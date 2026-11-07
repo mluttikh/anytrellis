@@ -165,6 +165,8 @@ class Trellis:
         self.renderer = renderer
         self._widget: TrellisWidget | None = None
         self._focus: str | None = None
+        self._view: dict[str, Any] | None = None
+        """What the browser last showed: its width and each scale group's range (images)."""
         self._link_group: Link | None = None
         self._highlight: Masks | None = None
         """The rows another plot of the link selects (``anytrellis.link``), or None."""
@@ -1074,6 +1076,52 @@ class Trellis:
         """Write ``to_html`` to a file; returns its path."""
         out = Path(path)
         out.write_text(self.to_html(title=title), encoding="utf-8")
+        return out
+
+    def save_svg(self, path: str | Path, *, width: float | None = None,
+                 height: float | None = None, theme: str = "light") -> Path:  # fmt: skip
+        """Write the plot as an SVG image, drawn in Python (no browser needed: a script, a
+        CI job); returns its path. It is the plot as shown: the zoom it was last shown with,
+        the selection and an opened panel, every mark, axis and label a vector element.
+
+        ```python
+        t.save_svg("temperatures.svg")
+        t.save_svg("slide.svg", width=1200, height=600, theme="dark")
+        ```
+
+        Args:
+            path: The file to write.
+            width: The image's width in CSS pixels (default: the width the plot was last
+                shown at, else 800).
+            height: The image's height in CSS pixels (default: as the plot lays out).
+            theme: ``"light"`` or ``"dark"``.
+        """
+        from anytrellis.figure import figure_svg
+
+        out = Path(path)
+        out.write_text(figure_svg(self, width=width, height=height, theme=theme),
+                       encoding="utf-8")  # fmt: skip
+        return out
+
+    def save_png(self, path: str | Path, *, width: float | None = None,
+                 height: float | None = None, theme: str = "light",
+                 scale: float = 2.0) -> Path:  # fmt: skip
+        """Write the plot as a PNG image, drawn in Python as ``save_svg`` draws it, with
+        ``scale`` pixels per CSS pixel (2: sharp on slides and high-density screens);
+        returns its path. Needs ``resvg-py``: ``pip install "anytrellis[png]"``.
+
+        ```python
+        t.save_png("temperatures.png")
+        t.save_png("thumbnail.png", width=400, scale=1)
+        ```
+        """
+        from anytrellis.figure import THEMES, figure_svg, svg_to_png
+
+        if not scale > 0:
+            raise ValueError(f"scale must be above 0, got {scale}")
+        svg = figure_svg(self, width=width, height=height, theme=theme)
+        out = Path(path)
+        out.write_bytes(svg_to_png(svg, scale, THEMES[theme]["bg"]))
         return out
 
     def __repr__(self) -> str:

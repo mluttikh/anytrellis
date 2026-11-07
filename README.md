@@ -13,6 +13,7 @@ tutorials, guides, a gallery and the API reference, with live plots.
 ```bash
 pip install anytrellis
 pip install "anytrellis[examples]"   # with Polars, for the example notebooks and datasets
+pip install "anytrellis[png]"        # with resvg-py, for save_png
 ```
 
 Status: early development (0.1). One panel per level of the facet columns, every panel
@@ -178,7 +179,9 @@ showed. From Python: `t.open("station 3")` (a grid's panel: `t.open("north", "s1
 selection and theme, to the clipboard as a PNG (or as an SVG with a PNG beside it, where
 the browser allows), downloads it as a PNG (at twice the screen's size) or an SVG, or, in
 a notebook, saves either next to the notebook. The toolbar and what the pointer points at
-are left out.
+are left out. From Python, without a browser (a script, a CI job), `t.save_png("plot.png")`
+and `t.save_svg("plot.svg")` draw the same: the zoom last shown, the selection and an
+opened panel (`width=`, `height=`, `theme="dark"`; PNGs need the `png` extra).
 
 **Full screen.** The toolbar's button or `f` shows the plot on the whole screen (`f` or Esc
 leaves). Browsers allow it only from a click or a key, so not from Python; where a page

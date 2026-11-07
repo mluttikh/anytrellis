@@ -21,6 +21,32 @@ out. A PNG is twice the plot's size on screen, so it stays sharp on slides.
 An SVG keeps every mark as a vector element, so a plot of many thousands of marks makes a
 large file that slides draw slowly; the plot says how large it is. Use a PNG for those.
 
+### From Python: scripts and reports
+
+`save_png` and `save_svg` write the image from Python, with no browser: in a script, a
+scheduled report or a CI job.
+
+```python
+plot.save_png("fuel-use.png")                     # twice the plot's size, as the button
+plot.save_svg("fuel-use.svg")
+plot.save_png("slide.png", width=1200, height=600, theme="dark")
+plot.save_png("thumbnail.png", width=400, scale=1)
+```
+
+It is the plot as shown in the notebook: the zoom you last looked at, the selection, a
+linked plot's highlight and an opened panel (`open()`). A plot that was never shown is
+drawn whole, 800 pixels wide; `width` and `height` set the size, in the same pixels as on
+screen, and `scale` the PNG's pixels per one of them.
+
+PNGs need `resvg-py`, which draws the SVG:
+
+```bash
+pip install "anytrellis[png]"
+```
+
+Python draws the text in a common sans-serif font, so the labels can look slightly
+different from the browser's. The Export menu's images are the browser's own.
+
 ## A page that stays interactive
 
 `save_html` writes the plot into one HTML file, with its data and the code that draws it.
