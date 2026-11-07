@@ -3,7 +3,7 @@
 import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
-import type { RendererPreference, TrellisSpec } from "./core/types";
+import type { Paging, RendererPreference, TrellisSpec } from "./core/types";
 import { type Highlight, TrellisView } from "./core/view";
 
 interface AnyModel {
@@ -147,6 +147,10 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     },
     // what it shows: Trellis.save_png and save_svg draw the same view
     onView: (shown) => model.send({ type: "view", ...shown }),
+    onPaging: (paging) => {
+      model.set("paging", paging);
+      model.save_changes();
+    },
   });
   s.views.add(view);
   view.setHighlight(s.highlight);
@@ -162,17 +166,22 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   const onFocus = (): void => view.setFocusName((model.get("open_panel") as string | null) ?? null);
   // Trellis.select in Python (or another view)
   const onSelection = (): void => view.setSelection((model.get("selection") as Brush | null) ?? null);
+  // Trellis.show_page, sort_panels, filter_panels in Python (or another view)
+  const onPaging = (): void => view.setPaging((model.get("paging") as Paging | null) ?? null);
   model.on("change:_spec", load);
   model.on("change:open_panel", onFocus);
   model.on("change:selection", onSelection);
+  model.on("change:paging", onPaging);
   onFocus();
   onSelection();
+  onPaging();
   load();
   model.send({ type: "ready" }); // what a link highlights here
   return () => {
     model.off("change:_spec", load);
     model.off("change:open_panel", onFocus);
     model.off("change:selection", onSelection);
+    model.off("change:paging", onPaging);
     s.views.delete(view);
     view.destroy();
   };

@@ -17,6 +17,14 @@ All notable changes to anytrellis. The format follows
   browser (scripts, reports, CI): the zoom last shown in the notebook, the selection, a
   linked plot's highlight and an opened panel, in the light or dark theme, at any size.
   PNGs need the new `png` extra (`pip install "anytrellis[png]"`, with resvg-py).
+- Pages of panels: a wrap of more than 100 panels shows them a page at a time (6 by 4;
+  `Trellis(rows=, cols=)` sets the page, `rows="all"` turns paging off), with a bar to turn
+  the pages (also Page Up and Page Down), sort the panels by a statistic of each and filter
+  them by name and by statistics' ranges. The statistics are computed in Python: rows, and
+  the mean, median, min, max, sd and trend of the values drawn, plus any columns given with
+  `panel_stats()`. From Python: `sort_panels()`, `filter_panels()`, `show_page()`,
+  `shown_panels()`, `stats()`, `page`, `pages` and `paging`. An opened panel steps through
+  the panels as sorted and filtered; images and saved pages show the page shown.
 - `violin()`: each group's values as a violin (a kernel density mirrored around its
   position), with its median and quartiles, or its values as points (`inner=`). Scaled to
   the same area, by count or to the same width (`scale=`); side by side with a colour,

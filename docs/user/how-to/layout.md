@@ -20,6 +20,9 @@ print(plot._embed_html())  # markdown-exec: hide
 `cols=` sets how many panels go in a row; without it, a wrap has about the square root
 of the number of panels. When the last row is not full, the legend goes in its empty cells if it fits there.
 
+A wrap of more than 100 panels shows them a page at a time; `rows=` sets a page's rows
+(see [Page through many panels](pages.md)).
+
 ## A grid: `row=` and `col=`
 
 ```python exec="on" source="above" session="layout" html="true"

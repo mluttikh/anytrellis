@@ -40,6 +40,8 @@ from typing import TYPE_CHECKING, Any
 import anywidget
 import traitlets
 
+from anytrellis.pages import Paging
+
 if TYPE_CHECKING:
     from anytrellis.plot import Trellis
 
@@ -60,6 +62,9 @@ class TrellisWidget(anywidget.AnyWidget):
     open_panel = traitlets.Unicode(None, allow_none=True).tag(sync=True)
     #: The selection's brush (``Trellis.select``, or one drawn in the browser), or None.
     selection = traitlets.Dict(None, allow_none=True).tag(sync=True)
+    #: The page, sort and filters of a paged wrap (``Trellis.show_page``, ``sort_panels``,
+    #: ``filter_panels``, or the reader in the browser).
+    paging = traitlets.Dict({}).tag(sync=True)
     #: Send the brush while it is dragged, not only on release (a linked plot).
     _live = traitlets.Bool(False).tag(sync=True)
 
@@ -69,10 +74,14 @@ class TrellisWidget(anywidget.AnyWidget):
         self.on_msg(self._on_msg)
         self.observe(self._on_focus, names="open_panel")
         self.observe(self._on_selection, names="selection")
+        self.observe(self._on_paging, names="paging")
 
     def _on_selection(self, change: dict[str, Any]) -> None:
         self._plot._selection = change["new"]  # drawn in the browser: save_html keeps it
         self._plot._selection_changed()
+
+    def _on_paging(self, change: dict[str, Any]) -> None:
+        self._plot._paging = Paging(**change["new"])  # turned in the browser: save_html keeps it
 
     def _on_focus(self, change: dict[str, Any]) -> None:
         self._plot._focus = change["new"]  # opened in the browser: save_html keeps it

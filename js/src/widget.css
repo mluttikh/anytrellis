@@ -435,3 +435,136 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   color: var(--atr-muted);
   font-size: 0.92em;
 }
+
+/* a paged wrap's bar: the pages, the sort and the filters */
+.atr-pager {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 2px 8px 4px;
+  color: var(--atr-text);
+}
+.atr-pager[hidden] {
+  display: none;
+}
+.atr-pager-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.atr-page {
+  min-width: 7.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.atr-count,
+.atr-muted {
+  color: var(--atr-muted);
+}
+.atr-count {
+  min-width: 8.5em;
+  padding-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.atr-root .atr-select,
+.atr-root .atr-search,
+.atr-root .atr-number {
+  box-sizing: border-box;
+  height: 24px;
+  margin: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--atr-border);
+  border-radius: 4px;
+  background: var(--atr-bg);
+  color: var(--atr-text);
+  font: inherit;
+  box-shadow: none;
+}
+.atr-root .atr-select {
+  max-width: 14em;
+  padding-right: 2px;
+}
+.atr-root .atr-search {
+  width: 11em;
+}
+.atr-root .atr-number {
+  width: 6.5em;
+}
+.atr-select:focus-visible,
+.atr-search:focus-visible,
+.atr-number:focus-visible {
+  outline: 2px solid var(--atr-accent);
+  outline-offset: -1px;
+}
+.atr-button[data-count] {
+  position: relative;
+}
+.atr-button[data-count]:not([data-count=""])::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  min-width: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--atr-accent);
+  color: var(--atr-bg);
+  font-size: 9px;
+  line-height: 12px;
+  text-align: center;
+}
+
+/* the filters by statistics: under the pager, at its left */
+.atr-filters {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--atr-border);
+  border-radius: 6px;
+  background: var(--atr-bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.atr-filters[hidden] {
+  display: none;
+}
+.atr-filter-rows {
+  display: grid;
+  grid-template-columns: auto auto auto auto;
+  align-items: center;
+  gap: 4px 6px;
+}
+.atr-filter-row {
+  display: contents;
+}
+.atr-filter-name {
+  padding-right: 6px;
+  white-space: nowrap;
+}
+.atr-filter-row .atr-search {
+  grid-column: span 3;
+}
+
+/* a paged wrap whose filters keep no panel */
+.atr-empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40%;
+  text-align: center;
+  color: var(--atr-muted);
+  pointer-events: none;
+}
+.atr-empty[hidden] {
+  display: none;
+}

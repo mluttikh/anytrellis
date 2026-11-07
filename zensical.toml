@@ -41,6 +41,7 @@ nav = [
     { "Colours, legends and order" = "how-to/colours.md" },
     { "Link plots" = "how-to/link.md" },
     { "Plot large data" = "how-to/large.md" },
+    { "Page through many panels" = "how-to/pages.md" },
     { "Share a plot" = "how-to/share.md" },
     { "Use anytrellis in marimo" = "how-to/marimo.md" },
     { "Coming from ggplot2 or seaborn" = "how-to/from-ggplot2-seaborn.md" },

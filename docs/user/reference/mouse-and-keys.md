@@ -34,7 +34,7 @@ scale: with `share_y="row"`, zooming the left axis of a row zooms that row.
 | ++s++ | drag draws a selection brush, and back |
 | ++esc++ | clear the selection; with none, back to all panels |
 | ++enter++ | open the panel under the pointer |
-| ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom |
+| ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom; with none opened, the previous / next page of a paged wrap |
 | ++backspace++ | back to all panels |
 | ++e++ | the Export menu: copy, download or save an image |
 | ++f++ | full screen, and back |
@@ -43,7 +43,8 @@ scale: with `share_y="row"`, zooming the left axis of a row zooms that row.
 
 The buttons at the top right do the same as keys: select (++s++), box zoom (++z++), fit y
 (++y++), reset (++r++), export (++e++) and full screen (++f++). With a panel opened, the strip over it has
-*All panels* and the previous and next buttons.
+*All panels* and the previous and next buttons. Over a paged wrap, a bar turns the pages,
+sorts the panels and filters them ([Page through many panels](../how-to/pages.md)).
 
 ## Selecting
 

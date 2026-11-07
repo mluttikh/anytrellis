@@ -159,6 +159,35 @@ export interface TrellisSpec {
   legend_position?: "auto" | "bottom";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
+  /** A wrap shown a page at a time (null: all its panels at once). */
+  pages?: PagesSpec | null;
+}
+
+/** A paged wrap: a page's rows and columns, and each panel's statistics to sort and filter
+ * the panels by. */
+export interface PagesSpec {
+  rows: number;
+  cols: number;
+  stats: PanelStat[];
+}
+
+export interface PanelStat {
+  name: string;
+  kind: "number" | "text";
+  /** A value per panel (null: none; "" for text). */
+  values: (number | string | null)[];
+  /** Each value as shown. */
+  text: string[];
+}
+
+/** The page shown (from 0), the sort (a statistic's name; null: as given) and the filters:
+ * words of the panels' names, and per statistic a [low, high] range (null: open) or text. */
+export interface Paging {
+  page?: number;
+  sort?: string | null;
+  descending?: boolean;
+  name?: string;
+  where?: Record<string, [number | null, number | null] | string | null>;
 }
 
 /** Where buffers come from: Python (BufferStore), or a page that embeds them. */

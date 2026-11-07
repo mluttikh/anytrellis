@@ -1,6 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs, details.mjs)."""
+many.mjs, details.mjs, paging.mjs)."""
 
 from __future__ import annotations
 
@@ -37,6 +37,9 @@ def main(out: Path) -> None:
     Trellis(steps).line(x="t", y="v", step="post").save_html(out / "steps.html")
     Trellis(cars).violin(x="origin", y="mpg").save_html(out / "violin.html")
     Trellis(cars).errorbar(x="origin", y="mpg").save_html(out / "errorbar.html")
+    paged = Trellis(sensors(stations=150, sensors=1, hours=24 * 7), wrap="station",
+                    title="150 stations")  # fmt: skip
+    paged.line(x="time", y="temp", width=1).save_html(out / "paged.html")
     many_plots(out / "many.html", gapminder)
 
 

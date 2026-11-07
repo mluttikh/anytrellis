@@ -25,6 +25,7 @@ import numpy as np
 from anytrellis.codec import DTYPES, Buffers
 
 if TYPE_CHECKING:
+    from anytrellis.pages import Paging
     from anytrellis.plot import Trellis
 
 THEMES: dict[str, dict[str, str]] = {
@@ -49,6 +50,8 @@ PNG_SCALE = 2.0
 
 GAP = 6
 TICK = 4
+STRIP_PAD = 4
+"""A strip's room at either end, and between a name and its value."""
 MIN_PANEL = 24
 HEADER = 26
 """The header over the plot (its title), when there is a title."""
@@ -361,6 +364,8 @@ class PanelBox:
     show_y: bool
     strip: Rect | None
     label: str
+    note: str = ""
+    """A paged wrap's value of the statistic sorted by, at the strip's right end."""
 
 
 @dataclass
@@ -395,15 +400,24 @@ def _y_labels_width(spec: dict[str, Any], domain: list[float], h: float | None) 
 
 
 def layout(spec: dict[str, Any], width: float, height: float | None = None,
-           focused: int | None = None) -> Layout:  # fmt: skip
+           focused: int | None = None, page: list[int] | None = None) -> Layout:  # fmt: skip
     """Where the panels, strips and titles sit, ``width`` px wide; ``height``: the plot's
-    height, overriding the spec's; ``focused``: that panel alone."""
+    height, overriding the spec's; ``focused``: that panel alone; ``page``: a paged wrap's
+    panels on the page shown (default: the first page's)."""
     if focused is not None and 0 <= focused < len(spec["panels"]):
         return _focus_layout(spec, width, height, focused)
-    grid, panels = spec["grid"], spec["panels"]
+    grid = spec["grid"]
+    pages = spec.get("pages")
+    shown: list[int] | None = None
+    panels = spec["panels"]
+    if pages:  # the page's panels in turn, on a grid of the page's size
+        per = pages["rows"] * pages["cols"]
+        shown = page if page is not None else list(range(min(per, len(panels))))
+        panels = [{**spec["panels"][index], "row": k // pages["cols"], "col": k % pages["cols"]}
+                  for k, index in enumerate(shown)]  # fmt: skip
     fs = FONT_SIZE
-    rows = max(1, grid["rows"])
-    cols = max(1, grid["cols"])
+    rows = max(1, pages["rows"] if pages else grid["rows"])
+    cols = max(1, pages["cols"] if pages else grid["cols"])
     at = {(p["row"], p["col"]): i for i, p in enumerate(panels)}
 
     show_x = []
@@ -432,6 +446,8 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     for i, p in enumerate(panels):
         if show_x[i] and (p["row"] == rows - 1 or (p["row"] + 1, p["col"]) in at):
             row_has_x[p["row"]] = True
+    if pages:
+        row_has_x[rows - 1] = True  # a short last page keeps the full pages' height
 
     strip_h = _round(fs * 1.5 + 4)
     wrap_strip = strip_h if grid["kind"] == "wrap" else 0
@@ -486,7 +502,8 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     for i, p in enumerate(panels):
         rect = Rect(col_x[p["col"]], row_y[p["row"]], pw, ph)
         strip = Rect(rect.x, rect.y - wrap_strip, pw, wrap_strip - 1) if wrap_strip else None
-        boxes.append(PanelBox(i, rect, show_x[i], show_y[i], strip, p["label"]))
+        index = shown[i] if shown is not None else i
+        boxes.append(PanelBox(index, rect, show_x[i], show_y[i], strip, p["label"]))
     strips = []
     if top_strip:
         for c, label in enumerate(grid["col_labels"]):
@@ -497,7 +514,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
                                 True))  # fmt: skip
 
     spare = None
-    if grid["kind"] == "wrap" and panels:
+    if grid["kind"] == "wrap" and panels and not pages:
         last = rows - 1
         used = max((p["col"] + 1 for p in panels if p["row"] == last), default=0)
         if 0 < used < cols:
@@ -1005,7 +1022,7 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
             svg.add(f'<path d="{"".join(d)}" fill="none" stroke="{th["axis"]}"/>')
 
     # strips
-    def strip(rect: Rect, label: str, vertical: bool) -> None:
+    def strip(rect: Rect, label: str, vertical: bool, note: str = "") -> None:
         svg.rect(rect, th["strip"])
         svg.open(svg.clip(rect))
         cx, cy = rect.x + rect.w / 2, rect.y + rect.h / 2
@@ -1013,13 +1030,18 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
             svg.open(f'transform="translate({_n(cx)} {_n(cy)}) rotate(90)"')
             svg.text(0, 0, fit(label, rect.h - 6), th["strip_text"], anchor="middle")
             svg.close()
+        elif note:  # the name at the left, cut to leave the value whole at the right
+            w = text_width(note)
+            svg.text(rect.x + rect.w - STRIP_PAD, cy + 0.5, note, th["strip_text"], anchor="end")
+            svg.text(rect.x + STRIP_PAD, cy + 0.5, fit(label, rect.w - 3 * STRIP_PAD - w),
+                     th["strip_text"])  # fmt: skip
         else:
             svg.text(cx, cy + 0.5, fit(label, rect.w - 6), th["strip_text"], anchor="middle")
         svg.close()
 
     for box in lay.panels:
         if box.strip is not None:
-            strip(box.strip, box.label, False)
+            strip(box.strip, box.label, False, box.note)
     for s in lay.strips:
         strip(s.rect, s.label, s.vertical)
 
@@ -1241,6 +1263,26 @@ def _shown(plot: Trellis) -> dict[str, Any]:
     }
 
 
+def _page(plot: Trellis, spec: dict[str, Any]) -> list[int] | None:
+    """A paged wrap's panels on the page shown (as the browser's ``pagePanels``)."""
+    pages = spec.get("pages")
+    if not pages:
+        return None
+    per = pages["rows"] * pages["cols"]
+    start = (plot.page - 1) * per
+    return plot._shown_order()[start : start + per]
+
+
+def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging) -> None:
+    """Each strip's value of the statistic sorted by, at its right (``noteSorted``)."""
+    stats = (spec.get("pages") or {}).get("stats", [])
+    stat = next((s for s in stats if s["name"] == paging.get("sort")), None)
+    if stat is None:
+        return
+    for box in lay.panels:
+        box.note = stat["text"][box.index]
+
+
 def figure_svg(plot: Trellis, *, width: float | None = None, height: float | None = None,
                theme: str = "light") -> str:  # fmt: skip
     """The plot as shown, as an SVG ``width`` by ``height`` CSS pixels (default: the
@@ -1266,8 +1308,9 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
 
     placed: list[_Placed] = []
     legend_h = 0.0
+    page = _page(plot, spec)
     if focused is None:
-        lay = layout(spec, width, stage_h)
+        lay = layout(spec, width, stage_h, page=page)
         spare = None if spec.get("legend_position") == "bottom" else lay.spare
         inset = _legend_inset(groups, spare) if groups and spare is not None else None
         if inset is not None:
@@ -1275,7 +1318,8 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         elif groups:
             placed, legend_h = _legend_below(groups, width)
             if stage_h is not None:
-                lay = layout(spec, width, stage_h - legend_h)
+                lay = layout(spec, width, stage_h - legend_h, page=page)
+        _note_sorted(spec, lay, plot.paging)
     else:
         if groups:
             placed, legend_h = _legend_below(groups, width)
@@ -1297,6 +1341,9 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     base_x = np.array([p["x"][0] for p in spec["panels"]], dtype=np.float64)
     base_y = np.array([p["y"][0] for p in spec["panels"]], dtype=np.float64)
     _draw_back(svg, spec, views, th)
+    if focused is None and page == []:  # as the browser's .atr-empty
+        svg.text(width / 2, lay.height * 0.4, "No panel matches the filters", th["muted"],
+                 anchor="middle", baseline="top")  # fmt: skip
 
     masks: list[np.ndarray | None] = []
     fractions: list[np.ndarray | None] = [None] * len(marks)

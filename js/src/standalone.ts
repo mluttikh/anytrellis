@@ -4,7 +4,7 @@
 
 import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
-import type { RendererPreference, TrellisSpec } from "./core/types";
+import type { Paging, RendererPreference, TrellisSpec } from "./core/types";
 import { TrellisView } from "./core/view";
 
 interface Payload {
@@ -14,6 +14,8 @@ interface Payload {
   /** The panel opened in Python (Trellis.open), or null. */
   focus?: string | null;
   selection?: Brush | null;
+  /** The page, sort and filters of a paged wrap. */
+  paging?: Paging | null;
 }
 
 declare global {
@@ -36,6 +38,7 @@ async function start(host: HTMLElement): Promise<void> {
     (window.anytrellisViews ??= []).push(view);
     if (payload.focus) view.setFocusName(payload.focus);
     if (payload.selection) view.setSelection(payload.selection);
+    if (payload.paging) view.setPaging(payload.paging);
     await view.setSpec(payload.spec);
     // two frames: the first draw happens on the next animation frame
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));

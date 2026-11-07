@@ -138,6 +138,10 @@ def _gallery() -> list[Entry]:
               .order("site", by="median", of="yield", descending=True)
               .order("variety", by="median", of="yield")
               .points(x="yield", y="variety", color="year", size=6)),
+        Entry("pages", "Pages of panels, sorted", "how-to/pages.md",
+              lambda: Trellis(sensors(stations=150, sensors=1, hours=24 * 7), wrap="station")
+              .line(x="time", y="temp", width=1)
+              .sort_panels("trend temp", descending=True)),
         Entry("many-points", "Many points", "how-to/large.md#many-points",
               lambda: Trellis(scatter(n=40_000, groups=16), wrap="group", cols=4).points(
                   x="x", y="y", color="cluster", size=1.5, opacity=0.4)),

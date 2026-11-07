@@ -27,6 +27,7 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 
 - [Link plots](link.md): one selection across separate plots.
 - [Plot large data](large.md): millions of marks, hundreds of panels.
+- [Page through many panels](pages.md): sort and filter them by each panel's statistics.
 - [Share a plot](share.md): a page that opens without Python.
 - [Use anytrellis in marimo](marimo.md)
 
