@@ -226,14 +226,12 @@ def test_what_page_mode_does_not_do() -> None:
         Trellis(rel, wrap="station", load="pages").area(x="t", y="temp")._scene()
     with pytest.raises(ValueError, match="facet="):
         Trellis(rel, wrap="station", load="pages").hist(x="temp", facet="exclude")._scene()
-    with pytest.raises(ValueError, match="link="):
-        Trellis(rel, wrap="station", load="pages", link="station").line(x="t", y="temp")._scene()
     with pytest.raises(ValueError, match="facet="):
         Trellis(rel, wrap="station", load="pages").line(x="t", y="temp",
                                                        facet="exclude")._scene()  # fmt: skip
     a = Trellis(rel, wrap="station", load="pages").line(x="t", y="temp")
     b = Trellis(df, wrap="station").line(x="t", y="temp")
-    with pytest.raises(ValueError, match="linked"):
+    with pytest.raises(ValueError, match="give on="):
         at.link(a, b)
 
 

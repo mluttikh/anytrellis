@@ -70,6 +70,7 @@ from anytrellis.query import (
     combos,
     distinct,
     drawn,
+    linked,
     never,
     panel_extents,
     panel_summaries,
@@ -89,6 +90,7 @@ from anytrellis.styling import (
     palette_colors,
     rgba,
 )
+from anytrellis.summaries import counts as linked_counts
 from anytrellis.summaries import parts as queried_parts
 from anytrellis.summaries import selected as summaries_selected
 
@@ -267,6 +269,9 @@ class Trellis:
         self._link_group: Link | None = None
         self._highlight: Masks | None = None
         """The rows another plot of the link selects (``anytrellis.link``), or None."""
+        self._linked_keys: tuple[tuple[str, ...], list[tuple[Any, ...]]] | None = None
+        """``load="pages"``: the keys another plot of the link selects (its ``on`` columns
+        and their values), or None."""
         self._scene_cache: tuple[dict[str, Any], Buffers] | None = None
         self._geometry: list[tuple[Layer, Table, Geometry | None]] = []
         self._drawn: list[_Drawn] = []
@@ -1408,6 +1413,12 @@ class Trellis:
         (``anytrellis.link``) without a brush of its own: the rows another plot selects."""
         self._scene()
         user = self._user_layer(layer)
+        if self._on_page(user) and self._current_selection() is None and self._linked_keys:
+            import narwhals as nw  # another plot of the link selects: the rows of its keys
+
+            assert self._data is not None
+            on, keys = self._linked_keys
+            return nw.to_native(self._data.lazy.filter(combos(self._data, on, keys)))
         if self._on_page(user) and user.mark in SUMMARIES:
             return self._summary_query(user)
         if self._on_page(user):
@@ -1415,7 +1426,7 @@ class Trellis:
         table = self._table(user)
         if self._current_selection() is None and self._highlight is not None:
             mask = self._highlight.get(id(user))
-            if mask is None:
+            if not isinstance(mask, np.ndarray):
                 mask = np.zeros(table.n, dtype=bool)
         else:
             mask = self._source_mask(user)
@@ -1457,7 +1468,28 @@ class Trellis:
                 where = never(user.x)
             else:
                 where = where & among_labels(whole, name, chosen)
-        return nw.to_native(whole.lazy.filter(where))
+        if not self._link:
+            return nw.to_native(whole.lazy.filter(where))
+        # link=: the rows sharing a key with those selected, here or in a layer's own data
+        own = self._own_keys()
+        if own:
+            where = where | combos(whole, self._link, own)
+        return nw.to_native(linked(whole, whole.lazy.filter(where), self._link))
+
+    def _own_keys(self) -> list[tuple[Any, ...]]:
+        """``load="pages"``, ``link=``: the keys of the rows the brush selects in the layers
+        with data of their own (in memory)."""
+        out: dict[tuple[Any, ...], None] = {}
+        for d, (lay, table, geom) in zip(self._drawn, self._geometry, strict=True):
+            if geom is None or d.part is not None or self._on_page(d.user):
+                continue
+            if not all(name in table for name in self._link):
+                continue
+            hit = np.flatnonzero(self._row_mask(lay, table, geom))
+            if len(hit):
+                values = [np.asarray(table.values(name), dtype=object)[hit] for name in self._link]
+                out.update(dict.fromkeys(zip(*values, strict=True)))
+        return list(out)
 
     def _summary_query(self, user: Layer) -> Any:
         """``load="pages"``: the rows of the plot's data that the summaries a brush selects
@@ -1502,10 +1534,44 @@ class Trellis:
         return [lr for lr in self._layers if lr.mark != "rule"]
 
     def _selected_masks(self) -> list[tuple[Table, np.ndarray]]:
-        """Each layer's data and the rows of it the brush selects (context layers: none)."""
+        """Each layer's data and the rows of it the brush selects (context layers: none;
+        ``load="pages"``, the plot's data: see ``_selected_queries``)."""
         self._scene()
-        return [(self._table(lr), self._source_mask(lr))
-                for lr in self._mark_layers() if lr.facet != "exclude"]  # fmt: skip
+        return [(self._table(lr), self._source_mask(lr)) for lr in self._mark_layers()
+                if lr.facet != "exclude" and not self._on_page(lr)]  # fmt: skip
+
+    def _selected_queries(self) -> list[tuple[Table, Any]]:
+        """``load="pages"``: the plot's data and the rows the brush selects of it, as a
+        query, per layer drawing it."""
+        self._scene()
+        assert self._data is not None or not any(map(self._on_page, self._layers))
+        return [(self._data, self.selected(lr.name)) for lr in self._mark_layers()
+                if self._on_page(lr) and self._data is not None]  # fmt: skip
+
+    def _linked_summary(self, layer: Layer, on: tuple[str, ...],
+                        keys: list[tuple[Any, ...]]) -> dict[int, np.ndarray] | None:  # fmt: skip
+        """``load="pages"``: how many rows of the keys another plot of the link selects each
+        of a summary's rows stands for, per part (None: the data has no ``on`` columns)."""
+        import narwhals as nw
+
+        whole = self._data
+        assert whole is not None
+        if not all(name in whole for name in on):
+            return None
+        self._scene()
+        parts = [d.part for d in self._drawn if d.user is layer and d.part is not None]
+        names = tuple(n for n in dict.fromkeys([*self._grid.columns, *_layer_columns(layer)])
+                      if n is not None and n in whole)  # fmt: skip
+        if keys:
+            query = whole.lazy.filter(combos(whole, on, keys)).select(*names)
+            rows = Table(nw.to_native(query.collect()))
+        else:
+            rows = Table({name: np.zeros(0) for name in names})
+        rows.whole = whole
+        panel_of = self._grid.assign(rows) if rows.n else np.zeros(0, dtype=np.int64)
+        assert panel_of is not None
+        return {id(part): linked_counts(part.where, rows, panel_of)
+                for part in parts if part.where is not None}  # fmt: skip
 
     def _row_mask(self, layer: Layer, table: Table, geom: Geometry) -> np.ndarray:
         brush = self._current_selection()
@@ -1823,8 +1889,6 @@ class Trellis:
                 "load='pages' reads a lazy table a page at a time (a DuckDB relation, an Ibis "
                 "table, a Polars LazyFrame): give one as data, or use load='all'"
             )
-        if self._link:
-            raise ValueError("load='pages' does not link rows across panels (link=) yet")
         for layer in self._layers:
             if not self._on_page(layer):
                 continue
@@ -1912,11 +1976,12 @@ class Trellis:
     def _page_names(self) -> tuple[str, ...]:
         """``load="pages"``: the columns read of the panels around the page shown: those
         the layers drawing their rows draw (a summary's come from the database), the facet
-        columns, and those of linked rows and orders."""
+        columns, and those of linked rows (``link=``, and a link's ``on=``) and orders."""
         whole = self._data
         assert whole is not None
+        on = self._link_group.on if self._link_group is not None else ()
         names: list[str | None] = [*self._page, *self._row, *self._col, *self._wrap,
-                                   *self._link]  # fmt: skip
+                                   *self._link, *on]  # fmt: skip
         for name, order in self._orders.items():
             names += [name, order.of]
         for layer in self._layers:
@@ -2281,6 +2346,9 @@ class Trellis:
         want = {i for k in range(max(0, page - 1), page + 2) if k < len(listed) for i in listed[k]}
         if self.focused in names:
             want.add(names.index(self.focused))
+        brush = self._current_selection()
+        if self._link and brush is not None and brush.get("panel") is not None:
+            want.add(int(brush["panel"]))  # its keys select the marks of the pages turned to
         return frozenset(want)
 
     def _windowed(self, entry: _Sent) -> _Sent:
@@ -2444,6 +2512,12 @@ class Trellis:
         message = self._detail(self._view)
         if message is not None and self._widget is not None:
             self._widget.send(message)
+        if message is not None and self._highlight is not None:  # for the layers sent now
+            group = self._link_group
+            if self._page_tables and group is not None:
+                group.refresh(self)  # (the rows read are others: their highlight too)
+            else:
+                self._send_highlight()
 
     def _shown_scene(self) -> tuple[dict[str, Any], Buffers]:
         """The spec and buffers as shown: layers zoomed in, in their detail (images)."""

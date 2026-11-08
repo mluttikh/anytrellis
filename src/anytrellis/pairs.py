@@ -176,7 +176,7 @@ class Pairs(Trellis):
         table = self._table(points)
         if self._current_selection() is None and self._highlight is not None:
             mask = self._highlight.get(id(points))
-            if mask is None:
+            if not isinstance(mask, np.ndarray):
                 mask = np.zeros(table.n, dtype=bool)
         else:
             mask = self._source_mask(points)

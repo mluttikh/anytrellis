@@ -709,3 +709,85 @@ def _and(a: Any, b: Any) -> Any:
 
 def _or(a: Any, b: Any) -> Any:
     return b if a is None else a if b is None else a | b
+
+
+# ---- linked plots ------------------------------------------------------------------------
+
+
+def counts(where: Where, rows: Table, panel_of: np.ndarray) -> np.ndarray:
+    """How many of ``rows`` (in panels ``panel_of``; rows read, of the plot's data) each
+    summary row stands for: the share of a bin, the group of a box, the stretch of a curve
+    another plot's selection holds."""
+    n = len(where.panel)
+    out = np.zeros(n, dtype=np.int64)
+    if not n or not rows.n:
+        return out
+    ok = panel_of >= 0
+    for name, log in where.finite:
+        ok &= np.isfinite(_axis_values(rows, name, log))
+    tests = list(where.tests)
+    end = tests[-1] if tests else None
+    span = end if isinstance(end, Range) and bool((end.lo != end.hi).any()) else None
+    if span is not None:  # its ranges: looked up in each group
+        tests.pop()
+    heads = [(where.panel.astype(str), panel_of.astype(str))]
+    if where.color is not None:
+        heads.append((where.color.labels.astype(str), _labels(rows, where.color.name)))
+    for t in tests:
+        if isinstance(t, Labels):
+            heads.append((t.labels.astype(str), _labels(rows, t.name)))
+        else:  # a value: as written to 12 digits (the database's log10 and numpy's alike)
+            heads.append((np.char.mod("%.12g", t.lo), np.char.mod("%.12g", _axis_values(
+                rows, t.name, t.log))))  # fmt: skip
+    head_s, head_r = _head_codes(heads)
+    hit = np.full(rows.n, -1, dtype=np.int64)
+    if span is None:
+        first = {}
+        for i, h in enumerate(head_s.tolist()):
+            first.setdefault(h, i)
+        hit = np.array([first.get(h, -1) for h in head_r.tolist()], dtype=np.int64)
+    else:
+        value = _axis_values(rows, span.name, span.log)
+        is_open = span.open if span.open is not None else np.zeros(n, dtype=bool)
+        order = np.lexsort((span.lo, head_s))
+        for h in np.unique(head_r[ok]):
+            block = order[head_s[order] == h]
+            if not len(block):
+                continue
+            mine = np.flatnonzero(ok & (head_r == h))
+            v = value[mine]
+            at = np.clip(np.searchsorted(span.lo[block], v, side="right") - 1, 0, len(block) - 1)
+            s = block[at]
+            inside = (v >= span.lo[s]) & np.where(is_open[s], v < span.hi[s], v <= span.hi[s])
+            hit[mine[inside]] = s[inside]
+    hit[~ok] = -1
+    return np.bincount(hit[hit >= 0], minlength=n)
+
+
+def _axis_values(rows: Table, name: str, log: bool) -> np.ndarray:
+    """A column's values on its axis: numbers (log10 on a log axis), times in ms."""
+    values = rows.column(name).values
+    if log:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.where(values > 0, np.log10(values), np.nan)
+    return values.astype(np.float64)
+
+
+def _labels(rows: Table, name: str) -> np.ndarray:
+    return np.asarray(rows.column(name).values).astype(str)
+
+
+def _head_codes(heads: list[tuple[np.ndarray, np.ndarray]]) -> tuple[np.ndarray, np.ndarray]:
+    """One integer per summary row and per row for their values of the ``heads``, the same
+    for the same values."""
+    code_s = np.zeros(len(heads[0][0]), dtype=np.int64)
+    code_r = np.zeros(len(heads[0][1]), dtype=np.int64)
+    for s, r in heads:
+        _, inverse = np.unique(np.concatenate([s, r]), return_inverse=True)
+        inverse = inverse.ravel().astype(np.int64)
+        size = int(inverse.max(initial=0)) + 1
+        both = np.concatenate([code_s, code_r]) * size + inverse
+        _, both = np.unique(both, return_inverse=True)  # (kept small: renumbered)
+        both = both.ravel().astype(np.int64)
+        code_s, code_r = both[: len(s)], both[len(s) :]
+    return code_s, code_r

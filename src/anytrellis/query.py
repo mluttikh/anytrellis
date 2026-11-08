@@ -289,6 +289,34 @@ def _datetime(ms: float, zone: str | None) -> Any:
     return when.replace(tzinfo=ZoneInfo(zone))
 
 
+def linked(table: Table, chosen: Any, names: Sequence[str]) -> Any:
+    """The rows of a lazy table sharing their values of the columns ``names`` with the rows
+    of ``chosen`` (a query of it): a semi join, rows without a value matching each other."""
+    import narwhals as nw
+
+    def keys() -> list[Any]:
+        out = []
+        for i, name in enumerate(names):
+            c = nw.col(name)
+            dtype = table.dtype(name)
+            if dtype == nw.String:
+                value = c.fill_null("")
+            elif dtype.is_numeric():
+                value = c.fill_null(0)
+            else:  # (categories, times, ...: by their text)
+                value = c.cast(nw.String).fill_null("")
+            out += [value.alias(f"{LINK_KEY}{i}"), c.is_null().alias(f"{LINK_MISSING}{i}")]
+        return out
+
+    on = [f"{p}{i}" for i in range(len(names)) for p in (LINK_KEY, LINK_MISSING)]
+    picked = chosen.select(*keys()).unique()
+    return table.lazy.with_columns(*keys()).join(picked, on=on, how="semi").drop(*on)
+
+
+LINK_KEY = "__anytrellis_key"
+LINK_MISSING = "__anytrellis_missing"
+
+
 def drawn(table: Table, name: str) -> Any:
     """Rows a point is drawn for, along column ``name``: a finite number or a time (any
     category, or none)."""
