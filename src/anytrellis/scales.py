@@ -1,8 +1,9 @@
 """Position scales: each axis's kind, and each panel's domain after scale sharing.
 
 ``share`` per axis: ``"all"`` (every panel the same domain: the default, so panels compare),
-``"row"`` / ``"col"`` (the same within a grid row / column), or ``"none"`` (each panel its
-own). Panels with the same domain form a group, zoomed together in the browser.
+``"row"`` / ``"col"`` (the same within a grid row / column), ``"page"`` (the same within a
+page of ``page=``), or ``"none"`` (each panel its own). Panels with the same domain form a
+group, zoomed together in the browser.
 """
 
 from __future__ import annotations
@@ -16,21 +17,22 @@ from anytrellis.facets import Grid
 
 AxisKind = Literal["number", "time", "band", "log"]
 """``log``: numbers in log10 units (a log scale); padded and zoomed like numbers."""
-Share = Literal["all", "row", "col", "none"]
+Share = Literal["all", "row", "col", "page", "none"]
 
 PAD = 0.04
 """Room on each side of a continuous domain, as a fraction of its span."""
 
 
 def share_mode(value: bool | str) -> Share:
-    """``True``/``"all"``, ``False``/``"none"``/``"free"``, ``"row"`` or ``"col"``."""
+    """``True``/``"all"``, ``False``/``"none"``/``"free"``, ``"row"``, ``"col"`` or
+    ``"page"``."""
     if value is True or value == "all":
         return "all"
     if value is False or value in ("none", "free"):
         return "none"
-    if value in ("row", "col"):
+    if value in ("row", "col", "page"):
         return value
-    raise ValueError(f"share: expected True, False, 'row' or 'col', got {value!r}")
+    raise ValueError(f"share: expected True, False, 'row', 'col' or 'page', got {value!r}")
 
 
 @dataclass
@@ -73,6 +75,10 @@ def group_ids(grid: Grid, share: Share) -> list[int]:
         return [p.row for p in grid.panels]
     if share == "col":
         return [p.col for p in grid.panels]
+    if share == "page":
+        if grid.page_of is None:
+            raise ValueError("share 'page' shares a scale within each page: give page=")
+        return grid.page_of.tolist()
     return [p.index for p in grid.panels]
 
 

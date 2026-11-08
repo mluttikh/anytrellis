@@ -112,6 +112,38 @@ Trellis(readings, wrap="station", cols=8, rows=3)   # 24 a page
 Trellis(readings, wrap="station", rows="all")       # every panel at once
 ```
 
-A grid (`row=`, `col=`) shows all its cells and doesn't page. To order a wrap's panels
-for good, rather than in the browser, use `order()`:
+A grid (`row=`, `col=`) shows all its cells; page it by a column (below). To order a
+wrap's panels for good, rather than in the browser, use `order()`:
 `plot.order("station", by="max", of="temp", descending=True)`.
+
+## A page per level of a column
+
+`page=` makes each level of a column a page of its own: a region's stations, a site's grid
+of sensors by metric. The bar names the page shown and lists the others to pick from.
+
+```python exec="on" source="above" session="pages" html="true"
+regions = Trellis(sensors(stations=40, sensors=1, hours=48), wrap="station", page="region",
+                  title="Stations by region")
+regions.line(x="time", y="temp", width=1)
+regions
+print(regions._embed_html())  # markdown-exec: hide
+```
+
+- **A wrap** shows a level's panels, as many rows as its largest level needs. With `rows=`,
+  a level of more panels goes on several pages ("north (2 of 3)"). Sorting and filtering
+  order each level's panels; a level with none left has no page.
+- **A grid** (`row=`, `col=`) shows each level's every cell, in the same place on every
+  page, so turning the pages compares them cell by cell. Its pages aren't sorted or
+  filtered.
+- **The scales** are shared by every page, unless `share_x="page"` or `share_y="page"`
+  gives each page its own.
+- **The levels** are in the column's order; `order("region", ...)` orders them, by name or
+  by a summary.
+
+```python
+Trellis(df, row="sensor", col="metric", page="site", share_y="page")
+plot.show_page("north")       # a level's first page
+plot.page_names               # ["coast", "north", "south"]
+```
+
+With `load="pages"` (a table in a database), turning to a level reads that level's rows.

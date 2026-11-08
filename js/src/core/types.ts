@@ -14,7 +14,7 @@ export interface BufferRef {
 /** `log`: numbers in log10 units (a log scale): zoomed and panned like numbers, labelled
  * as the values. */
 export type AxisKind = "number" | "time" | "band" | "log";
-export type Share = "all" | "row" | "col" | "none";
+export type Share = "all" | "row" | "col" | "page" | "none";
 
 export interface AxisSpec {
   kind: AxisKind;
@@ -171,11 +171,19 @@ export interface TrellisSpec {
 }
 
 /** A paged wrap: a page's rows and columns, and each panel's statistics to sort and filter
- * the panels by. */
+ * the panels by. With page columns (page=): each panel's page level, a page per level. */
 export interface PagesSpec {
   rows: number;
   cols: number;
   stats: PanelStat[];
+  /** Each panel's page level (an index in `levels`): a level's panels on pages of their own. */
+  groups?: number[] | null;
+  /** The page levels' names. */
+  levels?: string[] | null;
+  /** The page columns' names. */
+  title?: string;
+  /** A grid on every page: each panel keeps its cell (not sorted or filtered). */
+  grid?: boolean;
 }
 
 export interface PanelStat {

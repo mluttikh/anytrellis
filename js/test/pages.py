@@ -1,6 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs, details.mjs, paging.mjs)."""
+many.mjs, details.mjs, paging.mjs, levels.mjs)."""
 
 from __future__ import annotations
 
@@ -41,8 +41,30 @@ def main(out: Path) -> None:
     paged = Trellis(sensors(stations=150, sensors=1, hours=24 * 7), wrap="station",
                     title="150 stations")  # fmt: skip
     paged.line(x="time", y="temp", width=1).save_html(out / "paged.html")
+    regions = Trellis(sensors(stations=40, sensors=1, hours=48), wrap="station", page="region",
+                      rows=2, cols=4, title="Stations by region")  # fmt: skip
+    regions.line(x="time", y="temp", width=1).save_html(out / "regions.html")
+    sites = Trellis(site_readings(), row="sensor", col="metric", page="site", share_y="page",
+                    title="A grid per site")  # fmt: skip
+    sites.line(x="t", y="v").save_html(out / "sites.html")
     many_plots(out / "many.html", gapminder)
     dense_points(out / "dense.html")
+
+
+def site_readings() -> pl.DataFrame:
+    """Three sites (the higher their number, the higher their readings), each two sensors by
+    three metrics; site C has no sensor b."""
+    rng = np.random.default_rng(5)
+    rows = []
+    for k, site in enumerate("ABC"):
+        for sensor in "ab":
+            if site == "C" and sensor == "b":
+                continue
+            for metric in ("temp", "rain", "wind"):
+                t = np.arange(50.0)
+                rows.append(pl.DataFrame({"site": site, "sensor": sensor, "metric": metric, "t": t,
+                                          "v": 10.0 * (k + 1) + rng.normal(0, 1, 50)}))  # fmt: skip
+    return pl.concat(rows)
 
 
 def dense_points(path: Path, n: int = 150_000) -> None:

@@ -34,7 +34,7 @@ import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fil
 import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
 import { Pager } from "./pager";
-import { pageCount, panelOrder } from "./pages";
+import { pageLabels, pageList, panelOrder } from "./pages";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
 import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
@@ -220,6 +220,8 @@ export class TrellisView {
    * does not page). */
   private paging: Paging = {};
   private order: number[] | null = null;
+  /** The panels of each page, in order (null: it does not page). */
+  private pageList: number[][] | null = null;
   private pagingTimer: ReturnType<typeof setTimeout> | undefined;
   /** The notice says the panels shown are loading. */
   private loading = false;
@@ -465,28 +467,26 @@ export class TrellisView {
     const pages = spec?.pages;
     if (!spec || !pages) {
       this.order = null;
+      this.pageList = null;
       return;
     }
     const names = spec.panels.map((_, i) => panelName(spec, i));
     this.order = panelOrder(pages.stats, names, this.paging);
-    const last = pageCount(this.order.length, pages.rows * pages.cols) - 1;
+    this.pageList = pageList(this.order, pages);
+    const last = this.pageList.length - 1;
     this.paging.page = Math.max(0, Math.min(this.paging.page ?? 0, last));
   }
 
   /** The panels on the page shown (null: it does not page). */
   private pagePanels(): number[] | null {
-    const pages = this.spec?.pages;
-    if (!pages || !this.order) return null;
-    const per = pages.rows * pages.cols;
-    const start = (this.paging.page ?? 0) * per;
-    return this.order.slice(start, start + per);
+    if (!this.spec?.pages || !this.pageList) return null;
+    return this.pageList[this.paging.page ?? 0] ?? [];
   }
 
   /** The previous or next page (Page Up, Page Down). */
   private turnPage(step: number): void {
-    const pages = this.spec?.pages;
-    if (!pages || !this.order) return;
-    const count = pageCount(this.order.length, pages.rows * pages.cols);
+    if (!this.spec?.pages || !this.pageList) return;
+    const count = this.pageList.length;
     const next = (this.paging.page ?? 0) + step;
     if (next < 0 || next >= count) {
       this.notify(next < 0 ? "This is the first page" : "This is the last page");
@@ -830,10 +830,8 @@ export class TrellisView {
     const was = this.focused;
     this.focused = index;
     // back to a paged wrap: the page that has the panel that was open
-    const at = index === null && was !== null && this.order ? this.order.indexOf(was) : -1;
-    const pages = this.spec.pages;
-    if (at >= 0 && pages) {
-      const page = Math.floor(at / (pages.rows * pages.cols));
+    const page = index === null && was !== null && this.pageList ? this.pageList.findIndex((p) => p.includes(was)) : -1;
+    if (page >= 0) {
       if (page !== (this.paging.page ?? 0)) {
         this.paging = { ...this.paging, page };
         this.reportPaging(0);
@@ -912,8 +910,8 @@ export class TrellisView {
     this.pager.el.hidden = !paged;
     if (paged) {
       const pages = spec!.pages!;
-      const count = pageCount(this.order!.length, pages.rows * pages.cols);
-      this.pager.update(pages, this.paging, this.order!.length, spec!.panels.length, count);
+      const list = this.pageList ?? [[]];
+      this.pager.update(pages, this.paging, this.order!.length, spec!.panels.length, list.length, pageLabels(list, pages));
     } else this.pager.toggleMenu(false);
     this.root.classList.toggle("atr-open", open);
     if (!spec || this.focused === null) return;

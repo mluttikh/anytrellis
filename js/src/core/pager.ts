@@ -18,6 +18,10 @@ export class Pager {
   private readonly prev: HTMLButtonElement;
   private readonly next: HTMLButtonElement;
   private readonly where: HTMLSpanElement;
+  private readonly named: HTMLSelectElement;
+  private readonly namedTitle: HTMLSpanElement;
+  private readonly sorting: HTMLLabelElement;
+  private readonly filtering: HTMLSpanElement;
   private readonly count: HTMLSpanElement;
   private readonly sort: HTMLSelectElement;
   private readonly direction: HTMLButtonElement;
@@ -32,9 +36,15 @@ export class Pager {
     this.prev = button(ICONS.prev, "Previous page (Page Up)", () => this.turn(-1));
     this.next = button(ICONS.next, "Next page (Page Down)", () => this.turn(1));
     this.where = el("span", "atr-page");
+    // pages of page columns: picked by their level
+    this.named = el("select", "atr-page-select");
+    this.named.addEventListener("change", () => this.change({ page: Number(this.named.value) }));
+    this.named.hidden = true;
+    this.namedTitle = el("span", "atr-muted");
+    this.namedTitle.hidden = true;
     this.count = el("span", "atr-count");
     const pages = el("span", "atr-pager-group");
-    pages.append(this.prev, this.where, this.next, this.count);
+    pages.append(this.prev, this.namedTitle, this.named, this.where, this.next, this.count);
 
     this.sort = el("select", "atr-select");
     this.sort.title = "Sort the panels by a statistic of each";
@@ -43,6 +53,7 @@ export class Pager {
     this.direction = button(ICONS.up, "Ascending: click for descending", () => this.change({ descending: !this.paging.descending, page: 0 }));
     const sort = el("label", "atr-pager-group");
     sort.append(el("span", "atr-muted", "Sort"), this.sort, this.direction);
+    this.sorting = sort;
 
     this.search = el("input", "atr-search");
     this.search.type = "search";
@@ -54,6 +65,7 @@ export class Pager {
     this.filters.setAttribute("aria-expanded", "false");
     const filter = el("span", "atr-pager-group");
     filter.append(this.search, this.filters);
+    this.filtering = filter;
 
     this.el.append(pages, sort, filter);
     this.menu = el("div", "atr-filters");
@@ -63,13 +75,31 @@ export class Pager {
     this.el.append(this.menu);
   }
 
-  /** Show `paging` over `shown` of `total` panels, on `pageCount` pages. */
-  update(spec: PagesSpec, paging: Paging, shown: number, total: number, pageCount: number): void {
+  /** Show `paging` over `shown` of `total` panels, on `pageCount` pages (`names`: each
+   * page's name, "" for none). */
+  update(spec: PagesSpec, paging: Paging, shown: number, total: number, pageCount: number, names: string[] = []): void {
     const statsChanged = this.spec !== spec;
     this.spec = spec;
     this.paging = paging;
     const page = Math.min(paging.page ?? 0, pageCount - 1);
     this.where.textContent = `Page ${page + 1} of ${pageCount}`;
+    const named = names.some(Boolean);
+    this.where.hidden = named;
+    this.named.hidden = !named;
+    this.namedTitle.hidden = !named || !spec.title;
+    this.namedTitle.textContent = spec.title ?? "";
+    if (named) {
+      if (this.named.options.length !== names.length || names.some((n, k) => this.named.options[k].text !== n)) {
+        this.named.replaceChildren(...names.map((n, k) => option(String(k), n)));
+      }
+      this.named.value = String(page);
+      const title = spec.title ? `${spec.title}: ` : "";
+      this.named.title = `${title}the page shown (Page Up, Page Down)`;
+      this.named.setAttribute("aria-label", spec.title ? `Show the page of ${spec.title}` : "Show the page");
+    }
+    // a grid's pages: every cell, in its place
+    this.sorting.hidden = spec.grid === true;
+    this.filtering.hidden = spec.grid === true;
     this.prev.disabled = page <= 0;
     this.next.disabled = page >= pageCount - 1;
     this.count.textContent = shown === total ? `${total} panels` : `${shown} of ${total} panels`;

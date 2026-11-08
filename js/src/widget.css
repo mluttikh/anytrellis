@@ -449,6 +449,11 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 .atr-pager[hidden] {
   display: none;
 }
+.atr-pager-group[hidden],
+.atr-pager-group > [hidden],
+.atr-root .atr-page-select[hidden] {
+  display: none;
+}
 .atr-pager-group {
   display: inline-flex;
   align-items: center;
@@ -470,6 +475,7 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   font-variant-numeric: tabular-nums;
 }
 .atr-root .atr-select,
+.atr-root .atr-page-select,
 .atr-root .atr-search,
 .atr-root .atr-number {
   box-sizing: border-box;
@@ -483,7 +489,8 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   font: inherit;
   box-shadow: none;
 }
-.atr-root .atr-select {
+.atr-root .atr-select,
+.atr-root .atr-page-select {
   max-width: 14em;
   padding-right: 2px;
 }
@@ -494,6 +501,7 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   width: 6.5em;
 }
 .atr-select:focus-visible,
+.atr-page-select:focus-visible,
 .atr-search:focus-visible,
 .atr-number:focus-visible {
   outline: 2px solid var(--atr-accent);

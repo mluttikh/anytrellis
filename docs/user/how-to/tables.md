@@ -142,7 +142,8 @@ pages around it (720,000) in 0.3 s; the last few pages read are kept, to turn ba
 - **`save_html`** and `to_html` read every row, as `load="all"` does: the page holds every
   panel.
 - Not yet: `link=` and `anytrellis.link`. A wrap of 100 panels or fewer, which doesn't
-  page, reads every row; give `rows=` to page it.
+  page, reads every row; give `rows=` to page it. With `page=`, a page is a level: turning
+  to it reads that level's rows (a grid's too).
 - A database that can't compute the panels' statistics (a median, a standard deviation)
   gives an error: use `load="all"`. Without the trend's window query (Ibis, over a time x),
   the statistics have no trend.

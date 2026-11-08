@@ -59,7 +59,8 @@ from anytrellis.pages import (
     Stat,
     builtin_stats,
     given_stats,
-    page_count,
+    page_labels,
+    page_list,
     queried_stats,
     trends,
 )
@@ -129,9 +130,13 @@ class Trellis:
         rows: Rows of panels a page of a wrap shows: a wrap of more than 100 panels shows 4
             at a time, and the reader turns the pages, sorts and filters the panels (by
             their statistics: see ``panel_stats``). ``rows=3`` pages any wrap; ``"all"``
-            never pages.
-        share_x: Share the x scale: ``True`` (all panels), ``"row"``, ``"col"`` or
-            ``False`` (each panel its own).
+            never pages. With ``page``: a page level with more panels than fit goes on
+            several pages.
+        page: Column(s) whose levels are pages: each page shows one level's grid (``row``,
+            ``col``: the same rows and columns on every page) or wrap (its panels, sorted
+            and filtered as any paged wrap's). The reader picks the page by its level.
+        share_x: Share the x scale: ``True`` (all panels), ``"row"``, ``"col"``, ``"page"``
+            (the panels of a page of ``page``) or ``False`` (each panel its own).
         share_y: The same for y.
         x_scale: ``"linear"`` or ``"log"`` (log10: values of 0 or less are left out; a
             histogram's bins and a density are computed on the log scale).
@@ -173,6 +178,7 @@ class Trellis:
         wrap: str | Sequence[str] | None = None,
         cols: int | None = None,
         rows: int | str | None = None,
+        page: str | Sequence[str] | None = None,
         share_x: bool | str = True,
         share_y: bool | str = True,
         x_scale: str = "linear",
@@ -203,15 +209,21 @@ class Trellis:
         self._wrap = _names(wrap)
         if self._wrap and (self._row or self._col):
             raise ValueError("use wrap= alone, or row= and/or col= (a grid), not both")
+        self._page = _names(page)
+        both = set(self._page) & {*self._row, *self._col, *self._wrap}
+        if both:
+            raise ValueError(f"{sorted(both)}: a page column can't be a row, col or wrap one too")
+        if self._page and rows == "all":
+            raise ValueError("page= shows a page per level: not with rows='all'")
         if cols is not None and cols < 1:
             raise ValueError("cols must be at least 1")
         self._cols = cols
         if rows is not None and rows != "all" and (not isinstance(rows, int) or rows < 1):
             raise ValueError(f"rows must be at least 1, or 'all', got {rows!r}")
-        if isinstance(rows, int) and not self._wrap:
+        if isinstance(rows, int) and (self._row or self._col or not (self._wrap or self._page)):
             raise ValueError("rows= pages a wrap: give wrap= (a grid shows all its cells)")
-        if load == "pages" and not self._wrap:
-            raise ValueError("load='pages' reads a paged wrap's pages: give wrap=")
+        if load == "pages" and not (self._wrap or self._page):
+            raise ValueError("load='pages' reads a plot's pages: give wrap= or page=")
         if load == "pages" and rows == "all":
             raise ValueError("load='pages' reads a wrap a page at a time: not with rows='all'")
         self._rows = rows
@@ -1074,8 +1086,8 @@ class Trellis:
         ```
         """
         table = Table(data)
-        missing = [c for c in self._wrap if c not in table]
-        if not self._wrap:
+        missing = [c for c in (*self._page, *self._wrap) if c not in table]
+        if self._row or self._col or not (self._wrap or self._page):
             raise ValueError("panel_stats() is for a wrap (wrap=), whose pages it sorts")
         if missing:
             raise ValueError(f"panel_stats(): the table needs the facet columns {missing}")
@@ -1097,6 +1109,7 @@ class Trellis:
         t.sort_panels("trend temp", descending=True)   # the steepest rise first
         ```
         """
+        self._sortable()
         if by is not None:
             self._stat_named(by)
         return self._set_paging(sort=by, descending=bool(descending), page=0)
@@ -1112,16 +1125,33 @@ class Trellis:
         t.filter_panels(rows=(100, None), region="Europe")
         ```
         """
+        self._sortable()
         for key in where:
             self._stat_named(key)
         clean = {k: (list(v) if isinstance(v, tuple | list) else v) for k, v in where.items()}
         return self._set_paging(name=str(name), where=clean, page=0)
 
-    def show_page(self, page: int) -> Self:
-        """Turn to a page (from 1) of a paged wrap."""
+    def show_page(self, page: int | str) -> Self:
+        """Turn to a page: by number (from 1), or by its name (see ``page_names``: a level
+        of the page columns, the first of its pages).
+
+        ```python
+        t.show_page(3)
+        t.show_page("Amsterdam")      # page="site"
+        ```
+        """
         self._scene()
         if self._pages_spec() is None:
-            raise ValueError("this plot does not page: give rows= (and wrap=)")
+            raise ValueError("this plot does not page: give rows= (and wrap=), or page=")
+        if isinstance(page, str):
+            names = self.page_names
+            level = [n.split(" (")[0] if n.endswith(")") else n for n in names]
+            found = [k for k, n in enumerate(names) if n == page] or \
+                [k for k, n in enumerate(level) if n == page]  # fmt: skip
+            if not found:
+                shown = ", ".join(repr(n) for n in names[:8]) + (", ..." if len(names) > 8 else "")
+                raise ValueError(f"no page {page!r}; the pages are {shown}")
+            return self._set_paging(page=found[0])
         if not 1 <= page <= self.pages:
             raise ValueError(f"page must be from 1 to {self.pages}, got {page!r}")
         return self._set_paging(page=page - 1)
@@ -1129,10 +1159,27 @@ class Trellis:
     @property
     def pages(self) -> int:
         """The number of pages, with the panels the filters keep (1 when it does not page)."""
+        return len(self._page_list())
+
+    @property
+    def page_names(self) -> list[str]:
+        """Each page's name: its level of the page columns (``page=``), with "(2 of 3)"
+        after it when the level has more pages; without page columns, ""."""
         spec = self._pages_spec()
         if spec is None:
-            return 1
-        return page_count(len(self._shown_order()), spec["rows"] * spec["cols"])
+            return [""]
+        return page_labels(self._page_list(), spec.get("groups"), spec.get("levels") or [])
+
+    def _page_list(self) -> list[list[int]]:
+        """The panels of each page, in order (the panels the filters keep)."""
+        spec = self._pages_spec()
+        if spec is None:
+            return [list(range(len(self.panels())))]
+        return page_list(self._shown_order(), spec["rows"] * spec["cols"], spec.get("groups"))
+
+    def _sortable(self) -> None:
+        if self._page and (self._row or self._col):
+            raise ValueError("a grid's pages show all its cells: they are not sorted or filtered")
 
     @property
     def page(self) -> int:
@@ -1149,13 +1196,8 @@ class Trellis:
     def shown_panels(self) -> list[str]:
         """The names of the panels on the page shown, in order (all panels when it does not
         page)."""
-        spec = self._pages_spec()
         names = self.panels()
-        if spec is None:
-            return names
-        per = spec["rows"] * spec["cols"]
-        start = (self.page - 1) * per
-        return [names[i] for i in self._shown_order()[start : start + per]]
+        return [names[i] for i in self._page_list()[self.page - 1]]
 
     def _shown_order(self) -> list[int]:
         return panel_order(self._stats, self.panels(), self.paging)
@@ -1186,6 +1228,8 @@ class Trellis:
         panels placed on the first page."""
         n = len(grid.panels)
         self._stats = []
+        if grid.page_of is not None:
+            return self._level_pages(grid)
         if grid.kind != "wrap" or self._rows == "all":
             return None
         if self._rows is None and n <= AUTO_PANELS:
@@ -1199,6 +1243,34 @@ class Trellis:
         grid.rows, grid.cols = rows, cols
         self._stats = self._panel_stats(grid)
         return {"rows": rows, "cols": cols, "stats": [s.spec() for s in self._stats]}
+
+    def _level_pages(self, grid: Grid) -> dict[str, Any]:
+        """Pages of page columns: a grid's every cell on each (its rows and columns), or a
+        wrap of each level's panels, as many rows as the largest needs (or ``rows``: more
+        pages for a level with more panels)."""
+        assert grid.page_of is not None
+        levels = {"groups": grid.page_of.tolist(), "levels": grid.pages,
+                  "title": " · ".join(self._page)}  # fmt: skip
+        if grid.kind == "grid":
+            return {"rows": grid.rows, "cols": grid.cols, "stats": [], "grid": True, **levels}
+        most = int(np.bincount(grid.page_of).max(initial=1))
+        if isinstance(self._rows, int):
+            cols = max(1, min(self._cols or PAGE_COLS, most))
+            rows = max(1, min(self._rows, -(-most // cols)))
+        else:
+            cols, rows = grid.cols, grid.rows
+        per = rows * cols
+        place = []
+        at = 0
+        for k, p in enumerate(grid.panels):
+            if k and grid.page_of[k] != grid.page_of[k - 1]:
+                at = 0  # a level's first panel
+            place.append(replace(p, row=(at % per) // cols, col=at % cols))
+            at += 1
+        grid.panels = place
+        grid.rows, grid.cols = rows, cols
+        self._stats = self._panel_stats(grid)
+        return {"rows": rows, "cols": cols, "stats": [s.spec() for s in self._stats], **levels}
 
     def _panel_stats(self, grid: Grid) -> list[Stat]:
         """The built-in statistics, of the first layer drawing numbers from rows (its y, or
@@ -1744,15 +1816,17 @@ class Trellis:
         whole = self._data
         assert whole is not None
 
+        columns = (*self._page, *self._row, *self._col, *self._wrap)
+
         def combinations() -> Table:
-            found = distinct(whole, self._wrap)
-            for name in self._wrap:  # their levels too, without asking again
+            found = distinct(whole, columns)
+            for name in columns:  # their levels too, without asking again
                 if found.kind(name) == "category":
                     whole.memo(("levels", name), lambda name=name: found.column(name).levels)
             found.whole = whole
             return found
 
-        return whole.memo(("facets", self._wrap), combinations)
+        return whole.memo(("facets", columns), combinations)
 
     def _panels_filter(self, grid: Grid, panels: Sequence[int]) -> Any:
         """``load="pages"``: a query's condition for the rows of these panels."""
@@ -1837,7 +1911,8 @@ class Trellis:
 
     def _want_columns(self) -> None:
         """Tell each lazy table the columns the plot reads, so it reads them in one query."""
-        shared: list[str | None] = [*self._row, *self._col, *self._wrap, *self._link]
+        shared: list[str | None] = [*self._page, *self._row, *self._col, *self._wrap,
+                                    *self._link]  # fmt: skip
         for name, order in self._orders.items():
             shared += [name, order.of]
         tables = [] if self._data is None else [self._data]
@@ -1866,7 +1941,8 @@ class Trellis:
         # load="pages": the panels from the facet columns' combinations in the database
         grid = build_grid([self._facets(), *own] if paged else tables, row=self._row,
                           col=self._col, wrap=self._wrap, cols=self._cols,
-                          orders=self._orders, keep_empty=self._keep_empty)  # fmt: skip
+                          orders=self._orders, keep_empty=self._keep_empty,
+                          page=self._page)  # fmt: skip
         npanels = len(grid.panels)
         pages = self._pages(grid)
         self._grid = grid
@@ -2091,9 +2167,9 @@ class Trellis:
         """``_wanted``, of a paged wrap's page size and its panels' names."""
         paging = self.paging
         shown = panel_order(self._stats, names, paging)
-        per = pages["rows"] * pages["cols"]
-        page = min(max(int(paging.get("page", 0)), 0), page_count(len(shown), per) - 1)
-        want = set(shown[max(0, (page - 1) * per) : (page + 2) * per])
+        listed = page_list(shown, pages["rows"] * pages["cols"], pages.get("groups"))
+        page = min(max(int(paging.get("page", 0)), 0), len(listed) - 1)
+        want = {i for k in range(max(0, page - 1), page + 2) if k < len(listed) for i in listed[k]}
         if self.focused in names:
             want.add(names.index(self.focused))
         return frozenset(want)

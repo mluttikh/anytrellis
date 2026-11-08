@@ -4,6 +4,9 @@ A trellis is a grid (``row=`` and/or ``col=``: every combination of their levels
 cell, empty or not, so rows and columns read as aligned categories) or a wrap (``wrap=``:
 the combinations present, wrapped into ``cols`` columns). Several columns may be given to
 each; their combinations are the levels, in the order of the first column, then the next.
+
+Page columns (``page=``) split either into pages, one per level: a grid's every cell on each
+page (the same rows and columns on all), a wrap's combinations present on each page.
 """
 
 from __future__ import annotations
@@ -38,7 +41,8 @@ class Panel:
     label: str
     """The strip of a wrap ("" in a grid, whose strips are its rows' and columns' labels)."""
     keys: tuple[str, ...] = ()
-    """The panel's level of each facet column, in the order row, col (or wrap) columns."""
+    """The panel's level of each facet column, in the order page, row, col (or wrap)
+    columns."""
 
 
 @dataclass
@@ -52,13 +56,19 @@ class Grid:
     row_title: str = ""
     col_title: str = ""
     columns: tuple[str, ...] = ()
-    """The facet columns."""
+    """The facet columns (page columns first)."""
+    pages: list[str] = field(default_factory=list)
+    """The levels of the page columns, in order (none: no page columns)."""
+    page_of: np.ndarray | None = None
+    """Each panel's page level (an index in ``pages``), or None: no page columns."""
     _levels: dict[str, list[str]] = field(default_factory=dict)
     _row_combos: np.ndarray | None = None
     _col_combos: np.ndarray | None = None
     _row_vars: tuple[str, ...] = ()
     _col_vars: tuple[str, ...] = ()
     _wrap_vars: tuple[str, ...] = ()
+    _page_vars: tuple[str, ...] = ()
+    _page_combos: np.ndarray | None = None
     _kept: np.ndarray | None = None
     """A grid without its empty cells: each cell's panel (−1: dropped), by row * cols + col."""
 
@@ -80,8 +90,9 @@ class Grid:
             return _combo_index(table, self._wrap_vars, self._levels, self._row_combos)
         r = _combo_index(table, self._row_vars, self._levels, self._row_combos)
         c = _combo_index(table, self._col_vars, self._levels, self._col_combos)
-        out = r * self.cols + c
-        out[(r < 0) | (c < 0)] = -1
+        g = _combo_index(table, self._page_vars, self._levels, self._page_combos)
+        out = (g * self.rows + r) * self.cols + c
+        out[(r < 0) | (c < 0) | (g < 0)] = -1
         if self._kept is not None:
             out = np.where(out >= 0, self._kept[np.maximum(out, 0)], -1)
         return out
@@ -107,11 +118,15 @@ def build_grid(
     cols: int | None,
     orders: dict[str, Order],
     keep_empty: bool = True,
+    page: tuple[str, ...] = (),
 ) -> Grid:
-    """The grid of panels for the facet columns, from the tables that have them."""
+    """The grid of panels for the facet columns, from the tables that have them; with page
+    columns, a grid or wrap per page level, their panels in turn."""
     if wrap and (row or col):
         raise ValueError("use wrap= alone, or row= and/or col= (a grid), not both")
-    columns = (*row, *col, *wrap)
+    if page and not keep_empty:
+        raise ValueError("page columns keep a grid's empty cells")
+    columns = (*page, *row, *col, *wrap)
     if not columns:
         return Grid("single", 1, 1, [Panel(0, 0, 0, "")])
     sources = [t for t in tables if all(c in t for c in columns)]
@@ -119,35 +134,62 @@ def build_grid(
         raise ValueError(f"no data has the facet columns {list(columns)}")
     levels = {name: _levels([t.column(name) for t in sources], orders.get(name), sources)
               for name in columns}  # fmt: skip
-    if wrap:
-        combos = _present(sources, wrap, levels)
+    page_combos = _present(sources, page, levels) if page else None
+    page_keys = [tuple(levels[v][k] for v, k in zip(page, c, strict=True))
+                 for c in ([] if page_combos is None else page_combos)]  # fmt: skip
+    page_labels = [" · ".join(keys) for keys in page_keys]
+    if wrap or not (row or col):
+        names = (*page, *wrap)
+        combos = _present(sources, names, levels)
         n = len(combos)
-        ncols = max(1, min(cols or math.ceil(math.sqrt(n)), n))
-        nrows = max(1, math.ceil(n / ncols))
+        page_of = None
+        if page_combos is not None:  # each combination's page level, by its page part
+            dims = tuple(len(levels[v]) for v in page)
+            flat = np.ravel_multi_index(tuple(combos[:, : len(page)].T), dims)
+            known = np.ravel_multi_index(tuple(page_combos.T), dims)
+            page_of = np.searchsorted(known, flat).astype(np.int64)
+        most = n if page_of is None else int(np.bincount(page_of).max(initial=1))
+        ncols = max(1, min(cols or math.ceil(math.sqrt(most)), most))
+        nrows = max(1, math.ceil(most / ncols))
         panels = []
+        at = 0
         for i, combo in enumerate(combos):
-            keys = tuple(levels[v][k] for v, k in zip(wrap, combo, strict=True))
-            panels.append(Panel(i, i // ncols, i % ncols, " · ".join(keys), keys))
-        return Grid("wrap", nrows, ncols, panels, columns=columns, _levels=levels,
-                    _row_combos=combos, _wrap_vars=wrap)  # fmt: skip
+            keys = tuple(levels[v][k] for v, k in zip(names, combo, strict=True))
+            if page_of is not None and i and page_of[i] != page_of[i - 1]:
+                at = 0  # a page's first panel
+            own = keys[len(page) :]  # the strip: the wrap's levels (the page's: above)
+            label = " · ".join(own) if own else " · ".join(keys)
+            panels.append(Panel(i, at // ncols, at % ncols, label, keys))
+            at += 1
+        return Grid("wrap", nrows, ncols, panels, columns=columns, pages=page_labels,
+                    page_of=page_of, _levels=levels, _row_combos=combos,
+                    _wrap_vars=names)  # fmt: skip
     row_combos = _present(sources, row, levels) if row else np.zeros((1, 0), dtype=np.int64)
     col_combos = _present(sources, col, levels) if col else np.zeros((1, 0), dtype=np.int64)
     row_labels = [" · ".join(levels[v][k] for v, k in zip(row, c, strict=True)) for c in row_combos]
     col_labels = [" · ".join(levels[v][k] for v, k in zip(col, c, strict=True)) for c in col_combos]
     nrows, ncols = len(row_combos), len(col_combos)
     panels = []
-    for r in range(nrows):
-        for c in range(ncols):
-            keys = tuple(levels[v][k] for v, k in zip(row, row_combos[r], strict=True)) + tuple(
-                levels[v][k] for v, k in zip(col, col_combos[c], strict=True)
-            )
-            panels.append(Panel(r * ncols + c, r, c, "", keys))
+    pages = page_keys or [()]
+    for g, keys_of_page in enumerate(pages):
+        for r in range(nrows):
+            for c in range(ncols):
+                keys = (
+                    keys_of_page
+                    + tuple(levels[v][k] for v, k in zip(row, row_combos[r], strict=True))
+                    + tuple(levels[v][k] for v, k in zip(col, col_combos[c], strict=True))
+                )
+                panels.append(Panel((g * nrows + r) * ncols + c, r, c, "", keys))
+    page_of = None if page_combos is None else \
+        np.repeat(np.arange(len(pages), dtype=np.int64), nrows * ncols)  # fmt: skip
     grid = Grid(
         "grid", nrows, ncols, panels,
         row_labels=row_labels if row else [], col_labels=col_labels if col else [],
         row_title=" · ".join(row), col_title=" · ".join(col), columns=columns,
+        pages=page_labels, page_of=page_of,
         _levels=levels, _row_combos=row_combos, _col_combos=col_combos,
-        _row_vars=row, _col_vars=col,
+        _row_vars=row, _col_vars=col, _page_vars=page,
+        _page_combos=page_combos if page_combos is not None else np.zeros((1, 0), np.int64),
     )  # fmt: skip
     if not keep_empty:  # the cells with data, numbered in turn
         used = _used(grid, sources)

@@ -120,7 +120,7 @@ jobs:
       - run: uv sync
       - name: Write the test pages
         run: uv run python js/test/pages.py "$RUNNER_TEMP/pages"
-      - name: Select, legend, zoom, export, details and a page of many plots, in each renderer
+      - name: Select, legend, zoom, export, details, paging and a page of many plots, in each renderer
         working-directory: js
         run: |
           pages="$RUNNER_TEMP/pages"
@@ -136,6 +136,7 @@ jobs:
             node test/export.mjs "$pages/years.html" "$shots" "$r"
             node test/details.mjs "$pages" "$shots" "$r"
             node test/paging.mjs "$pages/paged.html" "$shots" "$r"
+            node test/levels.mjs "$pages" "$shots" "$r"
             echo "::endgroup::"
           done
           node test/zoom.mjs "$pages/sensors.html" "$shots"

@@ -23,6 +23,7 @@ from xml.sax.saxutils import escape
 import numpy as np
 
 from anytrellis.codec import DTYPES, Buffers
+from anytrellis.pages import page_list
 
 if TYPE_CHECKING:
     from anytrellis.pages import Paging
@@ -412,9 +413,13 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     panels = spec["panels"]
     if pages:  # the page's panels in turn, on a grid of the page's size
         per = pages["rows"] * pages["cols"]
-        shown = page if page is not None else list(range(min(per, len(panels))))
-        panels = [{**spec["panels"][index], "row": k // pages["cols"], "col": k % pages["cols"]}
-                  for k, index in enumerate(shown)]  # fmt: skip
+        shown = page if page is not None else \
+            page_list(range(len(panels)), per, pages.get("groups"))[0]  # fmt: skip
+        if pages.get("grid"):  # a grid's page: each cell in its place
+            panels = [spec["panels"][index] for index in shown]
+        else:
+            panels = [{**spec["panels"][index], "row": k // pages["cols"],
+                       "col": k % pages["cols"]} for k, index in enumerate(shown)]  # fmt: skip
     fs = FONT_SIZE
     rows = max(1, pages["rows"] if pages else grid["rows"])
     cols = max(1, pages["cols"] if pages else grid["cols"])
@@ -1273,9 +1278,7 @@ def _page(plot: Trellis, spec: dict[str, Any]) -> list[int] | None:
     pages = spec.get("pages")
     if not pages:
         return None
-    per = pages["rows"] * pages["cols"]
-    start = (plot.page - 1) * per
-    return plot._shown_order()[start : start + per]
+    return plot._page_list()[plot.page - 1]
 
 
 def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging) -> None:
