@@ -389,7 +389,10 @@ def series_codes(table: Table, names: list[str]) -> np.ndarray:
     out = np.zeros(table.n, dtype=np.int64)
     for name in names:
         col = table.column(name)
-        values = col.values.astype(str) if col.kind == "category" else col.values
-        _, inverse = np.unique(values, return_inverse=True)
+        if col.kind == "category":  # its levels' order (-1: none of them)
+            codes = col.level_codes().astype(np.int64) + 1
+            out = out * (len(col.levels) + 1) + codes
+            continue
+        _, inverse = np.unique(col.values, return_inverse=True)
         out = out * (int(inverse.max(initial=0)) + 1) + inverse.ravel()
     return out
