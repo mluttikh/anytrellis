@@ -212,6 +212,33 @@ def build_grid(
     return grid
 
 
+def strip_texts(grid: Grid, tables: Sequence[Table], name: str) -> list[str | None]:
+    """Each panel's value of column ``name``, its strip's text (None: the panel has no rows
+    with a value). A panel with two values raises: a strip names one panel."""
+    having = [t for t in tables if name in t and all(c in t for c in grid.columns)]
+    if not having:
+        raise ValueError(f"strip_label={name!r}: no data has this column and the facet "
+                         f"columns {list(grid.columns)}")  # fmt: skip
+    found: list[str | None] = [None] * len(grid.panels)
+    for t in having:
+        at = grid.assign(t)
+        assert at is not None
+        labels, codes = _codes(t.column(name))
+        ok = (at >= 0) & (codes >= 0)
+        pairs = np.unique(np.stack([at[ok], codes[ok]]), axis=1)
+        for panel, code in pairs.T.tolist():
+            text = labels[code]
+            if text == MISSING_LABEL:
+                continue
+            if found[panel] is None:
+                found[panel] = text
+            elif found[panel] != text:
+                keys = " · ".join(grid.panels[panel].keys)
+                raise ValueError(f"strip_label={name!r}: panel {keys!r} has several values "
+                                 f"({found[panel]!r}, {text!r}); give it one")  # fmt: skip
+    return found
+
+
 def _used(grid: Grid, tables: Sequence[Table]) -> set[int]:
     used: set[int] = set()
     for t in tables:

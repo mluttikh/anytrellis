@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
-import { crowdedRight } from "../src/core/drawing";
+import { crowdedRight, labelEnd } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
@@ -131,6 +131,36 @@ describe("nested strips", () => {
     expect(north.y + north.h + 1).toBe(l.panels[0].strip!.y); // over the panels' own strips
     s.grid.strips = "joined";
     expect(layout(s, opts).panels.map((p) => p.label)).toEqual(["north · a", "north · b", "south · a", "south · b"]);
+  });
+});
+
+describe("a grid's blank cells and panels' own strips", () => {
+  // a triangle: (0,0) (0,1) over (1,1), the cell below (0,0) left out (empty="blank")
+  const triangle = (): TrellisSpec => spec([panel(0, 0), panel(0, 1), panel(1, 1)], 2, 2, "grid");
+
+  it("draws both axes into a blank cell, the x labels short of the y labels", () => {
+    const l = layout(triangle(), opts);
+    const [corner, , diagonal] = l.panels;
+    expect([corner.showX, diagonal.showY]).toEqual([true, true]);
+    expect(diagonal.rect.x).toBe(l.panels[1].rect.x); // no gutter: the labels go in the cell
+    expect(crowdedRight(l, corner)).toBe(false);
+    expect(labelEnd(l, corner)).toBe(diagonal.yAxis!.x - 4); // "10" over "4": not drawn
+    expect(labelEnd(l, diagonal)).toBe(Infinity);
+  });
+
+  it("gives each panel a strip of its own naming it, and no others", () => {
+    const s = triangle();
+    s.grid.strip_label = true;
+    s.panels = s.panels.map((p, i) => ({ ...p, keys: ["r", String(i)], strip: `step ${i}` }));
+    const l = layout(s, opts);
+    expect(l.strips).toEqual([]);
+    expect(l.panels.map((b) => b.label)).toEqual(["step 0", "step 1", "step 2"]);
+    for (const b of l.panels) expect(b.strip!.y + b.strip!.h + 1).toBe(b.rect.y);
+    // the x labels of the panel above the blank cell: short of the strip right of it
+    const [corner, , diagonal] = l.panels;
+    expect(labelEnd(l, corner)).toBe(diagonal.strip!.x - 4);
+    // opened: its own strip's text too
+    expect(layout(s, { ...opts, focused: 2 }).panels[0].label).toBe("step 2");
   });
 });
 

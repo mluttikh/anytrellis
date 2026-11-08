@@ -367,6 +367,8 @@ class PanelBox:
     label: str
     note: str = ""
     """A paged wrap's value of the statistic sorted by, at the strip's right end."""
+    y_axis_x: float | None = None
+    """Where its y axis's labels may start (left), or None: it draws none."""
 
 
 @dataclass
@@ -385,6 +387,8 @@ class Layout:
     x_title: tuple[float, float] | None
     y_title: tuple[float, float] | None
     spare: Rect | None
+    x_axis_h: float = 0
+    """An x axis's height, its tick labels included."""
 
 
 def panel_name(spec: dict[str, Any], index: int) -> str:
@@ -456,17 +460,18 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
 
     strip_h = _round(fs * 1.5 + 4)
     nested = grid.get("strips") != "joined"
+    own = bool(grid.get("strip_label"))  # each panel's own strip, and no others
     start = grid.get("strip_from", 0)
 
     def depth(keys: list[list[str]] | None) -> int:
         return max(1, len(keys[0]) if keys else 1) if nested else 1
 
-    wrap_depth = depth([panels[0]["keys"][start:]] if panels else None) \
+    wrap_depth = 1 if own else depth([panels[0]["keys"][start:]] if panels else None) \
         if grid["kind"] == "wrap" else 0  # fmt: skip
-    col_depth = depth(grid.get("col_keys")) if grid["kind"] == "grid" and grid.get("col_labels") \
-        else 0  # fmt: skip
-    row_depth = depth(grid.get("row_keys")) if grid["kind"] == "grid" and grid.get("row_labels") \
-        else 0  # fmt: skip
+    col_depth = depth(grid.get("col_keys")) \
+        if not own and grid["kind"] == "grid" and grid.get("col_labels") else 0  # fmt: skip
+    row_depth = depth(grid.get("row_keys")) \
+        if not own and grid["kind"] == "grid" and grid.get("row_labels") else 0  # fmt: skip
     wrap_strip = wrap_depth * strip_h
     top_strip = col_depth * strip_h
     right_strip = row_depth * strip_h
@@ -523,8 +528,11 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         # a wrap's own strip: its innermost level's (the outer levels': strips over it)
         strip = Rect(rect.x, rect.y - strip_h, pw, strip_h - 1) if wrap_strip else None
         index = shown[i] if shown is not None else i
-        label = p["keys"][-1] if wrap_depth > 1 else p["label"]
-        boxes.append(PanelBox(index, rect, show_x[i], show_y[i], strip, label))
+        label = p.get("strip", p["label"]) if own \
+            else p["keys"][-1] if wrap_depth > 1 else p["label"]  # fmt: skip
+        y_axis_x = rect.x - y_label[i] if show_y[i] else None
+        boxes.append(PanelBox(index, rect, show_x[i], show_y[i], strip, label,
+                              y_axis_x=y_axis_x))  # fmt: skip
     strips = []
     if col_depth == 1:
         for c, label in enumerate(grid["col_labels"]):
@@ -578,6 +586,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         x_title=(centre_x, plot_bottom + x_title_h - 2) if x_title_h else None,
         y_title=(4 + fs, centre_y) if y_title_w else None,
         spare=spare,
+        x_axis_h=x_axis_h,
     )
 
 
@@ -611,7 +620,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
     rect = Rect(left + yw, top + strip_h, w, h)
     plot_bottom = rect.y + h + x_axis_h
     box = PanelBox(index, rect, True, True, Rect(rect.x, top, w, strip_h - 1),
-                   panel_name(spec, index))  # fmt: skip
+                   p.get("strip", panel_name(spec, index)), y_axis_x=rect.x - yw)  # fmt: skip
     return Layout(
         width=width,
         height=math.ceil(plot_bottom + bottom + 2),
@@ -620,6 +629,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
         x_title=(rect.x + w / 2, plot_bottom + x_title_h - 2) if x_title_h else None,
         y_title=(4 + fs, rect.y + h / 2) if y_title_w else None,
         spare=None,
+        x_axis_h=x_axis_h,
     )
 
 
@@ -1048,7 +1058,7 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
         r = v.rect
         d: list[str] = []
         if box.show_x:
-            crowded = _crowded_right(lay, box)
+            end = _label_end(lay, box)
             d.append(f"M{_n(r.x)} {_n(r.y + r.h + 0.5)}H{_n(r.x + r.w)}")
             last_right = -math.inf
             for value, label in _x_ticks(spec, v):
@@ -1058,8 +1068,8 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
                 tx = _round(x) + 0.5
                 d.append(f"M{_n(tx)} {_n(r.y + r.h)}V{_n(r.y + r.h + 4)}")
                 w = text_width(label)
-                if crowded and x + w / 2 > r.x + r.w - LABEL_ROOM:
-                    continue  # next to a panel's axis: not up to its first label
+                if x + w / 2 > end:
+                    continue  # next to a panel's axis: not up to its labels
                 lx = min(max(x, r.x + w / 2), r.x + r.w - w / 2 + 6)
                 if lx - w / 2 < last_right + 6:
                     continue
@@ -1125,6 +1135,27 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
 
 LABEL_ROOM = 4
 """Room (px) an x label leaves at its panel's right edge when another panel's x axis follows."""
+
+
+def _label_end(lay: Layout, box: PanelBox) -> float:
+    """How far right ``box``'s x labels may reach: not up to the first label of an x axis
+    right of it, nor into the y labels or the strip of the panel below and right of it (a
+    grid's empty cell below ``box``, drawn into from both sides) (drawing.ts: labelEnd)."""
+    r = box.rect
+    end = r.x + r.w - LABEL_ROOM if _crowded_right(lay, box) else math.inf
+    for b in lay.panels:
+        if b.rect.x <= r.x + r.w:
+            continue
+
+        def near(y: float) -> bool:
+            return r.y + r.h <= y < r.y + r.h + lay.x_axis_h
+
+        if b.y_axis_x is not None and b.y_axis_x < r.x + r.w + 8 and near(b.rect.y):
+            end = min(end, b.y_axis_x - LABEL_ROOM)
+        s = b.strip  # its strip (strip_label: a grid's panels have strips of their own)
+        if s is not None and s.x < r.x + r.w + 8 and near(s.y):
+            end = min(end, s.x - LABEL_ROOM)
+    return end
 
 
 def _crowded_right(lay: Layout, box: PanelBox) -> bool:

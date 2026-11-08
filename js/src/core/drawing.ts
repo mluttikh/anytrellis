@@ -178,7 +178,7 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     const v = views[i];
     const r = v.rect;
     if (box.showX) {
-      const crowded = crowdedRight(layout, box);
+      const end = labelEnd(layout, box);
       ctx.textAlign = "center";
       ctx.beginPath();
       ctx.moveTo(r.x, r.y + r.h + 0.5);
@@ -191,7 +191,7 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
         ctx.lineTo(Math.round(x) + 0.5, r.y + r.h + 4);
         const w = ctx.measureText(t.label).width;
         // next to a panel's axis: not up to its first label ("AprMar")
-        if (crowded && x + w / 2 > r.x + r.w - LABEL_ROOM) continue;
+        if (x + w / 2 > end) continue;
         const lx = Math.min(Math.max(x, r.x + w / 2), r.x + r.w - w / 2 + 6);
         if (lx - w / 2 < lastRight + 6) continue;
         ctx.fillText(t.label, lx, r.y + r.h + 4 + fs * 0.75);
@@ -306,6 +306,23 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
 /** Room (px) an x label leaves at its panel's right edge when another panel's x axis follows
  * there: with the gap between them, labels of neighbours stay well apart. */
 const LABEL_ROOM = 4;
+
+/** How far right `box`'s x labels may reach: not up to the first label of an x axis right of
+ * it ("AprMar"), nor into the y labels or the strip of the panel below and right of it (a
+ * grid's empty cell below `box`, drawn into from both sides: "10" over "4"). */
+export function labelEnd(layout: Layout, box: PanelBox): number {
+  const r = box.rect;
+  let end = crowdedRight(layout, box) ? r.x + r.w - LABEL_ROOM : Infinity;
+  for (const b of layout.panels) {
+    if (b.rect.x <= r.x + r.w) continue;
+    const near = (y: number): boolean => y >= r.y + r.h && y < r.y + r.h + layout.xAxisHeight;
+    if (b.yAxis && b.yAxis.x < r.x + r.w + 8 && near(b.rect.y)) end = Math.min(end, b.yAxis.x - LABEL_ROOM);
+    // its strip (strip_label: a grid's panels have strips of their own)
+    const s = b.strip;
+    if (s && s.x < r.x + r.w + 8 && near(s.y)) end = Math.min(end, s.x - LABEL_ROOM);
+  }
+  return end;
+}
 
 /** Whether the panel right of `box` (across the gap between panels) draws an x axis too, at
  * the same height: its first label starts where `box`'s last would end. */

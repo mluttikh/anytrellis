@@ -62,6 +62,36 @@ Trellis(penguins, wrap=["species", "island"], strips="joined")
 Either way, a panel's name in `panels()` and `open()` is its levels joined by ` · `
 (`"Adelie · Biscoe"`).
 
+## A grid with cells that can't have data
+
+A grid has a cell for every combination of its rows and columns. Some combinations can't
+happen: a species that doesn't live on an island, a step that comes before the step it
+starts from. Those cells stay empty, and with many of them the grid is mostly empty frames.
+`empty="blank"` leaves them out. The other panels keep their rows and columns, and the axes
+are drawn into the blank cells next to them:
+
+```python exec="on" source="above" session="layout" html="true"
+import polars as pl
+
+counted = penguins.with_columns(
+    title=pl.format("{} on {}: {} birds", "species", "island", pl.len().over("species", "island"))
+)
+plot = Trellis(counted, row="species", col="island", empty="blank", strip_label="title",
+               panel_height=140)
+plot.points(x="flipper_length_mm", y="body_mass_g", color="sex")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+Keep the default, `empty="draw"`, when an empty cell is news: data that should be there
+and isn't.
+
+`strip_label="title"` names each panel with the value of a column, in a strip over the
+panel. The column must have one value per panel; make it with the data, as above, or in
+the database's query. A panel without one is named by its levels. The rows' and columns'
+strips go, since each panel names itself. The panel's name in `panels()` and `open()` stays
+its levels (`"Adelie · Biscoe"`).
+
 ## Size
 
 | Argument | Sets |

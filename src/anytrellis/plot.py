@@ -30,7 +30,7 @@ from anytrellis.detail import (
     PointDetail,
     Shown,
 )
-from anytrellis.facets import Grid, Order, Summary, build_grid, ordered_levels
+from anytrellis.facets import Grid, Order, Panel, Summary, build_grid, ordered_levels, strip_texts
 from anytrellis.layers import (
     FACET_MODES,
     STEPS,
@@ -102,6 +102,7 @@ SPEC_VERSION = 1
 RENDERERS = ("auto", "webgpu", "webgl2", "canvas2d")
 LEGENDS = ("auto", "bottom")
 STRIPS = ("nested", "joined")
+EMPTY = ("draw", "blank")
 LOADS = ("all", "pages")
 PAGE_MARKS = ("points", "line", "text")
 """The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
@@ -160,6 +161,13 @@ class Trellis:
         strips: With several facet columns, ``"nested"``: a strip per column, each spanning
             the panels of its level (the first column's outermost); ``"joined"``: one strip
             per panel, row or column naming its levels together (``"north · A"``).
+        strip_label: A column whose value names each panel: every panel gets a strip of its
+            own with it (a grid too), in place of the strips above. It must have one value
+            per panel; a panel without one is named by its levels. Panel names in
+            ``panels()`` and ``open()`` stay their levels.
+        empty: A grid's cells without data: ``"draw"`` (empty panels, so a missing
+            combination shows) or ``"blank"`` (left out, the others in their rows and
+            columns: a triangle stays a triangle).
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
@@ -199,6 +207,8 @@ class Trellis:
         palette: Sequence[str] | None = None,
         legend: str = "auto",
         strips: str = "nested",
+        strip_label: str | None = None,
+        empty: str = "draw",
         fit_y: bool = False,
         link: str | Sequence[str] | None = None,
         load: str = "all",
@@ -244,8 +254,6 @@ class Trellis:
         self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
         self._scales: dict[str, str] = {"x": _scale(x_scale), "y": _scale(y_scale)}
         self._orders: dict[str, Order] = {}
-        self._keep_empty = True
-        """A grid's cells without data are kept (empty panels), or left out."""
         self._layers: list[Layer] = []
         self._tables: dict[int, Table] = {}
         self.height = height
@@ -263,6 +271,15 @@ class Trellis:
         if strips not in STRIPS:
             raise ValueError(f"strips must be one of {STRIPS}, got {strips!r}")
         self.strips = strips
+        if empty not in EMPTY:
+            raise ValueError(f"empty must be one of {EMPTY}, got {empty!r}")
+        if empty == "blank" and self._page:
+            raise ValueError("empty='blank' is not supported with page= (a page's grid keeps "
+                             "every cell, the same on every page)")  # fmt: skip
+        self._keep_empty = empty == "draw"
+        if strip_label is not None and not (self._row or self._col or self._wrap or self._page):
+            raise ValueError("strip_label= names facet panels: give row=, col= or wrap=")
+        self.strip_label = strip_label
         self.fit_y = bool(fit_y)
         self._link = _names(link)
         self._selection: Brush | None = None
@@ -1968,6 +1985,9 @@ class Trellis:
         assert whole is not None
 
         columns = (*self._page, *self._row, *self._col, *self._wrap)
+        label = self.strip_label
+        if label is not None and label in whole and label not in columns:
+            columns = (*columns, label)  # each combination's strip text with it
 
         def combinations() -> Table:
             found = distinct(whole, columns)
@@ -2137,7 +2157,7 @@ class Trellis:
     def _want_columns(self) -> None:
         """Tell each lazy table the columns the plot reads, so it reads them in one query."""
         shared: list[str | None] = [*self._page, *self._row, *self._col, *self._wrap,
-                                    *self._link]  # fmt: skip
+                                    *self._link, self.strip_label]  # fmt: skip
         for name, order in self._orders.items():
             shared += [name, order.of]
         tables = [] if self._data is None else [self._data]
@@ -2171,6 +2191,11 @@ class Trellis:
                           orders=self._orders, keep_empty=self._keep_empty,
                           page=self._page)  # fmt: skip
         npanels = len(grid.panels)
+        texts = None
+        paged_keys = len(self._page) if self._row or self._col or self._wrap else 0
+        if self.strip_label is not None:
+            texts = strip_texts(grid, [self._facets(), *own] if paged else tables,
+                                self.strip_label)  # fmt: skip
         pages = self._pages(grid)
         self._grid = grid
         window: frozenset[int] | None = None
@@ -2310,13 +2335,14 @@ class Trellis:
         spec = {
             "version": SPEC_VERSION,
             "title": self.title,
-            "grid": {**grid.spec(), "strips": self.strips},
+            "grid": {**grid.spec(), "strips": self.strips, "strip_label": texts is not None},
             "panels": [
                 {
                     "row": p.row,
                     "col": p.col,
                     "label": p.label,
                     "keys": list(p.keys),
+                    **({} if texts is None else {"strip": _strip_text(texts[i], p, paged_keys)}),
                     "x": [xd[i][0] - x_origin, xd[i][1] - x_origin],
                     "y": [yd[i][0] - y_origin, yd[i][1] - y_origin],
                     "xg": xg[i],
@@ -2783,6 +2809,14 @@ def _buffer_ids(spec_layer: dict[str, Any]) -> list[str]:
     if isinstance(color, dict):
         refs += [color.get("rgba"), color.get("codes")]
     return [r["id"] for r in refs if isinstance(r, dict) and "id" in r]
+
+
+def _strip_text(text: str | None, panel: Panel, paged: int) -> str:
+    """A panel's strip with ``strip_label``: its text, or (none) its levels, less the
+    first ``paged`` (the page's, which the pager names)."""
+    if text is not None:
+        return text
+    return " · ".join(panel.keys[paged:] or panel.keys)
 
 
 def _panel_name(panel: dict[str, Any], index: int) -> str:

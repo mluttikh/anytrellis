@@ -13,12 +13,25 @@ All notable changes to anytrellis. The format follows
   to each other that share its level (as ggh4x's in R): stacked on top of a grid's columns
   and a wrap's panels, side by side on the right of a grid's rows. Saved images draw them
   too.
+- `Trellis(empty="blank")`: a grid's cells without data are left out, and the other
+  panels keep their rows and columns, with axes drawn into the blank cells beside them.
+  The default, `"draw"`, keeps the empty panels.
+- `Trellis(strip_label=)`: a column whose value names each panel (one value per panel),
+  in a strip of the panel's own, in a grid too, in place of the row, column and nested
+  strips. A panel without a value is named by its levels; panel names in `panels()` and
+  `open()` stay the levels. With `load="pages"`, the database gives the labels with the
+  panels.
 
 ### Changed
 
 - A plot faceted by several columns (`wrap=["a", "b"]`, `col=[...]`, `row=[...]`) now
   shows nested strips, not one strip per panel naming the levels together (`"a · b"`);
   `strips="joined"` shows those. Panel names in `panels()` and `open()` are unchanged.
+
+### Fixed
+
+- A panel's last x label no longer runs into the y labels or the strip of the panel below
+  and right of it, when both draw into the empty cell between them ("10" over "4").
 
 ## [0.3.0] - 2026-11-08
 
