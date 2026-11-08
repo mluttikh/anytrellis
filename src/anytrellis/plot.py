@@ -13,7 +13,7 @@ import copy
 import html
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -273,6 +273,10 @@ class Trellis:
         self._linked_keys: tuple[tuple[str, ...], list[tuple[Any, ...]]] | None = None
         """``load="pages"``: the keys another plot of the link selects (its ``on`` columns
         and their values), or None."""
+        self._made: dict[int, tuple[Table, Geometry, Any]] = {}
+        """``load="pages"``: per layer drawing a page's rows, the geometry made last, of
+        which rows, and for which scales: a page turned keeps that of the panels still
+        read."""
         self._linked_counts: dict[int, tuple[Any, dict[int, np.ndarray]]] = {}
         """``load="pages"``: per summary layer, its rows' counts of the rows of the keys
         chosen last (and what they were counted for): kept while the pages turn."""
@@ -1593,6 +1597,18 @@ class Trellis:
         self._linked_counts[id(layer)] = (asked, out)
         return out
 
+    def _kept_geometry(self, layer: Layer, read: _Read, made_for: Any) -> _Kept | None:
+        """``load="pages"``, a page turned: the layer's geometry made last, if made of the
+        rows kept now and for the same scales (None: made again, whole)."""
+        last = self._made.get(id(layer))
+        if last is None or read.moved is None:
+            return None
+        table, geom, was_for = last
+        before, now = read.moved
+        if table is not before or was_for != made_for:
+            return None
+        return _Kept(geom, now, int((now >= 0).sum()))
+
     def _read_link_columns(self) -> None:
         """``load="pages"``: linked by the values of columns not read with the pages (it was
         drawn before): read the pages' rows again, with them (the database's summaries
@@ -1902,6 +1918,7 @@ class Trellis:
         self._scene_cache = None
         self._shadow = None
         self._queried = {}
+        self._made = {}
         if self._widget is not None:
             spec, _ = self._scene()
             self._widget._spec = spec
@@ -1995,9 +2012,13 @@ class Trellis:
         if last is not None and kept == window == last.panels:
             return last.rows
         parts = []
+        moved: tuple[Table, np.ndarray] | None = None
         if last is not None and kept:
             keep = np.flatnonzero(np.isin(last.panel_of, list(kept)))
             parts.append(last.rows._frame[keep])
+            now = np.full(last.rows.n, -1, dtype=np.int64)
+            now[keep] = np.arange(len(keep))
+            moved = (last.rows, now)  # each row read before: its row now
         if window - kept or not parts:
             parts.append(nw.from_native(self._query_rows(grid, window - kept, names).native))
         frame = parts[0] if len(parts) == 1 else nw.concat(parts, how="vertical")
@@ -2005,7 +2026,7 @@ class Trellis:
         rows.whole = whole
         panel_of = grid.assign(rows)
         assert panel_of is not None
-        self._read = _Read(names, keys, window, rows, panel_of)
+        self._read = _Read(names, keys, window, rows, panel_of, moved)
         return rows
 
     def _page_names(self) -> tuple[str, ...]:
@@ -2224,8 +2245,17 @@ class Trellis:
                 _paint(layer, table, geom, colors)
             else:
                 paged_points = window is not None and self._on_page(d.user)
+                read = self._read if paged and table is self._page_tables.get(id(d.user)) \
+                    else None  # fmt: skip
+                made_for = (x_levels, y_levels, tuple(steps.items()), colors.key())
+                kept = None
+                if read is not None and turning:
+                    kept = self._kept_geometry(layer, read, made_for)
                 geom, detail = _geometry(layer, table, grid, x_levels, y_levels, colors, steps,
-                                         self._cell_colors(layer, table), paged_points)  # fmt: skip
+                                         self._cell_colors(layer, table), paged_points,
+                                         None if read is None else read.panel_of, kept)  # fmt: skip
+                if read is not None:
+                    self._made[id(layer)] = (table, geom, made_for)
             extents["x"].add(geom.panel, geom.x0)
             extents["x"].add(geom.panel, geom.x1)
             extents["y"].add(geom.panel, geom.y0)
@@ -2680,6 +2710,9 @@ class _Read:
     rows: Table
     panel_of: np.ndarray
     """Each row's panel."""
+    moved: tuple[Table, np.ndarray] | None = None
+    """The rows read before (of panels still read), and each one's row now (-1: dropped):
+    the first rows now, the new after them."""
 
 
 @dataclass
@@ -2857,6 +2890,11 @@ class _ColorScales:
         self.order = [n for n in self.order if n in self.levels or n in self.ranges]
         self.colored = bool(self.order)
 
+    def key(self) -> tuple[Any, ...]:
+        """What the colours are made from: the same key, the same colours."""
+        return (tuple(self.palette or ()), tuple((k, tuple(v)) for k, v in self.levels.items()),
+                tuple(self.ranges.items()), tuple(self.order))  # fmt: skip
+
     def colors(self, name: str) -> list[str]:
         return palette_colors(self.palette, len(self.levels[name]))
 
@@ -2890,31 +2928,25 @@ def _geometry(
     steps: dict[str, float],
     cell_colors: Any = None,
     cells: bool = False,
+    panel_of: np.ndarray | None = None,
+    kept: _Kept | None = None,
 ) -> tuple[Geometry, Detail | None]:
     """A plain layer's geometry, and its level of detail: a line of many points thinned,
     points drawn as cells where dense (the geometry: what Python selects, all of it).
     ``cells``: points with a layer of cells after them, even with no dense panel (a page's
-    rows: the layers stay the same from page to page)."""
+    rows: the layers stay the same from page to page). ``panel_of``: each row's panel, if
+    known. ``kept``: a page turned: the geometry of the panels still read, kept, and only
+    that of the rows read now made."""
     assert layer.x is not None
     assert layer.y is not None
-    x = axis_values(table.column(layer.x), x_levels)
-    y = axis_values(table.column(layer.y), y_levels)
-    rows, panel = expand(grid.assign(table), table.n, len(grid.panels), layer.facet)
-    codes: np.ndarray | None = None
-    ncodes = 0
-    color_col = (
-        table.column(layer.color) if layer.color is not None and layer.color in table else None
-    )
-    if color_col is not None and color_col.kind == "category":
-        levels = colors.levels[color_col.name]
-        codes = axis_values(color_col, levels).astype(np.int64)
-        ncodes = len(levels)
+    if panel_of is None:
+        panel_of = grid.assign(table)
     if layer.mark == "line":
-        extra = list(layer.group)
-        if color_col is not None and color_col.kind == "category":
-            extra.append(color_col.name)
-        series = series_codes(table, extra)
+        rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet)
         if len(panel) and np.bincount(panel).max() > THIN:
+            x = axis_values(table.column(layer.x), x_levels)
+            y = axis_values(table.column(layer.y), y_levels)
+            series = series_codes(table, _series_names(layer, table))
             xs, ys, ss = x[rows], y[rows], series[rows]
             order = np.lexsort((xs, ss, panel))
             detail = LineDetail(rows[order], panel[order], xs[order], ys[order], ss[order],
@@ -2922,33 +2954,109 @@ def _geometry(
                                 lambda g: _paint(layer, table, g, colors))  # fmt: skip
             if detail.thin.any():
                 return detail.points, detail
-        geom = line_geometry(rows, panel, x, y, series, layer.step)
+    if kept is not None and panel_of is not None and layer.facet in ("auto", "include"):
+        geom = _merged(layer, table, grid, x_levels, y_levels, colors, steps, panel_of, kept)
+    else:
+        geom = _marks(layer, table, grid, x_levels, y_levels, colors, steps, panel_of)
+    dense = cells or (len(geom.panel) > DENSE and np.bincount(geom.panel).max() > DENSE)
+    numbers = x_levels is None and y_levels is None
+    if layer.mark == "points" and numbers and cell_colors is not None and dense:
+        values = None
+        color_col = table.column(layer.color) if layer.color is not None and \
+            layer.color in table else None  # fmt: skip
+        if color_col is not None and color_col.kind == "number":
+            values = color_col.values[geom.rows]
+        levels = colors.levels.get(color_col.name) if color_col is not None else None
+        name = None if color_col is None else color_col.name
+        return geom, PointDetail(geom, len(grid.panels), values, cell_colors, name, levels)
+    return geom, None
+
+
+@dataclass
+class _Kept:
+    """``load="pages"``, a page turned: the geometry of the rows read before, and how they
+    are kept in the rows read now (the kept first, in their order, then the new)."""
+
+    geometry: Geometry
+    rows: np.ndarray
+    """Each row read before: its row now, or -1 (its panel no longer read)."""
+    fresh: int
+    """The first row read now (the rows after it: of the panels that came near)."""
+
+
+def _merged(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
+            y_levels: list[str] | None, colors: _ColorScales, steps: dict[str, float],
+            panel_of: np.ndarray, kept: _Kept) -> Geometry:  # fmt: skip
+    """The geometry of the panels still read, kept (their rows renumbered), and of the rows
+    read now, made: each panel's instances depend on its rows alone."""
+    import narwhals as nw
+
+    old = kept.geometry
+    stay = kept.rows[old.rows] >= 0
+    if old.rows_end is not None:
+        stay &= kept.rows[old.rows_end] >= 0
+    before = old.take(np.flatnonzero(stay))
+    end = None if before.rows_end is None else kept.rows[before.rows_end]
+    before = replace(before, rows=kept.rows[before.rows], rows_end=end)
+    fresh = Table(nw.to_native(table._frame[kept.fresh :]))
+    fresh.whole = table.whole
+    made = _marks(layer, fresh, grid, x_levels, y_levels, colors, steps, panel_of[kept.fresh :])
+    end = None if made.rows_end is None else made.rows_end + kept.fresh
+    made = replace(made, rows=made.rows + kept.fresh, rows_end=end)
+    both = _concat_geometry(before, made)
+    if both is None:
+        return _marks(layer, table, grid, x_levels, y_levels, colors, steps, panel_of)
+    return both.take(np.argsort(both.panel, kind="stable"))
+
+
+def _concat_geometry(a: Geometry, b: Geometry) -> Geometry | None:
+    """Two geometries' instances, one after the other (None: one has an array the other
+    hasn't)."""
+    out: list[np.ndarray | None] = []
+    for f in fields(Geometry):
+        u, v = getattr(a, f.name), getattr(b, f.name)
+        if u is None and v is None:
+            out.append(None)
+        elif u is None or v is None:
+            if (a.count if u is None else b.count) > 0:
+                return None
+            out.append(u if v is None else v)
+        else:
+            out.append(np.concatenate([u, v]))
+    return Geometry(*out)  # ty: ignore[invalid-argument-type]
+
+
+def _series_names(layer: Layer, table: Table) -> list[str]:
+    """The columns splitting a line, area or band into series: its groups and colour."""
+    extra = list(layer.group)
+    if layer.color is not None and layer.color in table and \
+            table.column(layer.color).kind == "category":  # fmt: skip
+        extra.append(layer.color)
+    return extra
+
+
+def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
+           y_levels: list[str] | None, colors: _ColorScales, steps: dict[str, float],
+           panel_of: np.ndarray | None) -> Geometry:  # fmt: skip
+    """A plain layer's instances of these rows, coloured."""
+    assert layer.x is not None
+    assert layer.y is not None
+    x = axis_values(table.column(layer.x), x_levels)
+    y = axis_values(table.column(layer.y), y_levels)
+    rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet)
+    if layer.mark == "line":
+        geom = line_geometry(rows, panel, x, y, series_codes(table, _series_names(layer, table)),
+                             layer.step)  # fmt: skip
     elif layer.mark == "area":
-        extra = list(layer.group)
-        if color_col is not None and color_col.kind == "category":
-            extra.append(color_col.name)
-        geom = area_geometry(rows, panel, x, y, series_codes(table, extra),
+        geom = area_geometry(rows, panel, x, y, series_codes(table, _series_names(layer, table)),
                              stack=layer.position == "stack")  # fmt: skip
     elif layer.mark == "band":
         assert layer.y2 is not None
         upper = axis_values(table.column(layer.y2), y_levels)
-        extra = list(layer.group)
-        if color_col is not None and color_col.kind == "category":
-            extra.append(color_col.name)
-        geom = band_geometry(rows, panel, x, y, upper, series_codes(table, extra))
+        geom = band_geometry(rows, panel, x, y, upper,
+                             series_codes(table, _series_names(layer, table)))  # fmt: skip
     elif layer.mark in ("points", "text"):
         geom = point_geometry(rows, panel, x, y)
-        numbers = x_levels is None and y_levels is None
-        dense = cells or (len(geom.panel) > DENSE and np.bincount(geom.panel).max() > DENSE)
-        if layer.mark == "points" and numbers and cell_colors is not None and dense:
-            _paint(layer, table, geom, colors)
-            values = None
-            if color_col is not None and color_col.kind == "number":
-                values = color_col.values[geom.rows]
-            levels = colors.levels.get(color_col.name) if color_col is not None else None
-            name = None if color_col is None else color_col.name
-            detail = PointDetail(geom, len(grid.panels), values, cell_colors, name, levels)
-            return geom, detail
     elif layer.mark == "rect":
         x2 = axis_values(table.column(layer.x2), x_levels) if layer.x2 else None
         y2 = axis_values(table.column(layer.y2), y_levels) if layer.y2 else None
@@ -2956,11 +3064,19 @@ def _geometry(
                              y_step=steps["rect_y"], width=layer.bar_width,
                              height=layer.rect_height)  # fmt: skip
     else:
+        codes: np.ndarray | None = None
+        ncodes = 0
+        color_col = table.column(layer.color) if layer.color is not None and \
+            layer.color in table else None  # fmt: skip
+        if color_col is not None and color_col.kind == "category":
+            levels = colors.levels[color_col.name]
+            codes = axis_values(color_col, levels).astype(np.int64)
+            ncodes = len(levels)
         step = 1.0 if x_levels is not None else steps["bars"]
         geom = bar_geometry(rows, panel, x, y, step=step, width=layer.bar_width, codes=codes,
                             ncodes=ncodes, position=layer.position)  # fmt: skip
     _paint(layer, table, geom, colors)
-    return geom, None
+    return geom
 
 
 def _paint(layer: Layer, table: Table, geom: Geometry, colors: _ColorScales) -> None:

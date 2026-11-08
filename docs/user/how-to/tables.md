@@ -131,7 +131,8 @@ category columns and the range of the number colours.
 
 Ten million readings of 1,000 stations, from DuckDB, are drawn in 1.0 s rather than 3.9 s,
 from 480,000 rows read rather than all of them. Turning a page keeps the rows of the pages
-still around it and reads those of the page that came near (240,000) in 0.25 s. With
+still around it, with their lines and points as drawn, and reads and draws those of the
+page that came near (240,000) in 0.2 s. With
 `page=`, a level is read by its value (`WHERE site IN (...)`), not panel by panel.
 
 - **Lines, points and text** are drawn from the plot's data a page at a time.

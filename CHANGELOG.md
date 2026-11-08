@@ -34,7 +34,8 @@ All notable changes to anytrellis. The format follows
   range of x and y, the category levels and the colour ranges come from the database, so
   every page looks as with every row read. Ten million rows in 1,000 panels from DuckDB
   are drawn in 1.0 s from 480,000 rows read (3.9 s reading all of them); a page turned
-  reads only the page that came near, in 0.25 s. `selected()` is a query of the selected
+  reads only the page that came near and makes only its panels' lines and points, keeping
+  the others', in 0.2 s. `selected()` is a query of the selected
   rows; a saved page reads every row of the lines, points and text.
 - Summaries with `load="pages"`: `hist`, `box`, `violin`, `density`, `smooth` and
   `errorbar` of the plot's data are computed by the database, every panel's at once, and
