@@ -222,8 +222,10 @@ def test_what_page_mode_does_not_do() -> None:
         Trellis(rel, wrap="station", rows="all", load="pages")
     with pytest.raises(ValueError, match="lazy table"):
         Trellis(df, wrap="station", load="pages").line(x="t", y="temp")._scene()
-    with pytest.raises(ValueError, match="hist"):
-        Trellis(rel, wrap="station", load="pages").hist(x="temp")._scene()
+    with pytest.raises(ValueError, match="area"):
+        Trellis(rel, wrap="station", load="pages").area(x="t", y="temp")._scene()
+    with pytest.raises(ValueError, match="facet="):
+        Trellis(rel, wrap="station", load="pages").hist(x="temp", facet="exclude")._scene()
     with pytest.raises(ValueError, match="link="):
         Trellis(rel, wrap="station", load="pages", link="station").line(x="t", y="temp")._scene()
     with pytest.raises(ValueError, match="facet="):
