@@ -15,6 +15,10 @@ any table. Points, lines and boxes of those rows light up, the rest fade; a hist
 fill to the share of their count that is selected. A brush in another plot of the link takes
 over: the first plot's brush goes, and it shows the new selection in turn.
 
+A plot reading pages (``load="pages"``) links with ``on=``: its selection is a query, read
+as the keys chosen; another's selection lights up the rows of its pages read, and its
+summaries count the rows of the keys chosen in the database.
+
 Python relays the selection: the plots are linked in a running kernel, not in a saved page.
 """
 
@@ -31,9 +35,10 @@ if TYPE_CHECKING:
     from anytrellis.data import Table
     from anytrellis.plot import Trellis
 
-Masks = dict[int, np.ndarray | None]
+Masks = dict[int, "np.ndarray | dict[int, np.ndarray] | None"]
 """Per layer of a plot (``id`` of the layer as given): the rows of its data highlighted, or
-None (its data is not linked: drawn as it is)."""
+None (its data is not linked: drawn as it is); a summary from the database (``load="pages"``):
+per part (``id``), how many rows each of its rows stands for are highlighted."""
 
 
 class Link:
@@ -50,12 +55,17 @@ class Link:
                 raise TypeError(f"link() takes Trellis plots, got {type(p).__name__}")
             if p._link_group is not None:
                 raise ValueError(f"{p!r} is linked already: unlink() it first")
-            if p._load == "pages":
-                raise ValueError("a plot reading pages (load='pages') can't be linked yet")
         if len({id(p) for p in plots}) != len(plots):
             raise ValueError("a plot is given twice")
         self.plots = plots
         self.on: tuple[str, ...] = (on,) if isinstance(on, str) else tuple(on or ())
+        if not self.on and any(p._load == "pages" for p in plots):
+            raise ValueError(
+                "a plot reading pages (load='pages') links by the values of columns: give "
+                "on= (its rows are in the database: not the same rows as another's)"
+            )
+        self._chosen: list[tuple[Table, np.ndarray]] = []
+        """The source's selected rows: of its tables, and its queries' keys, read."""
         self.source: Trellis | None = None
         """The plot whose brush makes the selection, or None: nothing selected."""
         self._busy = False
@@ -73,6 +83,7 @@ class Link:
         for p in self.plots:
             p._link_group = None
             p._live(False)
+            p._linked_keys = None
             p._set_highlight(None)
         self.source = None
 
@@ -104,6 +115,7 @@ class Link:
             finally:
                 self._busy = False
         for p in self.plots:
+            p._linked_keys = None
             p._set_highlight(None)
 
     def relay(self) -> None:
@@ -111,9 +123,35 @@ class Link:
         source = self.source
         if source is None:
             return
-        chosen = source._selected_masks()
+        self._chosen = source._selected_masks() + self._queried(source)
         for p in self.plots:
-            p._set_highlight(None if p is source else self._masks_for(p, chosen))
+            if p is source:
+                p._linked_keys = None
+                p._set_highlight(None)
+            else:
+                p._set_highlight(self._masks_for(p, self._chosen))
+
+    def refresh(self, plot: Trellis) -> None:
+        """Show the selection in ``plot`` again: it reads other rows (``load="pages"``)."""
+        if self.source is not None and plot is not self.source:
+            plot._set_highlight(self._masks_for(plot, self._chosen))
+
+    def _queried(self, source: Trellis) -> list[tuple[Table, np.ndarray]]:
+        """The keys of the rows a plot reading pages selects, read (distinct)."""
+        import narwhals as nw
+
+        from anytrellis.data import Table
+
+        out = []
+        for whole, query in source._selected_queries():
+            if not all(name in whole for name in self.on):
+                continue
+            frame = nw.from_native(query)
+            if isinstance(frame, nw.DataFrame):
+                frame = frame.lazy()
+            keys = Table(nw.to_native(frame.select(*self.on).unique().collect()))
+            out.append((keys, np.ones(keys.n, dtype=bool)))
+        return out
 
     def _masks_for(self, plot: Trellis, chosen: list[tuple[Table, np.ndarray]]) -> Masks:
         """The rows of ``plot``'s layers' data that the source's ``chosen`` rows select."""
@@ -125,11 +163,22 @@ class Link:
                 masks = [m for t, m in chosen if t.native is native]
                 out[id(layer)] = np.logical_or.reduce(masks) if masks else None
             return out
+        from anytrellis.layers import SUMMARIES
+
+        # a summary from the database (load="pages"): the rows of the keys chosen, counted
+        counted = [lr for lr in layers if plot._on_page(lr) and lr.mark in SUMMARIES]
+        layers = [lr for lr in layers if lr not in counted]
+        if any(plot._on_page(lr) for lr in plot._mark_layers()):
+            plot._scene()  # (the rows of the pages around the one shown, read)
+            values = _chosen_keys(chosen, self.on)
+            plot._linked_keys = (self.on, values)
+            for layer in counted:
+                out[id(layer)] = plot._linked_summary(layer, self.on, values)
         tables = [t for t, _ in chosen] + [plot._table(lr) for lr in layers]
         keys = self._link_keys(tables)
         known = [k for k in keys if k is not None]
         if not known:
-            return {id(lr): None for lr in layers}
+            return {**out, **{id(lr): None for lr in layers}}
         picked = np.zeros(max(int(k.max(initial=-1)) for k in known) + 1, dtype=bool)
         for (_, mask), k in zip(chosen, keys[: len(chosen)], strict=True):
             if k is not None:
@@ -149,6 +198,19 @@ class Link:
     def __repr__(self) -> str:
         on = f", on={list(self.on)}" if self.on else ""
         return f"Link({len(self.plots)} plots{on})"
+
+
+def _chosen_keys(chosen: list[tuple[Table, np.ndarray]],
+                 on: tuple[str, ...]) -> list[tuple[Any, ...]]:  # fmt: skip
+    """The distinct values of the ``on`` columns of the rows chosen (Python values)."""
+    out: dict[tuple[Any, ...], None] = {}
+    for table, mask in chosen:
+        if not all(name in table for name in on) or not mask.any():
+            continue
+        rows = np.flatnonzero(mask)
+        values = [np.asarray(table.values(name), dtype=object)[rows] for name in on]
+        out.update(dict.fromkeys(zip(*values, strict=True)))
+    return list(out)
 
 
 def link(*plots: Trellis, on: str | Sequence[str] | None = None) -> Link:
@@ -189,15 +251,23 @@ def highlight_message(
             layers.append(None)
             continue
         if part is None:
+            assert isinstance(rows, np.ndarray)
             hit = rows[geom.rows]
             if geom.rows_end is not None:
                 hit = hit | rows[geom.rows_end]
             value, kind = hit, "mask"
-        else:  # a summary's row: the share of the rows it stands for that are selected
-            starts = part.members.starts
-            sizes = np.diff(starts)
-            inside = np.r_[0, np.cumsum(rows[part.members.rows], dtype=np.int64)]
-            count = inside[starts[1:]] - inside[starts[:-1]]
+        else:
+            if isinstance(rows, dict):  # a summary from the database: its rows' counts
+                found = rows.get(id(part))
+                if found is None:
+                    layers.append(None)
+                    continue
+                count, sizes = found, _sizes(part, len(found))
+            else:  # a summary's row: the share of the rows it stands for that are selected
+                starts = part.members.starts
+                sizes = np.diff(starts)
+                inside = np.r_[0, np.cumsum(rows[part.members.rows], dtype=np.int64)]
+                count = inside[starts[1:]] - inside[starts[:-1]]
             share = np.divide(count, sizes, out=np.zeros(len(sizes)), where=sizes > 0)
             if part.layer.stat == "hist" and part.layer.mark in ("bars", "rect"):
                 value, kind = share[geom.rows].astype(np.float32), "fraction"
@@ -210,3 +280,11 @@ def highlight_message(
         total += len(value)
     message = {"type": "highlight", "layers": layers, "selected": selected, "total": total}
     return message, buffers
+
+
+def _sizes(part: Any, n: int) -> np.ndarray:
+    """How many rows each of a summary's rows stands for: a histogram's counts (others: 1,
+    only a histogram shows a share)."""
+    if "count" in part.table:
+        return np.asarray(part.table.column("count").values, dtype=np.float64)
+    return np.ones(n)

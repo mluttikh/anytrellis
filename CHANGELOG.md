@@ -35,7 +35,7 @@ All notable changes to anytrellis. The format follows
   every page looks as with every row read. Ten million rows in 1,000 panels from DuckDB
   are drawn in 1.0 s from 480,000 rows read (3.9 s reading all of them); a page turned
   reads only the page that came near, in 0.25 s. `selected()` is a query of the selected
-  rows; a saved page reads every row of the lines, points and text. Not with `link`.
+  rows; a saved page reads every row of the lines, points and text.
 - Summaries with `load="pages"`: `hist`, `box`, `violin`, `density`, `smooth` and
   `errorbar` of the plot's data are computed by the database, every panel's at once, and
   no row is read: bin counts, quartiles and whiskers, means and spreads, sums of squares,
@@ -44,6 +44,11 @@ All notable changes to anytrellis. The format follows
   asking again. A brush over a summary selects the rows it stands for, as a query. Ten
   million rows in 1,000 panels: a histogram in 0.8 s (3.2 s reading every row), a loess
   fit in 3.6 s (22 s).
+- Linking with `load="pages"`: `link=` selects the rows sharing the brushed rows' keys in
+  every panel, as a query. `anytrellis.link(..., on=)` links a plot reading pages to any
+  other: its selection is read as the keys chosen, and a selection elsewhere lights up the
+  rows of the pages read and fills its summaries (counted by the database) to the share
+  of the keys chosen. A link of a plot reading pages needs `on=`.
 - Paged wraps send only the panels near the page shown: in a notebook, the browser gets
   the data of the page shown and the pages either side of it, and more as the pages turn,
   are sorted or filtered, or a panel of another page opens; a page further away says it

@@ -144,8 +144,15 @@ still around it and reads those of the page that came near (240,000) in 0.25 s. 
   curve.
 - **`save_html`** and `to_html` read every row of the lines, points and text, as
   `load="all"` does: the page holds every panel. A plot of summaries only reads none.
-- Not yet: `link=` and `anytrellis.link`. A wrap of 100 panels or fewer, which doesn't
-  page, reads every row; give `rows=` to page it. With `page=`, a page is a level: turning
+- **`link=`**: a brush in a panel selects the rows sharing its rows' keys in every panel,
+  as a query (`selected()`); the panels of the pages read light up those of the panel
+  brushed. **`anytrellis.link(..., on=)`** links a plot reading pages to others by the
+  values of columns (give `on=`: its rows are in the database, not the same rows as
+  another's). Its selection is read as the keys chosen; a selection elsewhere lights up
+  the rows of the pages read, and its summaries count the rows of the keys chosen, read
+  from the database (a histogram's bars fill to their share).
+- A wrap of 100 panels or fewer, which doesn't page, reads every row; give `rows=` to
+  page it. With `page=`, a page is a level: turning
   to it reads that level's rows (a grid's too).
 - A database that can't compute the panels' statistics (a median, a standard deviation)
   gives an error: use `load="all"`. Without the trend's window query (Ibis, over a time x),

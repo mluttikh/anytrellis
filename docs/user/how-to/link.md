@@ -74,6 +74,12 @@ print(sorted(lives.selected()["country"].unique()))
 `link="country"` on `years` follows the brushed countries through its own panels;
 `on="country"` shows the same countries in `lives`.
 
+A plot reading a database a page at a time (`load="pages"`, see
+[tables](tables.md#reading-a-page-at-a-time)) links with `on=` only: its rows are in the
+database. Its selection is read as the keys chosen, and a selection elsewhere lights up
+the rows of its pages read; its histograms fill to the share of the keys chosen, counted
+by the database.
+
 ## Unlink
 
 `link()` returns a `Link`. `unlink()` sets the plots apart again (each keeps its own
