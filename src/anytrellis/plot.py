@@ -167,7 +167,8 @@ class Trellis:
             ``panels()`` and ``open()`` stay their levels.
         empty: A grid's cells without data: ``"draw"`` (empty panels, so a missing
             combination shows) or ``"blank"`` (left out, the others in their rows and
-            columns: a triangle stays a triangle).
+            columns: a triangle stays a triangle). With ``page=``: the cells without data
+            on every page, so each page has the same cells.
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
@@ -273,9 +274,6 @@ class Trellis:
         self.strips = strips
         if empty not in EMPTY:
             raise ValueError(f"empty must be one of {EMPTY}, got {empty!r}")
-        if empty == "blank" and self._page:
-            raise ValueError("empty='blank' is not supported with page= (a page's grid keeps "
-                             "every cell, the same on every page)")  # fmt: skip
         self._keep_empty = empty == "draw"
         if strip_label is not None and not (self._row or self._col or self._wrap or self._page):
             raise ValueError("strip_label= names facet panels: give row=, col= or wrap=")

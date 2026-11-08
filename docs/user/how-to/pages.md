@@ -134,7 +134,8 @@ print(regions._embed_html())  # markdown-exec: hide
   order each level's panels; a level with none left has no page.
 - **A grid** (`row=`, `col=`) shows each level's every cell, in the same place on every
   page, so turning the pages compares them cell by cell. Its pages aren't sorted or
-  filtered.
+  filtered. With `empty="blank"`, the cells without data on any page are left out, on
+  every page; a cell with data on some pages only is an empty panel on the others.
 - **The scales** are shared by every page, unless `share_x="page"` or `share_y="page"`
   gives each page its own.
 - **The levels** are in the column's order; `order("region", ...)` orders them, by name or

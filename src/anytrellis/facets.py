@@ -6,7 +6,8 @@ the combinations present, wrapped into ``cols`` columns). Several columns may be
 each; their combinations are the levels, in the order of the first column, then the next.
 
 Page columns (``page=``) split either into pages, one per level: a grid's every cell on each
-page (the same rows and columns on all), a wrap's combinations present on each page.
+page (the same rows and columns on all; with ``keep_empty=False``, those with data on some
+page), a wrap's combinations present on each page.
 """
 
 from __future__ import annotations
@@ -133,8 +134,6 @@ def build_grid(
     columns, a grid or wrap per page level, their panels in turn."""
     if wrap and (row or col):
         raise ValueError("use wrap= alone, or row= and/or col= (a grid), not both")
-    if page and not keep_empty:
-        raise ValueError("page columns keep a grid's empty cells")
     columns = (*page, *row, *col, *wrap)
     if not columns:
         return Grid("single", 1, 1, [Panel(0, 0, 0, "")])
@@ -203,11 +202,14 @@ def build_grid(
         _row_vars=row, _col_vars=col, _page_vars=page,
         _page_combos=page_combos if page_combos is not None else np.zeros((1, 0), np.int64),
     )  # fmt: skip
-    if not keep_empty:  # the cells with data, numbered in turn
-        used = _used(grid, sources)
-        kept = [p for p in grid.panels if p.index in used]
-        grid._kept = np.full(nrows * ncols, -1, dtype=np.int64)
+    if not keep_empty:  # the cells with data on some page, numbered in turn, on every page
+        cells = nrows * ncols
+        used = {i % cells for i in _used(grid, sources)}
+        kept = [p for p in grid.panels if p.index % cells in used]
+        grid._kept = np.full(len(pages) * cells, -1, dtype=np.int64)
         grid._kept[[p.index for p in kept]] = np.arange(len(kept))
+        if page_of is not None:
+            grid.page_of = page_of[[p.index for p in kept]]
         grid.panels = [replace(p, index=i) for i, p in enumerate(kept)]
     return grid
 

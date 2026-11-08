@@ -162,6 +162,15 @@ describe("a grid's blank cells and panels' own strips", () => {
     // opened: its own strip's text too
     expect(layout(s, { ...opts, focused: 2 }).panels[0].label).toBe("step 2");
   });
+
+  it("pages a grid with the same blank cells on every page, so turning them moves nothing", () => {
+    const s = spec([panel(0, 0), panel(0, 1), panel(1, 1), panel(0, 0), panel(0, 1), panel(1, 1)], 2, 2, "grid");
+    s.pages = { rows: 2, cols: 2, stats: [], grid: true, groups: [0, 0, 0, 1, 1, 1], levels: ["a", "b"] };
+    const [a, b] = [[0, 1, 2], [3, 4, 5]].map((page) => layout(s, { ...opts, page }));
+    expect(b.panels.map((p) => p.index)).toEqual([3, 4, 5]);
+    expect(b.panels.map((p) => p.rect)).toEqual(a.panels.map((p) => p.rect));
+    expect(labelEnd(b, b.panels[0])).toBe(b.panels[2].yAxis!.x - 4); // the blank cell's axes
+  });
 });
 
 describe("layout", () => {

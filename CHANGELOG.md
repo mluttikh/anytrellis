@@ -15,7 +15,8 @@ All notable changes to anytrellis. The format follows
   too.
 - `Trellis(empty="blank")`: a grid's cells without data are left out, and the other
   panels keep their rows and columns, with axes drawn into the blank cells beside them.
-  The default, `"draw"`, keeps the empty panels.
+  The default, `"draw"`, keeps the empty panels. With `page=`, a cell is left out when
+  it has no data on any page, so every page has the same cells.
 - `Trellis(strip_label=)`: a column whose value names each panel (one value per panel),
   in a strip of the panel's own, in a grid too, in place of the row, column and nested
   strips. A panel without a value is named by its levels; panel names in `panels()` and

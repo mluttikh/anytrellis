@@ -7,10 +7,12 @@ from __future__ import annotations
 from typing import Any
 
 import duckdb
+import numpy as np
 import polars as pl
 import pytest
 
 from anytrellis import Trellis
+from anytrellis.data import Table
 from anytrellis.figure import _label_end, figure_svg, layout
 
 STEPS = ("s1", "s2", "s3", "s4")
@@ -60,8 +62,6 @@ def test_blank_cells_take_the_axes_of_the_panels_beside_them() -> None:
 def test_empty_takes_draw_or_blank_and_not_with_page() -> None:
     with pytest.raises(ValueError, match="empty must be one of"):
         Trellis(triangle(), row="from", col="to", empty="hide")
-    with pytest.raises(ValueError, match="not supported with page="):
-        Trellis(triangle(), page="from", col="to", empty="blank")
     wrap = Trellis(triangle(), wrap="to", empty="blank").points(x="x", y="y")
     assert len(scene(wrap)["panels"]) == 4  # a wrap has no empty cells
 
@@ -139,3 +139,53 @@ def test_an_svg_draws_the_labels() -> None:
     for label in ("s1 to s1", "s3 to s4", "s4 to s4"):
         assert f">{label}<" in svg
     assert ">s2 · s1<" not in svg  # a blank cell: no panel, no strip
+
+
+def products() -> pl.DataFrame:
+    """A triangle per product; product b has no rows from s1 to s3, which a has."""
+    both = pl.concat([triangle().with_columns(product=pl.lit(p)) for p in ("a", "b")])
+    return both.filter(~((pl.col("product") == "b") & (pl.col("from") == "s1")
+                         & (pl.col("to") == "s3")))  # fmt: skip
+
+
+def test_pages_blank_the_cells_empty_on_every_page() -> None:
+    """Each page has the same cells: those with data on some page. A cell empty on one
+    page only is drawn there, empty."""
+    t = Trellis(products(), page="product", row="from", col="to", empty="blank")
+    spec = scene(t.points(x="x", y="y"))
+    cells = [(r, c) for r in range(4) for c in range(r, 4)]
+    assert [(p["row"], p["col"]) for p in spec["panels"]] == cells + cells
+    assert spec["pages"]["groups"] == [0] * 10 + [1] * 10
+    assert t.panels()[10:12] == ["b · s1 · s1", "b · s1 · s2"]
+    # every row in the panel of its product, from and to
+    df = products()
+    at = t._grid.assign(Table(df))
+    assert at is not None
+    names = [t._grid.panels[i].keys for i in at]
+    assert names == list(zip(df["product"], df["from"], df["to"], strict=True))
+    assert np.bincount(at, minlength=20)[12] == 0  # b's s1 to s3: drawn, empty
+    # the pages' layouts alike: turning them doesn't move the plot
+    a, b = (layout(spec, 800, page=list(range(k, k + 10))) for k in (0, 10))
+    assert [x.rect for x in a.panels] == [x.rect for x in b.panels]
+    assert a.height == b.height
+
+
+def test_a_database_pages_a_grid_with_blank_cells() -> None:
+    rel = duckdb.from_arrow(products().to_arrow())
+
+    def make(load: str) -> Trellis:
+        t = Trellis(rel, page="product", row="from", col="to", empty="blank", load=load)
+        return t.points(x="x", y="y")
+
+    paged, whole = make("pages"), make("all")
+    for t in (paged, whole):
+        t.show_page(2)  # product b
+
+    def counts(t: Trellis) -> list[int]:
+        geom = next(g for _, _, g in t._geometry if g is not None)
+        return np.bincount(geom.panel, minlength=20)[10:].tolist()
+
+    assert len(scene(paged)["panels"]) == 20
+    assert counts(paged) == counts(whole)
+    assert counts(paged)[0] == 5  # page b read: its rows in their panels
+    assert counts(paged)[2] == 0
