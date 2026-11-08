@@ -8,6 +8,14 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- `Trellis(page=)`: a page per level of a column (or columns). A grid (`row=`, `col=`)
+  shows each level's every cell, in the same place on every page; a wrap shows the level's
+  panels, sorted and filtered within it, on several pages with `rows=` when there are more
+  than fit. The pager names the page shown and lists the levels to pick from;
+  `show_page("north")` and `page_names` do the same from Python. `share_x="page"` and
+  `share_y="page"` give each page its own scale. With `load="pages"`, a level's rows are
+  read as its page is turned to.
+
 - `pairs()`: a scatterplot matrix of a table's number columns, x by column and y by row,
   each variable's scale shared along its column and its row. The diagonal shows each
   variable alone (a density curve per colour, or a stacked histogram) over its own range.

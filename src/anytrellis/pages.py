@@ -216,3 +216,36 @@ def _within(v: float, lo: float | None, hi: float | None) -> bool:
 
 def page_count(shown: int, per_page: int) -> int:
     return max(1, -(-shown // per_page))
+
+
+def page_list(shown: Sequence[int], per: int, groups: Sequence[int] | None) -> list[list[int]]:
+    """The pages: the panels shown (in order) ``per`` a page; with page columns (``groups``:
+    each panel's page level), each level's panels on pages of their own, the levels in
+    order (one the filters leave empty: none). At least one page, maybe empty. In step with
+    ``pageList`` in js/src/core/pages.ts."""
+    per = max(1, per)
+    out: list[list[int]] = []
+    if groups is None:
+        members = [list(shown)]
+    else:
+        by: dict[int, list[int]] = {}
+        for i in shown:
+            by.setdefault(int(groups[i]), []).append(i)
+        members = [by[g] for g in sorted(by)]
+    for m in members:
+        out += [m[k : k + per] for k in range(0, len(m), per)]
+    return out or [[]]
+
+
+def page_labels(pages: list[list[int]], groups: Sequence[int] | None,
+                levels: Sequence[str]) -> list[str]:  # fmt: skip
+    """Each page's name: its page level ("2 of 3" after it, when the level has more
+    pages); "" without page columns."""
+    if groups is None:
+        return ["" for _ in pages]
+    first = [levels[int(groups[p[0]])] if p else "" for p in pages]
+    out = []
+    for k, name in enumerate(first):
+        same = [j for j, other in enumerate(first) if other == name]
+        out.append(name if len(same) == 1 else f"{name} ({same.index(k) + 1} of {len(same)})")
+    return out

@@ -8,6 +8,7 @@
 // every panel; a grid puts its column labels over the top row and its row labels to the
 // right of the last column.
 
+import { pageList } from "./pages";
 import { ticks, yTickCount } from "./ticks";
 import type { TrellisSpec } from "./types";
 
@@ -89,8 +90,11 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   // a paged wrap: the page's panels, placed in turn on a grid of the page's size (the same
   // on every page, so turning pages does not move the plot)
   const pages = spec.pages ?? null;
-  const shown = pages ? (opts.page ?? spec.panels.slice(0, pages.rows * pages.cols).map((_, i) => i)) : null;
-  const panels = shown ? shown.map((index, k) => ({ ...spec.panels[index], row: Math.floor(k / pages!.cols), col: k % pages!.cols })) : spec.panels;
+  const shown = pages ? (opts.page ?? pageList(spec.panels.map((_, i) => i), pages)[0]) : null;
+  // (a grid's page: each panel in its cell)
+  const panels = shown
+    ? shown.map((index, k) => (pages!.grid ? spec.panels[index] : { ...spec.panels[index], row: Math.floor(k / pages!.cols), col: k % pages!.cols }))
+    : spec.panels;
   const fs = opts.fontSize;
   const rows = Math.max(1, pages ? pages.rows : grid.rows);
   const cols = Math.max(1, pages ? pages.cols : grid.cols);

@@ -1,7 +1,7 @@
 // A paged wrap: which panels a page shows, after the reader's filters and sort. In step with
 // `order` in src/anytrellis/pages.py (Trellis.shown_panels, images drawn in Python).
 
-import type { PanelStat, Paging } from "./types";
+import type { PagesSpec, PanelStat, Paging } from "./types";
 
 /** The panels shown, in order: those the filters keep (every word of `name` in the panel's
  * name; each statistic in its range, or holding its text), sorted stably by a statistic,
@@ -39,6 +39,37 @@ function within(v: number | null, lo: number | null, hi: number | null): boolean
   return (lo === null || v >= lo) && (hi === null || v <= hi);
 }
 
-export function pageCount(shown: number, perPage: number): number {
-  return Math.max(1, Math.ceil(shown / perPage));
+/** The pages: the panels shown (in order), rows × cols a page; with page columns, each
+ * level's panels on pages of their own, the levels in order (one the filters leave empty:
+ * none). At least one page, maybe empty. In step with `page_list` in pages.py. */
+export function pageList(shown: number[], pages: PagesSpec): number[][] {
+  const per = Math.max(1, pages.rows * pages.cols);
+  const groups = pages.groups ?? null;
+  let members: number[][] = [shown];
+  if (groups) {
+    const by = new Map<number, number[]>();
+    for (const i of shown) {
+      const g = groups[i];
+      const list = by.get(g);
+      if (list) list.push(i);
+      else by.set(g, [i]);
+    }
+    members = [...by.keys()].sort((a, b) => a - b).map((g) => by.get(g)!);
+  }
+  const out: number[][] = [];
+  for (const m of members) for (let k = 0; k < m.length; k += per) out.push(m.slice(k, k + per));
+  return out.length ? out : [[]];
+}
+
+/** Each page's name: its page level ("2 of 3" after it, when the level has more pages); ""
+ * without page columns. In step with `page_labels` in pages.py. */
+export function pageLabels(list: number[][], pages: PagesSpec): string[] {
+  const groups = pages.groups;
+  const levels = pages.levels ?? [];
+  if (!groups) return list.map(() => "");
+  const first = list.map((p) => (p.length ? (levels[groups[p[0]]] ?? "") : ""));
+  return first.map((name, k) => {
+    const same = first.flatMap((other, j) => (other === name ? [j] : []));
+    return same.length === 1 ? name : `${name} (${same.indexOf(k) + 1} of ${same.length})`;
+  });
 }

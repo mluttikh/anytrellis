@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
-import { pageCount, panelOrder } from "../src/core/pages";
+import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
@@ -632,7 +632,21 @@ describe("pages", () => {
   });
 
   it("counts pages, at least one", () => {
-    expect([pageCount(0, 24), pageCount(24, 24), pageCount(25, 24)]).toEqual([1, 1, 2]);
+    const page = { rows: 4, cols: 6, stats: [] };
+    const n = (count: number): number[] => Array.from({ length: count }, (_, i) => i);
+    expect([pageList(n(0), page).length, pageList(n(24), page).length, pageList(n(25), page).length]).toEqual([1, 1, 2]);
+  });
+
+  it("pages page columns' levels apart, as Python does", () => {
+    // panels 0-2 of level 0, 3-7 of level 1, 8 of level 2; three a page
+    const page = { rows: 1, cols: 3, stats: [], groups: [0, 0, 0, 1, 1, 1, 1, 1, 2], levels: ["a", "b", "c"] };
+    const all = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+    expect(pageList(all, page)).toEqual([[0, 1, 2], [3, 4, 5], [6, 7], [8]]);
+    expect(pageLabels(pageList(all, page), page)).toEqual(["a", "b (1 of 2)", "b (2 of 2)", "c"]);
+    // sorted and filtered: each level's panels in the order shown; a level left empty, no page
+    expect(pageList([7, 1, 0, 5], page)).toEqual([[1, 0], [7, 5]]);
+    expect(pageList([], page)).toEqual([[]]);
+    expect(pageLabels([[]], page)).toEqual([""]);
   });
 
   it("lays out a page's panels in turn, on a page of the same size every time", () => {

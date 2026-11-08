@@ -59,6 +59,7 @@ panels, labels in strips over the panels, and panels ordered by what they show.
 | --- | --- |
 | `xyplot(y ~ x \| a)` | `Trellis(df, wrap="a").points(x="x", y="y")` |
 | `xyplot(y ~ x \| a * b)` | `Trellis(df, row="a", col="b")` |
+| `xyplot(y ~ x \| a * b * c)` (a page per level of `c`) | `Trellis(df, row="a", col="b", page="c")` |
 | `groups = g` | `color="g"` |
 | `layout = c(2, 3)` | `cols=2` |
 | `type = c("p", "r")` | `.points()` and `.smooth(method="linear")` |
