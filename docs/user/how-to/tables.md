@@ -130,8 +130,9 @@ would with every row read: the panels (the facet columns' combinations), their s
 category columns and the range of the number colours.
 
 Ten million readings of 1,000 stations, from DuckDB, are drawn in 1.0 s rather than 3.9 s,
-from 480,000 rows read rather than all of them. Turning a page reads the rows of the three
-pages around it (720,000) in 0.3 s; the last few pages read are kept, to turn back to.
+from 480,000 rows read rather than all of them. Turning a page keeps the rows of the pages
+still around it and reads those of the page that came near (240,000) in 0.25 s. With
+`page=`, a level is read by its value (`WHERE site IN (...)`), not panel by panel.
 
 - **Lines, points and text** are drawn from the plot's data a page at a time. A summary
   (`hist`, `box`, `smooth`, ...) needs every row of its panel: give it a table of its own,

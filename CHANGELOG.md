@@ -33,8 +33,8 @@ All notable changes to anytrellis. The format follows
   next ones as the pages turn. The panels, their statistics (with the trend), each panel's
   range of x and y, the category levels and the colour ranges come from the database, so
   every page looks as with every row read. Ten million rows in 1,000 panels from DuckDB
-  are drawn in 1.0 s from 480,000 rows read (3.9 s reading all of them); a page turns in
-  0.3 s. Lines, points and text; `selected()` is a query of the selected rows; a saved
+  are drawn in 1.0 s from 480,000 rows read (3.9 s reading all of them); a page turned
+  reads only the page that came near, in 0.25 s. Lines, points and text; `selected()` is a query of the selected rows; a saved
   page reads every row. Not with `link`.
 - Paged wraps send only the panels near the page shown: in a notebook, the browser gets
   the data of the page shown and the pages either side of it, and more as the pages turn,
