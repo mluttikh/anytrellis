@@ -1,6 +1,6 @@
 {
   "name": "@anytrellis/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "GPU trellis renderer; the anywidget entry is one consumer.",
   "type": "module",
