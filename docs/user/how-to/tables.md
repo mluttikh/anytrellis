@@ -134,20 +134,59 @@ from 480,000 rows read rather than all of them. Turning a page keeps the rows of
 still around it and reads those of the page that came near (240,000) in 0.25 s. With
 `page=`, a level is read by its value (`WHERE site IN (...)`), not panel by panel.
 
-- **Lines, points and text** are drawn from the plot's data a page at a time. A summary
-  (`hist`, `box`, `smooth`, ...) needs every row of its panel: give it a table of its own,
-  which is read whole (the database can compute it: `con.sql("select ...")`).
+- **Lines, points and text** are drawn from the plot's data a page at a time.
+- **Summaries** (`hist`, `box`, `violin`, `density`, `smooth`, `errorbar`) are computed by
+  the database, every panel's at once, and no row is read: see below.
 - **`selected()`** is a query of the selected rows, in every panel, not yet read: a DuckDB
   relation, an Ibis table or a `LazyFrame`. Read the rows when you need them
-  (`selected().pl()`, `.to_pandas()`, `.collect()`), or count them first.
-- **`save_html`** and `to_html` read every row, as `load="all"` does: the page holds every
-  panel.
+  (`selected().pl()`, `.to_pandas()`, `.collect()`), or count them first. A brush over a
+  summary selects the rows it stands for: a histogram's bins, a box's group, a stretch of a
+  curve.
+- **`save_html`** and `to_html` read every row of the lines, points and text, as
+  `load="all"` does: the page holds every panel. A plot of summaries only reads none.
 - Not yet: `link=` and `anytrellis.link`. A wrap of 100 panels or fewer, which doesn't
   page, reads every row; give `rows=` to page it. With `page=`, a page is a level: turning
   to it reads that level's rows (a grid's too).
 - A database that can't compute the panels' statistics (a median, a standard deviation)
   gives an error: use `load="all"`. Without the trend's window query (Ibis, over a time x),
   the statistics have no trend.
+
+#### Summaries from the database
+
+A summary of the plot's data is a query or two, grouped by the facet columns (and the
+colour, and a box's positions), whose answer is a few rows per panel:
+
+| Mark | What the database computes |
+| --- | --- |
+| `hist` | the count in each bin; the bins from the range of every row (`min`, `max`) |
+| `box` | the quartiles (`quantile_cont`), the whiskers' ends, and the values beyond them |
+| `errorbar` | each group's count, mean, standard deviation, lowest and highest value |
+| `smooth(method="linear")` | each group's sums of squares and products about its means |
+| `smooth()` (loess) | each group's values in 1,024 bins of x: their count and mean x, and the sum of y and of its squares; the local fits are made on the bins |
+| `density`, `violin` | each group's values in fine bins, an eighth of its bandwidth wide (64 to 8,192 to a group); the curve is made from the bins |
+
+They are made once, for every panel: the axes are those of every panel's summary from the
+start, and turning a page sends the next panels' without asking again. They are as they
+are from the rows read, except the curves made from bins: a density's or a violin's
+differs by about 0.03% of its peak, and a loess fit by a few thousandths of the scatter
+about it.
+
+Ten million readings of 1,000 stations, from DuckDB:
+
+| Mark | `load="pages"` | `load="all"` |
+| --- | --- | --- |
+| `hist(x="temp", color="sensor")` | 0.8 s | 3.2 s |
+| `box(x="sensor", y="temp")` | 0.9 s | 4.6 s |
+| `violin(x="sensor", y="temp")` | 1.8 s | 8.4 s |
+| `density(x="temp", color="sensor")` | 1.5 s | 5.2 s |
+| `smooth(x="time", y="temp", method="linear")` | 0.7 s | 2.9 s |
+| `smooth(x="time", y="temp")` (loess) | 3.6 s | 22 s |
+| `errorbar(x="sensor", y="temp")` | 0.4 s | 4.4 s |
+
+What the database doesn't summarise comes from the rows, read once (the columns the mark
+draws, every panel's): a violin's points (`inner="points"`), error bars of given ends
+(`ymin=`, `ymax=`), and, from Ibis, summaries of a time column (it has no times as
+numbers).
 
 ## Large tables
 

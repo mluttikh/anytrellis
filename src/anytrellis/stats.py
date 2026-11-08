@@ -71,6 +71,65 @@ class Part:
     family: bool = False
     """Drawn from the same table as the mark's other family parts (a box's body and its
     lines): what selects one of its rows selects the row in all of them."""
+    where: Where | None = None
+    """The rows each summary row stands for, as a query's tests (``load="pages"``)."""
+
+
+@dataclass
+class Range:
+    """Values of a number or time column from ``lo`` to ``hi`` (axis units: a log axis's
+    in log10 units, times in milliseconds), each row's; ``open``: below ``hi``, not at it;
+    ``lo == hi``: that value."""
+
+    name: str
+    kind: str
+    lo: np.ndarray
+    hi: np.ndarray
+    log: bool = False
+    open: np.ndarray | None = None
+
+
+@dataclass
+class Labels:
+    """A category column's label, each row's."""
+
+    name: str
+    labels: np.ndarray
+
+
+@dataclass
+class Where:
+    """The rows of the data each summary row stands for, as tests a query makes: its
+    panel, its colour's label, ranges or labels of its columns, and the columns it needs
+    finite (``load="pages"``: the rows are in the database, not read)."""
+
+    panel: np.ndarray
+    color: Labels | None
+    tests: list[Range | Labels]
+    finite: tuple[tuple[str, bool], ...] = ()
+    """(name, on a log axis) of each column the rows need a finite value of."""
+
+    def take(self, rows: np.ndarray) -> Where:
+        tests = [_take_test(t, rows) for t in self.tests]
+        color = None if self.color is None else Labels(self.color.name, self.color.labels[rows])
+        return Where(self.panel[rows], color, tests, self.finite)
+
+
+def _take_test(test: Range | Labels, rows: np.ndarray) -> Range | Labels:
+    if isinstance(test, Labels):
+        return Labels(test.name, test.labels[rows])
+    return Range(test.name, test.kind, test.lo[rows], test.hi[rows], test.log,
+                 None if test.open is None else test.open[rows])  # fmt: skip
+
+
+def _color_where(color: Column | None, labels: np.ndarray, ci: np.ndarray) -> Labels | None:
+    """Each summary row's colour (None: not split by colour)."""
+    return None if color is None or not color.levels else Labels(color.name, labels[ci])
+
+
+def no_members(n: int) -> Members:
+    """Summary rows standing for no rows read (the database's)."""
+    return Members(np.zeros(n + 1, dtype=np.int64), np.zeros(0, dtype=np.int64))
 
 
 def parts(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
@@ -103,9 +162,8 @@ def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) 
     rows, panel = expand(panel_of, table.n, npanels, layer.facet)
     edges: np.ndarray | None = None
     if col.kind == "category":
-        levels = list(col.levels)
         bin_of = col.level_codes()
-        nbins = len(levels)
+        nbins = len(col.levels)
     else:
         edges = bin_edges(col, args["bins"], args["binwidth"])
         nbins = len(edges) - 1
@@ -117,10 +175,21 @@ def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) 
     keep = b >= 0
     rows, panel, b = rows[keep], panel[keep], b[keep]
     labels, c = _color_codes(color, rows)
-    nc = len(labels)
-    key = (panel * nc + c) * nbins + b
+    key = (panel * len(labels) + c) * nbins + b
     uniq, inverse, counts = np.unique(key, return_inverse=True, return_counts=True)
-    inverse = inverse.ravel()
+    members = Members.grouped(inverse.ravel(), rows, len(uniq))
+    return hist_parts(layer, col, color, edges, uniq, counts, npanels, members)
+
+
+def hist_parts(layer: Layer, col: Column, color: Column | None, edges: np.ndarray | None,
+               uniq: np.ndarray, counts: np.ndarray, npanels: int,
+               members: Members) -> list[Part]:  # fmt: skip
+    """A histogram's bars: ``counts`` of the bins ``uniq`` (sorted, each ``(panel *
+    colours + colour) * bins + bin``), of ``edges`` (a category ``col``: its levels)."""
+    args = layer.stat_args
+    labels, _ = _color_codes(color, np.zeros(0, dtype=np.int64))
+    nc = len(labels)
+    nbins = len(col.levels) if edges is None else len(edges) - 1
     p = uniq // (nc * nbins)
     ci = (uniq // nbins) % nc
     bi = uniq % nbins
@@ -136,9 +205,10 @@ def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) 
     cols = [Column(PANEL, "number", p.astype(np.float64))]
     extra: dict[str, np.ndarray] = {}
     if edges is None:
-        names = np.array(levels, dtype=object)[bi]
+        names = np.array(col.levels, dtype=object)[bi]
         cols.append(Column(col.name, "category", names, col.levels))
         extra["bin"] = names
+        test: Range | Labels = Labels(col.name, names)
     else:
         lo, hi = edges[bi], edges[bi + 1]
         cols.append(Column(col.name, col.kind, lo))
@@ -146,6 +216,7 @@ def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) 
             extra[col.name] = _times(lo)
         shown_lo, shown_hi = _shown(col, lo, hi)
         extra["bin"] = _ranges(shown_lo, shown_hi, col.kind)
+        test = Range(col.name, col.kind, lo, hi, col.log, bi < nbins - 1)
     cols.append(Column(stat, "number", value))
     if color is not None:
         cols.append(Column(color.name, "category", labels[ci], color.levels))
@@ -173,8 +244,8 @@ def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) 
     # the bin's range rather than its middle, and a count as a whole number
     tooltip = ["bin", stat] if stat == "count" else ["bin", stat, "count"]
     drawn = replace(layer, mark="bars", y=stat, tooltip=tooltip)
-    members = Members.grouped(inverse, rows, len(uniq))
-    return [Part(drawn, out, build, members, hide=("x", "y"))]
+    where = Where(p, _color_where(color, labels, ci), [test])
+    return [Part(drawn, out, build, members, hide=("x", "y"), where=where)]
 
 
 def bin_edges(col: Column, bins: Any, binwidth: Any) -> np.ndarray:
@@ -226,10 +297,10 @@ def _round_width(raw: float) -> float:
 
 
 @dataclass
-class _Groups:
-    """A layer's values in groups, one per (panel, position, colour), sorted within each:
-    what a box, a violin or an error bar summarises. Vertical, or horizontal when y is
-    the category and x the numbers."""
+class Keys:
+    """Groups of a layer's values, one per (panel, position, colour): what a box, a violin
+    or an error bar summarises. Vertical, or horizontal when y is the category and x the
+    numbers."""
 
     layer: Layer
     horizontal: bool
@@ -241,12 +312,8 @@ class _Groups:
     puniq: np.ndarray
     labels: np.ndarray
     guniq: np.ndarray
-    sv: np.ndarray
-    """The values, sorted by group and within it."""
-    sg: np.ndarray
-    srows: np.ndarray
+    """Each group's ``(panel * positions + position) * colours + colour``, sorted."""
     counts: np.ndarray
-    starts: np.ndarray
 
     @property
     def npos(self) -> int:
@@ -270,18 +337,6 @@ class _Groups:
     def gc(self) -> np.ndarray:
         """Each group's colour (index in ``labels``)."""
         return self.guniq % self.nc
-
-    @property
-    def first(self) -> np.ndarray:
-        return self.starts[:-1]
-
-    def quantile(self, f: float) -> np.ndarray:
-        """Each group's ``f`` quantile (linear between values)."""
-        h = (self.counts - 1) * f
-        lo = np.floor(h).astype(np.int64)
-        hi = np.ceil(h).astype(np.int64)
-        sv, first = self.sv, self.first
-        return sv[first + lo] + (h - lo) * (sv[first + hi] - sv[first + lo])
 
     def position_column(self, index: np.ndarray) -> Column:
         values = self.puniq[index]
@@ -313,6 +368,41 @@ class _Groups:
             self.layer.position == "dodge"  # fmt: skip
         return _Slots(self.pos.name, color.name if dodge and color else None, self.horizontal,
                       width * step)  # fmt: skip
+
+    def where(self, index: np.ndarray, value: Range | None = None) -> Where:
+        """The rows of groups ``index`` (and of ``value``'s range of the values)."""
+        pos = self.pos
+        at = self.puniq[self.gpos[index]]
+        if pos.kind == "category":
+            test: Range | Labels = Labels(pos.name, at.astype(object))
+        else:
+            at = at.astype(np.float64)
+            test = Range(pos.name, pos.kind, at, at.copy(), pos.log)
+        tests = [test] if value is None else [test, value]
+        return Where(self.gp[index], _color_where(self.color, self.labels, self.gc[index]),
+                     tests, ((self.val.name, self.val.log),))  # fmt: skip
+
+
+@dataclass
+class _Groups(Keys):
+    """Groups' values, sorted by group and within it."""
+
+    sv: np.ndarray
+    sg: np.ndarray
+    srows: np.ndarray
+    starts: np.ndarray
+
+    @property
+    def first(self) -> np.ndarray:
+        return self.starts[:-1]
+
+    def quantile(self, f: float) -> np.ndarray:
+        """Each group's ``f`` quantile (linear between values)."""
+        h = (self.counts - 1) * f
+        lo = np.floor(h).astype(np.int64)
+        hi = np.ceil(h).astype(np.int64)
+        sv, first = self.sv, self.first
+        return sv[first + lo] + (h - lo) * (sv[first + hi] - sv[first + lo])
 
 
 def _grouped(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> _Groups:
@@ -347,8 +437,8 @@ def _grouped(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: i
     counts = np.bincount(ginv[order], minlength=len(guniq))
     # intp: reduceat takes only the platform's index type (int32 in WebAssembly)
     starts = np.r_[0, np.cumsum(counts)].astype(np.intp)
-    return _Groups(layer, horizontal, pos, val, color, puniq, labels, guniq, v[order],
-                   ginv[order], rows[order], counts, starts)  # fmt: skip
+    return _Groups(layer, horizontal, pos, val, color, puniq, labels, guniq, counts, v[order],
+                   ginv[order], rows[order], starts)  # fmt: skip
 
 
 @dataclass
@@ -400,6 +490,24 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
         whi = np.maximum.reduceat(np.where(inside, sv, -np.inf), first)
     else:
         wlo = whi = np.zeros(0)
+    og = sg[~inside]
+    orows, ov = srows[~inside], sv[~inside]
+    if not args["outliers"]:
+        orows, og, ov = orows[:0], og[:0], ov[:0]
+    tips = {name: table.raw(name)[orows] for name in layer.tooltip}
+    return box_parts(g, q1, med, q3, wlo, whi, (og, ov, tips), Members(g.starts, srows),
+                     Members.each(orows))  # fmt: skip
+
+
+def box_parts(g: Keys, q1: np.ndarray, med: np.ndarray, q3: np.ndarray, wlo: np.ndarray,
+              whi: np.ndarray, outlying: tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]],
+              members: Members, outlier_members: Members) -> list[Part]:  # fmt: skip
+    """Box plots of groups ``g``: their quartiles and whiskers' ends (each the furthest
+    value within ``whis`` IQRs: infinite, none), and the values beyond (``outlying``: each
+    one's group, value and tooltip columns)."""
+    layer = g.layer
+    args = layer.stat_args
+    og, ov, user_tips = outlying
     wlo = np.where(np.isfinite(wlo), np.minimum(wlo, q1), q1)
     whi = np.where(np.isfinite(whi), np.maximum(whi, q3), q3)
     groups = np.arange(len(g.guniq))
@@ -413,11 +521,6 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
         "whiskers": _ranges(shown_lo, shown_hi, "number"),
     }
     boxes = _table(g.columns(groups, med), stats_text)
-    og = sg[~inside]
-    orows, ov = srows[~inside], sv[~inside]
-    if not args["outliers"]:
-        orows, og, ov = orows[:0], og[:0], ov[:0]
-    user_tips = {name: table.raw(name)[orows] for name in layer.tooltip}
     outliers = _table(g.columns(og, ov), {g.pos.name: g.raw_position(g.gpos[og]), **user_tips})
     slots = g.slots(float(args["width"]))
     gp = g.gp
@@ -441,14 +544,16 @@ def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -
         return slots.oriented(gp[og], c_, ov, c_.copy(), ov.copy(), np.arange(len(og)))
 
     tips = [g.pos.name, "n", "median", "q1", "q3", "whiskers"]
-    members = Members(g.starts, srows)
     body = replace(layer, mark="rect", opacity=layer.opacity * FILL, tooltip=tips)
     lines = replace(layer, mark="line", tooltip=tips)
     points = replace(layer, mark="points", tooltip=list(layer.tooltip))
+    where = g.where(groups)
+    val = g.val
+    outlier_where = g.where(og, Range(val.name, val.kind, ov, ov.copy(), val.log))
     return [
-        Part(body, boxes, build_body, members, hide=("x", "y"), family=True),
-        Part(lines, boxes, build_lines, members, hide=("x", "y"), family=True),
-        Part(points, outliers, build_points, Members.each(orows)),
+        Part(body, boxes, build_body, members, hide=("x", "y"), family=True, where=where),
+        Part(lines, boxes, build_lines, members, hide=("x", "y"), family=True, where=where),
+        Part(points, outliers, build_points, outlier_members, where=outlier_where),
     ]
 
 
@@ -466,21 +571,47 @@ def violin(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
     (``inner="quartiles"``), or its values (``"points"``)."""
     args = layer.stat_args
     g = _grouped(layer, table, panel_of, npanels)
-    groups = np.arange(len(g.guniq))
     q1, med, q3 = g.quantile(0.25), g.quantile(0.5), g.quantile(0.75)
     cut, gridsize, adjust = float(args["cut"]), int(args["gridsize"]), float(args["bw_adjust"])
-    grids: list[np.ndarray] = []
-    dens: list[np.ndarray] = []
-    owner: list[np.ndarray] = []
-    for k in groups:
+    curves: list[tuple[int, np.ndarray, np.ndarray]] = []
+    for k in range(len(g.guniq)):
         s = g.sv[g.starts[k] : g.starts[k + 1]]
         if len(s) < 2 or s[-1] <= s[0]:
             continue
         bw = adjust * float(np.std(s, ddof=1)) * len(s) ** -0.2
         grid = np.linspace(s[0] - cut * bw, s[-1] + cut * bw, gridsize)
-        grids.append(grid)
-        dens.append(_kde(s, grid, bw))
-        owner.append(np.full(gridsize, k))
+        curves.append((k, grid, _kde(s, grid, bw)))
+    out = violin_parts(g, q1, med, q3, curves, Members(g.starts, g.srows))
+    if args["inner"] == "points":
+        slots = g.slots(float(args["width"]))
+        gp = g.gp
+        user_tips = {name: table.raw(name)[g.srows] for name in layer.tooltip}
+        values = _table(g.columns(g.sg, g.sv), {g.pos.name: g.raw_position(g.gpos[g.sg]),
+                                               **user_tips})  # fmt: skip
+
+        def build_points(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
+            c_, _ = slots.centres(values, xl, yl, cl)
+            return slots.oriented(gp[g.sg], c_, g.sv, c_.copy(), g.sv.copy(),
+                                  np.arange(len(g.sv)))  # fmt: skip
+
+        dots = replace(layer, mark="points", tooltip=list(layer.tooltip))
+        val = g.val
+        where = g.where(g.sg, Range(val.name, val.kind, g.sv, g.sv.copy(), val.log))
+        out.append(Part(dots, values, build_points, Members.each(g.srows), where=where))
+    return out
+
+
+def violin_parts(g: Keys, q1: np.ndarray, med: np.ndarray, q3: np.ndarray,
+                 curves: list[tuple[int, np.ndarray, np.ndarray]],
+                 members: Members) -> list[Part]:  # fmt: skip
+    """Violins of groups ``g``: each group's density ``curves`` (its index, the values
+    along it, the density at each), its quartiles across it."""
+    layer = g.layer
+    args = layer.stat_args
+    groups = np.arange(len(g.guniq))
+    grids = [grid for _, grid, _ in curves]
+    dens = [d for _, _, d in curves]
+    owner = [np.full(len(grid), k) for k, grid, _ in curves]
     ys = np.concatenate(grids) if grids else np.zeros(0)
     d = np.concatenate(dens) if dens else np.zeros(0)
     k_of = np.concatenate(owner) if owner else np.zeros(0, np.int64)
@@ -499,9 +630,11 @@ def violin(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
         w = d / (float(peak.max()) if len(d) else 1.0)
     # each group's width at its median and quartiles (a group of one value: half)
     at_q = np.full((3, len(groups)), 0.5)
-    for i, k in enumerate(np.unique(k_of)):
-        sl = slice(i * gridsize, (i + 1) * gridsize)
+    at = 0
+    for k, grid, _ in curves:
+        sl = slice(at, at + len(grid))
         at_q[:, k] = np.interp([q1[k], med[k], q3[k]], ys[sl], w[sl])
+        at += len(grid)
     pair = np.flatnonzero(k_of[1:] == k_of[:-1]) if len(k_of) else np.zeros(0, np.int64)
     a, b = pair, pair + 1
     kp = k_of[a]
@@ -549,26 +682,13 @@ def violin(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
         return slots.oriented(gp[rows], a0, v0, a1, v1, rows, line=True)
 
     tips = [g.pos.name, "n", "median", "q1", "q3"]
-    members = Members(g.starts, g.srows)
     fill = replace(layer, mark="band", opacity=layer.opacity * FILL, tooltip=tips)
     lines = replace(layer, mark="line", tooltip=tips)
-    out = [
-        Part(fill, violins, build_fill, members, hide=("x", "y"), family=True),
-        Part(lines, violins, build_lines, members, hide=("x", "y"), family=True),
+    where = g.where(groups)
+    return [
+        Part(fill, violins, build_fill, members, hide=("x", "y"), family=True, where=where),
+        Part(lines, violins, build_lines, members, hide=("x", "y"), family=True, where=where),
     ]
-    if args["inner"] == "points":
-        user_tips = {name: table.raw(name)[g.srows] for name in layer.tooltip}
-        values = _table(g.columns(g.sg, g.sv), {g.pos.name: g.raw_position(g.gpos[g.sg]),
-                                               **user_tips})  # fmt: skip
-
-        def build_points(xl: Levels, yl: Levels, cl: ColorLevels) -> Geometry:
-            c_, _ = slots.centres(values, xl, yl, cl)
-            return slots.oriented(gp[g.sg], c_, g.sv, c_.copy(), g.sv.copy(),
-                                  np.arange(len(g.sv)))  # fmt: skip
-
-        dots = replace(layer, mark="points", tooltip=list(layer.tooltip))
-        out.append(Part(dots, values, build_points, Members.each(g.srows)))
-    return out
 
 
 # ---- error bars ----------------------------------------------------------------------------
@@ -592,22 +712,31 @@ def errorbar(layer: Layer, table: Table, panel_of: np.ndarray | None,
 
 def _errorbar_summary(layer: Layer, table: Table, panel_of: np.ndarray | None,
                       npanels: int) -> list[Part]:  # fmt: skip
-    args = layer.stat_args
     g = _grouped(layer, table, panel_of, npanels)
-    groups = np.arange(len(g.guniq))
     n = g.counts.astype(np.float64)
     first = g.first
     if len(g.sv):
         mean = np.add.reduceat(g.sv, first) / n
         dev = g.sv - mean[g.sg]
         sd = np.sqrt(np.add.reduceat(dev * dev, first) / np.maximum(n - 1, 1))
+        least, most = np.minimum.reduceat(g.sv, first), np.maximum.reduceat(g.sv, first)
     else:
-        mean = sd = np.zeros(0)
+        mean = sd = least = most = np.zeros(0)
+    return errorbar_parts(g, mean, sd, least, most, Members(g.starts, g.srows))
+
+
+def errorbar_parts(g: Keys, mean: np.ndarray, sd: np.ndarray, least: np.ndarray,
+                   most: np.ndarray, members: Members) -> list[Part]:  # fmt: skip
+    """Error bars of groups ``g``, from their values' means, standard deviations (ddof
+    1), lowest and highest."""
+    layer = g.layer
+    args = layer.stat_args
+    groups = np.arange(len(g.guniq))
+    n = g.counts.astype(np.float64)
     sd = np.where(n >= 2, sd, np.nan)
     extent = args["extent"]
     if extent == "range":
-        lo = np.minimum.reduceat(g.sv, first) if len(g.sv) else np.zeros(0)
-        hi = np.maximum.reduceat(g.sv, first) if len(g.sv) else np.zeros(0)
+        lo, hi = least, most
         label = "range"
     else:
         if extent == "ci":
@@ -629,7 +758,7 @@ def _errorbar_summary(layer: Layer, table: Table, panel_of: np.ndarray | None,
                                             "mean": shown_mean, label: text})  # fmt: skip
     tips = [g.pos.name, "n", "mean", label]
     return _errorbar_parts(layer, bars, g.gp, g.slots(float(args["width"])), mean, lo, hi,
-                           Members(g.starts, g.srows), tips)  # fmt: skip
+                           members, tips, g.where(groups))  # fmt: skip
 
 
 def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
@@ -671,13 +800,21 @@ def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
     tips = list(dict.fromkeys([*names, *layer.tooltip]))
     # the drawn parts' x and y: the table's position and value columns
     axes = {"x": value_name, "y": pos_name} if horizontal else {"x": pos_name, "y": value_name}
+    if pos.kind == "category":
+        test: Range | Labels = Labels(pos_name, pos.values[rows])
+    else:
+        at = pos.values[rows]
+        test = Range(pos_name, pos.kind, at, at.copy(), pos.log)
+    labels, ci = _color_codes(color, rows)
+    finite = tuple((e.name, e.log) for e in ends)
+    where = Where(panel, _color_where(color, labels, ci), [test], finite)
     return _errorbar_parts(replace(layer, **axes), bars, panel, slots, centre, lo, hi,
-                           Members.each(rows), tips)  # fmt: skip
+                           Members.each(rows), tips, where)  # fmt: skip
 
 
 def _errorbar_parts(layer: Layer, bars: Table, panel: np.ndarray, slots: _Slots,
                     centre: np.ndarray | None, lo: np.ndarray, hi: np.ndarray,
-                    members: Members, tips: list[str]) -> list[Part]:  # fmt: skip
+                    members: Members, tips: list[str], where: Where) -> list[Part]:  # fmt: skip
     """An error bar per row of ``bars``: a line from ``lo`` to ``hi`` with caps, and its
     centre as a point."""
     args = layer.stat_args
@@ -700,7 +837,7 @@ def _errorbar_parts(layer: Layer, bars: Table, panel: np.ndarray, slots: _Slots,
 
     lines = replace(layer, mark="line", tooltip=tips)
     if centre is None or not args["points"]:
-        return [Part(lines, bars, build_lines, members, hide=("x", "y"))]
+        return [Part(lines, bars, build_lines, members, hide=("x", "y"), where=where)]
     mid = np.asarray(centre)
     shown = np.isfinite(mid)
 
@@ -711,8 +848,8 @@ def _errorbar_parts(layer: Layer, bars: Table, panel: np.ndarray, slots: _Slots,
 
     points = replace(layer, mark="points", tooltip=tips)
     return [
-        Part(lines, bars, build_lines, members, hide=("x", "y"), family=True),
-        Part(points, bars, build_points, members, hide=("x", "y"), family=True),
+        Part(lines, bars, build_lines, members, hide=("x", "y"), family=True, where=where),
+        Part(points, bars, build_points, members, hide=("x", "y"), family=True, where=where),
     ]
 
 
@@ -734,51 +871,71 @@ def density(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: in
     keep = np.isfinite(v)
     rows, panel, v = rows[keep], panel[keep], v[keep]
     labels, c = _color_codes(color, rows)
-    nc = len(labels)
-    guniq, ginv = _codes(panel * nc + c)
+    guniq, ginv = _codes(panel * len(labels) + c)
     order = np.lexsort((v, ginv))
     sv, sg, srows = v[order], ginv[order], rows[order]
     counts = np.bincount(sg, minlength=len(guniq))
     starts = np.r_[0, np.cumsum(counts)].astype(np.int64)
-    cut, gridsize = float(args["cut"]), int(args["gridsize"])
     bws = np.zeros(len(guniq))
     for g in range(len(guniq)):
         s = sv[starts[g] : starts[g + 1]]
         if len(s) >= 2 and s[-1] > s[0]:
             bws[g] = float(args["bw_adjust"]) * float(np.std(s, ddof=1)) * len(s) ** -0.2
-    valid = np.flatnonzero(bws > 0)
-    lo = min((sv[starts[g]] - cut * bws[g] for g in valid), default=0.0)
-    hi = max((sv[starts[g + 1] - 1] + cut * bws[g] for g in valid), default=1.0)
-    grid = np.linspace(lo, hi, gridsize)
-    xs_all, ds_all, panel_all, color_all, curve_all = [], [], [], [], []
+    ends = (sv[starts[:-1]], sv[np.maximum(starts[1:] - 1, 0)]) if len(sv) else (bws, bws)
+    curves: list[tuple[int, np.ndarray, np.ndarray]] = []
     sample_of = np.full(len(sv), -1, dtype=np.int64)
     at = 0
-    for k, g in enumerate(valid):
+    for g, xs in density_grids(bws, *ends, float(args["cut"]), int(args["gridsize"])):
         s = sv[starts[g] : starts[g + 1]]
-        bw = bws[g]
-        xs = grid[(grid >= s[0] - cut * bw) & (grid <= s[-1] + cut * bw)]
-        if len(xs) < 2:
-            continue
-        xs_all.append(xs)
-        ds_all.append(_kde(s, xs, bw))
-        panel_all.append(np.full(len(xs), guniq[g] // nc))
-        color_all.append(np.full(len(xs), guniq[g] % nc))
-        curve_all.append(np.full(len(xs), k))
+        curves.append((g, xs, _kde(s, xs, bws[g])))
         # each value stands in the sample at or before it (a segment's start)
         idx = np.clip(np.searchsorted(xs, s, side="right") - 1, 0, len(xs) - 1)
         sample_of[starts[g] : starts[g + 1]] = at + idx
         at += len(xs)
+    counted = sample_of >= 0
+    members = Members.grouped(sample_of[counted], srows[counted], at)
+    return density_parts(layer, col, color, guniq, curves, members)
+
+
+def density_grids(bws: np.ndarray, lows: np.ndarray, highs: np.ndarray, cut: float,
+                  gridsize: int) -> list[tuple[int, np.ndarray]]:  # fmt: skip
+    """Each group's x values for its density (those with a bandwidth: two values or more):
+    the part of a grid shared by every group ``cut`` bandwidths past its lowest and
+    highest values."""
+    valid = np.flatnonzero(bws > 0)
+    lo = min((lows[g] - cut * bws[g] for g in valid), default=0.0)
+    hi = max((highs[g] + cut * bws[g] for g in valid), default=1.0)
+    grid = np.linspace(lo, hi, gridsize)
+    out = []
+    for g in valid:
+        xs = grid[(grid >= lows[g] - cut * bws[g]) & (grid <= highs[g] + cut * bws[g])]
+        if len(xs) >= 2:
+            out.append((int(g), xs))
+    return out
+
+
+def density_parts(layer: Layer, col: Column, color: Column | None, guniq: np.ndarray,
+                  curves: list[tuple[int, np.ndarray, np.ndarray]],
+                  members: Members) -> list[Part]:  # fmt: skip
+    """Densities of groups ``guniq`` (each ``panel * colours + colour``): ``curves`` of
+    a group's index, the x values along it and the density at each."""
+    args = layer.stat_args
+    labels, _ = _color_codes(color, np.zeros(0, dtype=np.int64))
+    nc = len(labels)
     cat = lambda parts, dtype: np.concatenate(parts) if parts else np.zeros(0, dtype)  # noqa: E731
-    x, d = cat(xs_all, np.float64), cat(ds_all, np.float64)
-    p, ci, curve = cat(panel_all, np.int64), cat(color_all, np.int64), cat(curve_all, np.int64)
+    x = cat([xs for _, xs, _ in curves], np.float64)
+    d = cat([ds for _, _, ds in curves], np.float64)
+    p = cat([np.full(len(xs), guniq[g] // nc) for g, xs, _ in curves], np.int64)
+    ci = cat([np.full(len(xs), guniq[g] % nc) for g, xs, _ in curves], np.int64)
+    curve = cat([np.full(len(xs), k) for k, (_, xs, _) in enumerate(curves)], np.int64)
     cols = [Column(PANEL, "number", p.astype(np.float64)), Column(col.name, col.kind, x),
             Column("density", "number", d)]  # fmt: skip
     if color is not None:
         cols.append(Column(color.name, "category", labels[ci], color.levels))
     out = _table(cols, {col.name: _times(x)} if col.kind == "time" else {})
-    counted = sample_of >= 0
-    members = Members.grouped(sample_of[counted], srows[counted], len(x))
     pair = np.flatnonzero(curve[1:] == curve[:-1]) if len(curve) else np.zeros(0, np.int64)
+    where = Where(p, _color_where(color, labels, ci), [_pieces(col, x, curve)],
+                  ((col.name, col.log),))  # fmt: skip
 
     def build(_x: Any, _y: Any, _c: Any, area: bool = False) -> Geometry:
         a, b = pair, pair + 1
@@ -789,12 +946,28 @@ def density(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: in
 
     line = replace(layer, mark="line", y="density", tooltip=[])
     if not args["fill"]:
-        return [Part(line, out, build, members)]
+        return [Part(line, out, build, members, where=where)]
     filled = replace(layer, mark="area", y="density", tooltip=[], opacity=layer.opacity * FILL)
+
+    def build_area(xl: Any, yl: Any, cl: Any) -> Geometry:
+        return build(xl, yl, cl, area=True)
+
     return [
-        Part(filled, out, lambda xl, yl, cl: build(xl, yl, cl, area=True), members, family=True),
-        Part(line, out, build, members, family=True),
+        Part(filled, out, build_area, members, family=True, where=where),
+        Part(line, out, build, members, family=True, where=where),
     ]
+
+
+def _pieces(col: Column, x: np.ndarray, curve: np.ndarray) -> Range:
+    """The values each sample along a curve stands for: from it to the next (the last:
+    from it on)."""
+    lo, hi = x.copy(), np.full(len(x), np.inf)
+    if len(x):
+        same = curve[1:] == curve[:-1]
+        hi[:-1] = np.where(same, x[1:], np.inf)
+        lo[1:] = np.where(same, x[1:], -np.inf)
+        lo[0] = -np.inf
+    return Range(col.name, col.kind, lo, hi, col.log, np.ones(len(x), dtype=bool))
 
 
 # ---- smooth fits ---------------------------------------------------------------------------
@@ -826,8 +999,7 @@ def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
     starts = np.r_[0, np.cumsum(np.bincount(sg, minlength=len(guniq)))].astype(np.int64)
     full = (float(sx.min()), float(sx.max())) if args["fullrange"] and len(sx) else None
     n = int(args["n"])
-    p_hi = 1 - (1 - float(args["level"])) / 2
-    pieces: dict[str, list[np.ndarray]] = {k: [] for k in ("x", "fit", "lo", "hi", "p", "c", "k")}
+    fits: list[Fit] = []
     sample_of = np.full(len(sx), -1, dtype=np.int64)
     at = 0
     for k in range(len(guniq)):
@@ -843,17 +1015,45 @@ def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
             fit, se, df = _linear(u, gy, u0)
         else:
             fit, se, df = _loess(u, gy, u0, float(args["span"]))
-        half = _t_quantile(p_hi, df) * se if args["se"] and df >= 1 else np.full(n, np.nan)
-        pieces["x"].append(grid)
-        pieces["fit"].append(fit)
-        pieces["lo"].append(fit - half)
-        pieces["hi"].append(fit + half)
-        pieces["p"].append(np.full(n, guniq[k] // nc))
-        pieces["c"].append(np.full(n, guniq[k] % nc))
-        pieces["k"].append(np.full(n, k))
+        fits.append(Fit(int(guniq[k]), grid, fit, se, df))
         idx = np.clip(np.searchsorted(grid, gx, side="right") - 1, 0, n - 1)
         sample_of[a:b] = at + idx
         at += n
+    counted = sample_of >= 0
+    members = Members.grouped(sample_of[counted], srows[counted], at)
+    return smooth_parts(layer, xc, yc, color, fits, members)
+
+
+@dataclass
+class Fit:
+    """A smooth fit of one group (``panel * colours + colour``): at x values ``grid``, the
+    fit, its standard error and its residual degrees of freedom."""
+
+    group: int
+    grid: np.ndarray
+    fit: np.ndarray
+    se: np.ndarray
+    df: float
+
+
+def smooth_parts(layer: Layer, xc: Column, yc: Column, color: Column | None,
+                 fits: list[Fit], members: Members) -> list[Part]:  # fmt: skip
+    """Smooth lines of ``fits``, and the confidence bands of their means."""
+    args = layer.stat_args
+    labels, _ = _color_codes(color, np.zeros(0, dtype=np.int64))
+    nc = len(labels)
+    p_hi = 1 - (1 - float(args["level"])) / 2
+    pieces: dict[str, list[np.ndarray]] = {k: [] for k in ("x", "fit", "lo", "hi", "p", "c", "k")}
+    for k, f in enumerate(fits):
+        m = len(f.grid)
+        half = _t_quantile(p_hi, f.df) * f.se if args["se"] and f.df >= 1 else np.full(m, np.nan)
+        pieces["x"].append(f.grid)
+        pieces["fit"].append(f.fit)
+        pieces["lo"].append(f.fit - half)
+        pieces["hi"].append(f.fit + half)
+        pieces["p"].append(np.full(m, f.group // nc))
+        pieces["c"].append(np.full(m, f.group % nc))
+        pieces["k"].append(np.full(m, k))
     cat = {k: np.concatenate(v) if v else np.zeros(0) for k, v in pieces.items()}
     x, fit, lower, upper = cat["x"], cat["fit"], cat["lo"], cat["hi"]
     p, ci, curve = (cat[k].astype(np.int64) for k in ("p", "c", "k"))
@@ -869,9 +1069,9 @@ def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
     if xc.kind == "time":
         extra[xc.name] = _times(x)
     out = _table(cols, extra)
-    counted = sample_of >= 0
-    members = Members.grouped(sample_of[counted], srows[counted], len(x))
     pair = np.flatnonzero(curve[1:] == curve[:-1]) if len(curve) else np.zeros(0, np.int64)
+    where = Where(p, _color_where(color, labels, ci), [_pieces(xc, x, curve)],
+                  ((xc.name, xc.log), (yc.name, yc.log)))  # fmt: skip
 
     def build_line(_x: Any, _y: Any, _c: Any) -> Geometry:
         a, b = pair, pair + 1
@@ -887,12 +1087,26 @@ def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
     has_band = bool(args["se"]) and bool(np.isfinite(lower).any())
     line = replace(layer, mark="line", tooltip=[interval] if has_band else [])
     if not has_band:
-        return [Part(line, out, build_line, members)]
+        return [Part(line, out, build_line, members, where=where)]
     band = replace(layer, mark="band", opacity=layer.opacity * 0.25, tooltip=[interval])
     return [
-        Part(band, out, build_band, members, hide=("y",), family=True),
-        Part(line, out, build_line, members, family=True),
+        Part(band, out, build_band, members, hide=("y",), family=True, where=where),
+        Part(line, out, build_line, members, family=True, where=where),
     ]
+
+
+def linear_fit(n: float, xbar: float, ybar: float, sxx: float, sxy: float, syy: float,
+               at: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:  # fmt: skip
+    """Least squares from the sums of the values' squares and products about their means:
+    the fit at ``at``, its standard error and the residual degrees of freedom (as
+    ``_linear``, without the values)."""
+    slope = sxy / sxx
+    fit = ybar + slope * (at - xbar)
+    df = n - 2
+    if df < 1:
+        return fit, np.full(len(at), np.nan), float(df)
+    sigma = np.sqrt(max(syy - slope * sxy, 0.0) / df)
+    return fit, sigma * np.sqrt(1 / n + (at - xbar) ** 2 / sxx), float(df)
 
 
 def _linear(u: np.ndarray, y: np.ndarray, at: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
@@ -943,6 +1157,58 @@ def _loess(u: np.ndarray, y: np.ndarray, at: np.ndarray, span: float
     return fit, sigma * norm, df
 
 
+def loess_binned(x: np.ndarray, counts: np.ndarray, sum_y: np.ndarray, sum_y2: np.ndarray,
+                 at: np.ndarray, span: float) -> tuple[np.ndarray, np.ndarray, float]:  # fmt: skip
+    """``_loess`` of values counted in fine bins of x (sorted: each bin's count, the mean of
+    its x, the sum of its y and of their squares): each bin's values as at its mean x, so a
+    fit costs a bin's work rather than a value's."""
+    n = float(counts.sum())
+    mid = float((counts * x).sum()) / n
+    scale = float(np.sqrt((counts * (x - mid) ** 2).sum() / n)) or 1.0
+    u, u0 = (x - mid) / scale, (at - mid) / scale
+    q = min(n, max(float(np.ceil(span * n)), 3.0))
+    du = u[None, :] - u0[:, None]  # a row per place along the line, a column per bin
+    d = np.abs(du)
+    reach = _reach(u, counts, u0, q)[:, None]
+    reach = np.maximum(reach * max(span, 1.0), 1e-12)
+    w = np.clip(1 - (d / reach) ** 3, 0, None) ** 3
+    cw = counts[None, :] * w
+    s0, s1, s2 = cw.sum(axis=1), (cw * du).sum(axis=1), (cw * du * du).sum(axis=1)
+    det = s0 * s2 - s1 * s1
+    line = det > 1e-12 * np.maximum(s0 * s2, 1e-300)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        weights = np.where(
+            line[:, None], w * (s2[:, None] - s1[:, None] * du) / det[:, None], w / s0[:, None]
+        )  # each value's, in its bin
+    fit = weights @ sum_y
+    norm = np.sqrt((counts[None, :] * weights * weights).sum(axis=1))
+    leverage = np.take_along_axis(weights, np.argmin(d, axis=1)[:, None], axis=1)[:, 0]
+    trace = float(np.clip(leverage.mean() * n, 1.0, n - 1.0)) if n > 2 else n
+    df = n - trace
+    if df < 1:
+        return fit, np.full(len(at), np.nan), df
+    f = np.interp(u, u0, fit)
+    resid = float((sum_y2 - 2 * f * sum_y + counts * f * f).sum())
+    return fit, np.sqrt(max(resid, 0.0) / df) * norm, df
+
+
+def _reach(u: np.ndarray, counts: np.ndarray, at: np.ndarray, q: float) -> np.ndarray:
+    """How far from each of ``at`` its ``q`` nearest values reach: the distance of the bin
+    (``u``, sorted, holding ``counts`` values) in which the count within it reaches ``q``
+    (the least distance holding as many, found by halving)."""
+    total = np.r_[0.0, np.cumsum(counts)]
+    lo = np.zeros(len(at))
+    hi = np.maximum(np.abs(u[0] - at), np.abs(u[-1] - at))
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        held = total[np.searchsorted(u, at + mid, side="right")] - \
+            total[np.searchsorted(u, at - mid, side="left")]  # fmt: skip
+        enough = held >= q
+        hi = np.where(enough, mid, hi)
+        lo = np.where(enough, lo, mid)
+    return hi
+
+
 def _t_quantile(p: float, df: float) -> float:
     """Student's t quantile: exact for 1 and 2 degrees of freedom, else the Cornish-Fisher
     expansion around the normal quantile (within 0.2% from 3 on)."""
@@ -990,6 +1256,14 @@ def _kde(values: np.ndarray, at: np.ndarray, bw: float) -> np.ndarray:
     nbins = int(min(max(8 * (values[-1] - values[0]) / bw, 64), 8192))
     weights, edges = np.histogram(values, bins=nbins)
     centres = (edges[:-1] + edges[1:]) / 2
+    return _kde_binned(centres, weights, at, bw, len(values))
+
+
+def _kde_binned(centres: np.ndarray, weights: np.ndarray, at: np.ndarray, bw: float,
+                n: float) -> np.ndarray:  # fmt: skip
+    """A Gaussian KDE of ``n`` values at ``at``, from their counts (``weights``) in bins
+    centred at ``centres``."""
+    norm = 1.0 / (n * bw * np.sqrt(2 * np.pi))
     z = (at[:, None] - centres[None, :]) / bw
     return (np.exp(-0.5 * z * z) * weights[None, :]).sum(axis=1) * norm
 

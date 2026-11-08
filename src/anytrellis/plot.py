@@ -89,6 +89,8 @@ from anytrellis.styling import (
     palette_colors,
     rgba,
 )
+from anytrellis.summaries import parts as queried_parts
+from anytrellis.summaries import selected as summaries_selected
 
 if TYPE_CHECKING:
     from anytrellis.widget import TrellisWidget
@@ -202,6 +204,9 @@ class Trellis:
         """``load="pages"``: the layers drawing the plot's data, and the rows read of it."""
         self._read: _Read | None = None
         """``load="pages"``: the rows read last, of the panels around the page shown."""
+        self._queried: dict[int, tuple[Any, list[Part]]] = {}
+        """``load="pages"``: each summary layer's parts, every panel's (by the panels and
+        log axes they were made for)."""
         self._row = _names(row)
         self._col = _names(col)
         self._wrap = _names(wrap)
@@ -1403,6 +1408,8 @@ class Trellis:
         (``anytrellis.link``) without a brush of its own: the rows another plot selects."""
         self._scene()
         user = self._user_layer(layer)
+        if self._on_page(user) and user.mark in SUMMARIES:
+            return self._summary_query(user)
         if self._on_page(user):
             return self._selected_query(user)
         table = self._table(user)
@@ -1451,6 +1458,27 @@ class Trellis:
             else:
                 where = where & among_labels(whole, name, chosen)
         return nw.to_native(whole.lazy.filter(where))
+
+    def _summary_query(self, user: Layer) -> Any:
+        """``load="pages"``: the rows of the plot's data that the summaries a brush selects
+        stand for (a histogram's bins, a box's groups, a curve's pieces), in every panel, as
+        a query of the database: not yet read."""
+        import narwhals as nw
+
+        whole = self._data
+        assert whole is not None
+        wheres = []
+        if self._current_selection() is not None:
+            for d, (lay, table, geom) in zip(self._drawn, self._geometry, strict=True):
+                if d.user is not user or d.part is None or d.part.where is None:
+                    continue
+                assert geom is not None
+                hit = np.flatnonzero(self._row_mask(lay, table, geom))
+                if len(hit):
+                    wheres.append(d.part.where.take(hit))
+        grid = self._grid
+        cond = summaries_selected(whole, wheres, lambda ps: self._panels_filter(grid, ps))
+        return nw.to_native(whole.lazy.filter(cond))
 
     def _source_mask(self, user: Layer) -> np.ndarray:
         """The rows of a layer's data its brush selects."""
@@ -1772,6 +1800,7 @@ class Trellis:
     def _changed(self) -> Self:
         self._scene_cache = None
         self._shadow = None
+        self._queried = {}
         if self._widget is not None:
             spec, _ = self._scene()
             self._widget._spec = spec
@@ -1799,11 +1828,11 @@ class Trellis:
         for layer in self._layers:
             if not self._on_page(layer):
                 continue
-            if layer.mark not in PAGE_MARKS:
+            if layer.mark not in (*PAGE_MARKS, *SUMMARIES):
                 raise ValueError(
-                    f"load='pages' draws lines, points and text from the plot's data; "
-                    f"{layer.mark}() needs more rows than a page's: give it its own data, or "
-                    "use load='all'"
+                    f"load='pages' draws lines, points, text and summaries (hist, box, ...) "
+                    f"from the plot's data; {layer.mark}() needs more rows than a page's: give "
+                    "it its own data, or use load='all'"
                 )
             if layer.facet in ("all", "exclude"):
                 raise ValueError(f"load='pages': {layer.name} draws every panel's rows "
@@ -1855,7 +1884,7 @@ class Trellis:
 
         whole = self._data
         assert whole is not None
-        names = tuple(whole._wanted)
+        names = self._page_names()
         if window is None:
             self._read = None
             return self._query_rows(grid, None, names)
@@ -1880,6 +1909,41 @@ class Trellis:
         self._read = _Read(names, keys, window, rows, panel_of)
         return rows
 
+    def _page_names(self) -> tuple[str, ...]:
+        """``load="pages"``: the columns read of the panels around the page shown: those
+        the layers drawing their rows draw (a summary's come from the database), the facet
+        columns, and those of linked rows and orders."""
+        whole = self._data
+        assert whole is not None
+        names: list[str | None] = [*self._page, *self._row, *self._col, *self._wrap,
+                                   *self._link]  # fmt: skip
+        for name, order in self._orders.items():
+            names += [name, order.of]
+        for layer in self._layers:
+            if self._on_page(layer) and layer.mark not in SUMMARIES:
+                names += _layer_columns(layer)
+        return tuple(n for n in dict.fromkeys(names) if n is not None and n in whole)
+
+    def _page_summary(self, layer: Layer, grid: Grid, logs: list[str]) -> list[Part]:
+        """``load="pages"``: a summary layer's parts, every panel's: from the database, or
+        (a summary it doesn't compute) from every row of the columns it draws, read once."""
+        key = (tuple(p.keys for p in grid.panels), tuple(logs))
+        made = self._queried.get(id(layer))
+        if made is not None and made[0] == key:
+            return made[1]
+        whole = self._data
+        assert whole is not None
+        _check_log(layer, logs)
+        found = queried_parts(layer, whole, grid, logs)
+        if found is None:
+            names = tuple(n for n in dict.fromkeys([*grid.columns, *_layer_columns(layer)])
+                          if n is not None and n in whole)  # fmt: skip
+            rows = whole.memo(("rows", names), lambda: self._query_rows(grid, None, names))
+            table = _scaled(layer, rows, logs)
+            found = summary_parts(layer, table, grid.assign(table), len(grid.panels))
+        self._queried[id(layer)] = (key, found)
+        return found
+
     def _query_rows(self, grid: Grid, panels: frozenset[int] | None,
                     names: tuple[str, ...]) -> Table:  # fmt: skip
         """``load="pages"``: the rows of these panels (None: every row), in one query."""
@@ -1901,8 +1965,8 @@ class Trellis:
         assert whole is not None
         keys = grid.columns
         for layer in self._layers:
-            if not self._on_page(layer):
-                continue
+            if not self._on_page(layer) or layer.mark in SUMMARIES:
+                continue  # (a summary's: of its parts, every panel's)
             x, y = layer.x, layer.y
             assert x is not None
             assert y is not None
@@ -1986,9 +2050,13 @@ class Trellis:
                 names = [_panel_name({"keys": p.keys, "label": p.label}, i)
                          for i, p in enumerate(grid.panels)]  # fmt: skip
                 window = self._wanted_of(pages, names)
-            rows = self._rows_of(grid, window)
-            self._page_tables = {id(lr): rows for lr in marks if self._on_page(lr)}
-            tables = [rows, *own]
+            reading = [lr for lr in marks if self._on_page(lr) and lr.mark not in SUMMARIES]
+            if reading:
+                rows = self._rows_of(grid, window)
+                self._page_tables = {id(lr): rows for lr in reading}
+                tables = [rows, *own]
+            else:  # summaries only: from the database, every panel's
+                tables = [self._data, *own] if self._data is not None else own
         given = self._given_orders(tables)
         # every layer as the plain layers it draws: a summary (hist, box, ...) as its parts
         drawn: list[_Drawn] = []
@@ -1997,11 +2065,15 @@ class Trellis:
             if layer.mark == "rule":
                 drawn.append(_Drawn(layer, layer, self._data or Table({}), None))
                 continue
-            table = _scaled(layer, self._table(layer), logs)
-            if layer.mark not in SUMMARIES:
-                drawn.append(_Drawn(layer, layer, table, None))
-                continue
-            for part in summary_parts(layer, table, grid.assign(table), npanels):
+            if paged and self._on_page(layer) and layer.mark in SUMMARIES:
+                made = self._page_summary(layer, grid, logs)
+            else:
+                table = _scaled(layer, self._table(layer), logs)
+                if layer.mark not in SUMMARIES:
+                    drawn.append(_Drawn(layer, layer, table, None))
+                    continue
+                made = summary_parts(layer, table, grid.assign(table), npanels)
+            for part in made:
                 part.layer.stat = layer.mark
                 drawn.append(_Drawn(layer, part.layer, part.table, part))
         self._drawn = drawn
@@ -2415,6 +2487,7 @@ class Trellis:
             shadow._link_group = None
             shadow._page_tables = {}
             shadow._read = None
+            shadow._queried = {}
             shadow._shadow = None
             self._shadow = shadow
         shadow = self._shadow
@@ -2457,13 +2530,25 @@ def _scale(value: str) -> str:
     return value
 
 
-def _scaled(layer: Layer, table: Table, logs: list[str]) -> Table:
-    """A layer's table with its columns on log axes in log10 units."""
+def _check_log(layer: Layer, logs: list[str]) -> None:
+    """A layer drawn from zero has no log y axis."""
     if "y" in logs and layer.mark in FROM_ZERO:
         raise ValueError(
             f"{layer.mark}() draws from zero, which a log y axis has no place for; use "
             "points or lines, or a linear y"
         )
+
+
+def _layer_columns(layer: Layer) -> list[str | None]:
+    """The columns a layer draws."""
+    ends = [*layer.stat_args.get("x_columns", ()), *layer.stat_args.get("y_columns", ())]
+    return [layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text, *layer.group,
+            *layer.tooltip, *ends]  # fmt: skip
+
+
+def _scaled(layer: Layer, table: Table, logs: list[str]) -> Table:
+    """A layer's table with its columns on log axes in log10 units."""
+    _check_log(layer, logs)
     names = set()
     if "x" in logs:
         names |= {n for n in (layer.x, layer.x2) if n is not None}

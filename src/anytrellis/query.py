@@ -9,7 +9,7 @@ operation it lacks): the caller then computes the summary from the rows, as for 
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -112,15 +112,18 @@ def distinct(table: Table, names: Sequence[str]) -> Table:
     return Table(nw.to_native(table.lazy.select(*names).unique().collect()))
 
 
-def span(table: Table, name: str) -> tuple[float, float] | None:
+def span(table: Table, name: str, positive: bool = False) -> tuple[float, float] | None:
     """The range of a lazy table's finite values of a number or time column (times in
-    milliseconds, as read), or None: it has none."""
+    milliseconds, as read; ``positive``: of those above 0), or None: it has none."""
     import narwhals as nw
 
     if table.kind(name) == "category":
         return None
     c = nw.col(name)
-    found = Table(nw.to_native(table.lazy.filter(_finite(table, name))
+    ok = _finite(table, name)
+    if positive:
+        ok = ok & (c > 0)
+    found = Table(nw.to_native(table.lazy.filter(ok)
                                .select(c.min().alias("lo"), c.max().alias("hi"))
                                .collect()))  # fmt: skip
     lo, hi = found.column("lo").values, found.column("hi").values
@@ -243,38 +246,47 @@ def combos(table: Table, names: Sequence[str], rows: Sequence[Sequence[Any]]) ->
     return out
 
 
-def within(table: Table, name: str, lo: float, hi: float, kind: str) -> Any:
-    """Rows whose value of number or time column ``name`` is in ``[lo, hi]`` (a time:
-    milliseconds of wall-clock time in its zone; ``kind`` "log": log10 units)."""
-    import datetime as dt
-
+def within(table: Table, name: str, lo: float, hi: float, kind: str,
+           open_hi: bool = False) -> Any:  # fmt: skip
+    """Rows whose value of number or time column ``name`` is in ``[lo, hi]`` (``open_hi``:
+    ``[lo, hi)``; an infinite end: no end; a time: milliseconds of wall-clock time in its
+    zone; ``kind`` "log": log10 units)."""
     import narwhals as nw
 
     c = nw.col(name)
-    if kind == "log":
-        return (c >= 10.0**lo) & (c <= 10.0**hi)
-    if kind != "time":
-        return (c >= lo) & (c <= hi)
-    dtype = table.dtype(name)
-    if isinstance(dtype, nw.Date):
-        c = c.cast(nw.Datetime("us"))
-    zone = getattr(dtype, "time_zone", None)
+    if kind == "time":
+        dtype = table.dtype(name)
+        if isinstance(dtype, nw.Date):
+            c = c.cast(nw.Datetime("us"))
+        zone = getattr(dtype, "time_zone", None)
+        value: Callable[[float], Any] = lambda ms: _datetime(ms, zone)  # noqa: E731
+    elif kind == "log":
+        value = lambda v: 10.0**v  # noqa: E731
+    else:
+        value = float
+    out = None if lo == -np.inf else c >= value(lo)
+    if hi != np.inf:
+        high = c < value(hi) if open_hi else c <= value(hi)
+        out = high if out is None else out & high
+    return always(name) if out is None else out
+
+
+def _datetime(ms: float, zone: str | None) -> Any:
+    """Milliseconds of wall-clock time as a datetime (in ``zone``); past the years a
+    datetime has: its ends."""
+    import datetime as dt
 
     epoch = dt.datetime(1970, 1, 1)  # noqa: DTZ001 - wall-clock time
     micro = dt.timedelta(microseconds=1)
     first = (dt.datetime.min - epoch) // micro  # noqa: DTZ901 - wall-clock time
     last = (dt.datetime.max - epoch) // micro  # noqa: DTZ901 - wall-clock time
+    us = min(max(ms * 1000, first), last)
+    when = epoch + dt.timedelta(microseconds=round(us))
+    if zone is None:
+        return when
+    from zoneinfo import ZoneInfo
 
-    def at(ms: float) -> dt.datetime:  # (a range past the years a datetime has: to its ends)
-        us = min(max(ms * 1000, first), last)
-        when = epoch + dt.timedelta(microseconds=round(us))
-        if zone is None:
-            return when
-        from zoneinfo import ZoneInfo
-
-        return when.replace(tzinfo=ZoneInfo(zone))
-
-    return (c >= at(lo)) & (c <= at(hi))
+    return when.replace(tzinfo=ZoneInfo(zone))
 
 
 def drawn(table: Table, name: str) -> Any:
