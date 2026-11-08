@@ -84,7 +84,9 @@ print(plot._embed_html())  # markdown-exec: hide
 ```
 
 Keep the default, `empty="draw"`, when an empty cell is news: data that should be there
-and isn't.
+and isn't. With `page=`, a cell is left out when it has no data on any page, so every page
+has the same cells and turning the pages moves nothing. A cell with data on some pages
+only is drawn, empty, on the others: there, its emptiness is news.
 
 `strip_label="title"` names each panel with the value of a column, in a strip over the
 panel. The column must have one value per panel; make it with the data, as above, or in
