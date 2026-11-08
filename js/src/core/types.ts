@@ -49,6 +49,14 @@ export interface GridSpec {
   col_labels: string[];
   row_title: string;
   col_title: string;
+  /** A grid's rows' and columns' level of each of their facet columns (nested strips). */
+  row_keys?: string[][];
+  col_keys?: string[][];
+  /** A wrap's strips name the panels' keys from this one on (those before: the page's). */
+  strip_from?: number;
+  /** With several facet columns, `nested`: a strip per column, spanning the panels of its
+   * level; `joined`: one strip naming the levels together. */
+  strips?: "nested" | "joined";
 }
 
 export interface ColorSpec {

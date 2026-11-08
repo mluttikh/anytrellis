@@ -115,6 +115,8 @@ row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
 
 - `Trellis(df, row=..., col=...)`: a grid; `Trellis(df, wrap=..., cols=4)`: a wrap. Each
   takes one column or several (their combinations are the levels).
+- Several facet columns get nested strips, the first outermost, each spanning the panels
+  that share its level (as ggh4x's); `strips="joined"` shows one strip per panel.
 - `page="site"`: a page per level of a column, each a grid or a wrap of its own.
 - `aspect=1`: square panels (each panel's height as a multiple of its width).
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),

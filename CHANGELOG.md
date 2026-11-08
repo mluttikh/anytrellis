@@ -6,6 +6,20 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Trellis(strips=)`: `"nested"` (the default) or `"joined"`. With several facet columns,
+  nested strips give each column a strip, the first outermost, spanning the panels next
+  to each other that share its level (as ggh4x's in R): stacked on top of a grid's columns
+  and a wrap's panels, side by side on the right of a grid's rows. Saved images draw them
+  too.
+
+### Changed
+
+- A plot faceted by several columns (`wrap=["a", "b"]`, `col=[...]`, `row=[...]`) now
+  shows nested strips, not one strip per panel naming the levels together (`"a · b"`);
+  `strips="joined"` shows those. Panel names in `panels()` and `open()` are unchanged.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

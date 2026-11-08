@@ -53,6 +53,12 @@ class Grid:
     panels: list[Panel]
     row_labels: list[str] = field(default_factory=list)
     col_labels: list[str] = field(default_factory=list)
+    row_keys: list[tuple[str, ...]] = field(default_factory=list)
+    """A grid's rows: each one's level of each row column (nested strips)."""
+    col_keys: list[tuple[str, ...]] = field(default_factory=list)
+    """A grid's columns: each one's level of each col column."""
+    strip_from: int = 0
+    """A wrap's strips: the panels' keys from this one on (those before: the page's)."""
     row_title: str = ""
     col_title: str = ""
     columns: tuple[str, ...] = ()
@@ -104,6 +110,9 @@ class Grid:
             "cols": self.cols,
             "row_labels": self.row_labels,
             "col_labels": self.col_labels,
+            "row_keys": [list(k) for k in self.row_keys],
+            "col_keys": [list(k) for k in self.col_keys],
+            "strip_from": self.strip_from,
             "row_title": self.row_title,
             "col_title": self.col_title,
         }
@@ -162,12 +171,14 @@ def build_grid(
             panels.append(Panel(i, at // ncols, at % ncols, label, keys))
             at += 1
         return Grid("wrap", nrows, ncols, panels, columns=columns, pages=page_labels,
-                    page_of=page_of, _levels=levels, _row_combos=combos,
-                    _wrap_vars=names)  # fmt: skip
+                    page_of=page_of, strip_from=len(page) if wrap else 0, _levels=levels,
+                    _row_combos=combos, _wrap_vars=names)  # fmt: skip
     row_combos = _present(sources, row, levels) if row else np.zeros((1, 0), dtype=np.int64)
     col_combos = _present(sources, col, levels) if col else np.zeros((1, 0), dtype=np.int64)
-    row_labels = [" · ".join(levels[v][k] for v, k in zip(row, c, strict=True)) for c in row_combos]
-    col_labels = [" · ".join(levels[v][k] for v, k in zip(col, c, strict=True)) for c in col_combos]
+    row_keys = [tuple(levels[v][k] for v, k in zip(row, c, strict=True)) for c in row_combos]
+    col_keys = [tuple(levels[v][k] for v, k in zip(col, c, strict=True)) for c in col_combos]
+    row_labels = [" · ".join(k) for k in row_keys]
+    col_labels = [" · ".join(k) for k in col_keys]
     nrows, ncols = len(row_combos), len(col_combos)
     panels = []
     pages = page_keys or [()]
@@ -185,6 +196,7 @@ def build_grid(
     grid = Grid(
         "grid", nrows, ncols, panels,
         row_labels=row_labels if row else [], col_labels=col_labels if col else [],
+        row_keys=row_keys if row else [], col_keys=col_keys if col else [],
         row_title=" · ".join(row), col_title=" · ".join(col), columns=columns,
         pages=page_labels, page_of=page_of,
         _levels=levels, _row_combos=row_combos, _col_combos=col_combos,

@@ -4,6 +4,22 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
+## Unreleased
+
+No code stops working; one change in what a plot shows.
+
+**Several facet columns get nested strips.** A plot faceted by a list of columns shows a
+strip per column, each spanning the panels next to each other that share its level, not
+one strip per panel naming the levels together. To keep the old strips:
+
+```python
+# 0.3: one strip per panel, "Adelie · Biscoe"
+Trellis(penguins, wrap=["species", "island"])
+
+# next: the same
+Trellis(penguins, wrap=["species", "island"], strips="joined")
+```
+
 ## 0.3.0
 
 No code stops working; two changes in what a plot shows, or when it reads its data.

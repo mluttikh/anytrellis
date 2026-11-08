@@ -101,6 +101,7 @@ if TYPE_CHECKING:
 SPEC_VERSION = 1
 RENDERERS = ("auto", "webgpu", "webgl2", "canvas2d")
 LEGENDS = ("auto", "bottom")
+STRIPS = ("nested", "joined")
 LOADS = ("all", "pages")
 PAGE_MARKS = ("points", "line", "text")
 """The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
@@ -156,6 +157,9 @@ class Trellis:
         palette: Colours for category colour columns (default: tab10).
         legend: ``"auto"``: in a wrap's empty cells after its last panel when it fits there,
             under the plot otherwise; ``"bottom"``: always under the plot.
+        strips: With several facet columns, ``"nested"``: a strip per column, each spanning
+            the panels of its level (the first column's outermost); ``"joined"``: one strip
+            per panel, row or column naming its levels together (``"north · A"``).
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
@@ -194,6 +198,7 @@ class Trellis:
         y_title: str | None = None,
         palette: Sequence[str] | None = None,
         legend: str = "auto",
+        strips: str = "nested",
         fit_y: bool = False,
         link: str | Sequence[str] | None = None,
         load: str = "all",
@@ -255,6 +260,9 @@ class Trellis:
         if legend not in LEGENDS:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
         self.legend = legend
+        if strips not in STRIPS:
+            raise ValueError(f"strips must be one of {STRIPS}, got {strips!r}")
+        self.strips = strips
         self.fit_y = bool(fit_y)
         self._link = _names(link)
         self._selection: Brush | None = None
@@ -2302,7 +2310,7 @@ class Trellis:
         spec = {
             "version": SPEC_VERSION,
             "title": self.title,
-            "grid": grid.spec(),
+            "grid": {**grid.spec(), "strips": self.strips},
             "panels": [
                 {
                     "row": p.row,
