@@ -719,49 +719,196 @@ def counts(where: Where, rows: Table, panel_of: np.ndarray) -> np.ndarray:
     summary row stands for: the share of a bin, the group of a box, the stretch of a curve
     another plot's selection holds."""
     n = len(where.panel)
-    out = np.zeros(n, dtype=np.int64)
     if not n or not rows.n:
-        return out
+        return np.zeros(n, dtype=np.int64)
     ok = panel_of >= 0
     for name, log in where.finite:
         ok &= np.isfinite(_axis_values(rows, name, log))
+    tests, span = _span_of(where)
+    value = None if span is None else _axis_values(rows, span.name, span.log)
+    return _counted(where, tests, span, panel_of, ok, lambda name: _labels(rows, name),
+                    lambda _, t: _axis_values(rows, t.name, t.log), value)  # fmt: skip
+
+
+def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray | None:
+    """How many rows of the plot's lazy table that ``keep`` holds (a filter: the rows of
+    the keys another plot of a link selects) each of a summary's rows stands for, counted
+    by the database. The rows are grouped by what the summary rows test (panel, colour,
+    labels, values), and by a bucket of the value whose range they cover: a histogram's
+    bins themselves (the counts are exact), or buckets narrower than any range, each with
+    its least and greatest value (every range holding a row is found). None: the backend
+    can't run the query (the caller reads the rows)."""
+    import narwhals as nw
+
+    where = part.where
+    assert where is not None
+    n = len(where.panel)
+    if not n:
+        return np.zeros(0, dtype=np.int64)
+    ask = _Ask(part.layer, whole, grid, ())
+    tests, span = _span_of(where)
+    try:
+        ok = keep
+        for name, log in where.finite:
+            ok = ok & ask._ok(name, log)
+        names: list[str] = [*grid.columns]
+        if where.color is not None:
+            names.append(where.color.name)
+        values: dict[int, str] = {}
+        extra: list[Any] = []
+        for i, t in enumerate(tests):
+            if isinstance(t, Labels):
+                names.append(t.name)
+                continue
+            v = ask._value(t.name, t.log)
+            alias = f"{VALUE}{i}"
+            values[i] = alias
+            extra.append(v.alias(alias))
+            chosen = np.unique(t.lo)
+            if len(chosen) <= _AMONG:  # the values of the summary rows only (outliers)
+                ok = ok & v.is_in(chosen.tolist())
+        groups = [*dict.fromkeys(n for n in names if n in whole), *values.values()]
+        aggs = [_len()]
+        mids: np.ndarray | None = None
+        if span is not None:
+            v = ask._value(span.name, span.log)
+            bucket, mids, lo, hi = _buckets(span, v)
+            if np.isfinite(lo):
+                ok = ok & (v >= lo)
+            if np.isfinite(hi):
+                ok = ok & (v <= hi)
+            extra += [v.alias(VALUE), bucket.alias(BIN)]
+            groups.append(BIN)
+            if mids is None:  # fine buckets: where in them the rows are
+                c = nw.col(VALUE)
+                aggs += [c.min().alias(LO), c.max().alias(HI)]
+        found = ask._read(lambda q: q.filter(ok).with_columns(*extra).group_by(*groups)
+                          .agg(*aggs))  # fmt: skip
+    except _Unable:
+        return None
+    if not found.n:
+        return np.zeros(n, dtype=np.int64)
+    count = found.column(N).values.astype(np.int64)
+    pick = np.arange(found.n)
+    weights = count
+    value = None
+    if span is not None and mids is not None:  # a bin: its middle stands for its rows
+        value = mids[found.column(BIN).values.astype(np.int64)]
+    elif span is not None:  # its least value and its greatest, the rows split between them
+        pick = np.concatenate([pick, pick])
+        value = np.concatenate([found.column(LO).values, found.column(HI).values])
+        weights = np.concatenate([np.where(count > 1, count - 1, count),
+                                  (count > 1).astype(np.int64)])  # fmt: skip
+    panel_of = grid.assign(found)
+    assert panel_of is not None
+    return _counted(where, tests, span, panel_of[pick], panel_of[pick] >= 0,
+                    lambda name: _labels(found, name)[pick],
+                    lambda i, _: found.column(values[i]).values.astype(np.float64)[pick],
+                    value, weights)  # fmt: skip
+
+
+_AMONG = 1_000
+"""Up to this many values tested (a box's outliers): only rows of those values are read."""
+_FINE = 1 << 16
+"""The most buckets of a value a range of a summary's rows is looked up in."""
+
+
+def _span_of(where: Where) -> tuple[list[Range | Labels], Range | None]:
+    """A summary's tests of one value or label each, and the range of the value each row
+    covers (a bin, the stretch of a curve), if any."""
     tests = list(where.tests)
     end = tests[-1] if tests else None
-    span = end if isinstance(end, Range) and bool((end.lo != end.hi).any()) else None
-    if span is not None:  # its ranges: looked up in each group
+    if isinstance(end, Range) and bool((end.lo != end.hi).any()):
         tests.pop()
+        return tests, end
+    return tests, None
+
+
+def _buckets(span: Range, v: Any) -> tuple[Any, np.ndarray | None, float, float]:
+    """A bucket of value ``v`` (a query) for each row, the middles of the buckets if each
+    lies within one summary row's range (None: finer buckets than any range), and the
+    least and greatest value of any range."""
+    import narwhals as nw
+
+    every = np.unique(np.concatenate([span.lo, span.hi]))
+    ends = every[np.isfinite(every)]
+    lo, hi = float(ends[0]), float(ends[-1])
+    steps = np.diff(ends)
+    nb = len(steps)
+    if nb == 0:
+        return v * 0, None, float(every[0]), float(every[-1])
+    if len(ends) < len(every):  # a range without an end (a curve's first or last stretch)
+        k = _fine(span, hi - lo)
+        return ((v - lo) / (hi - lo) * k).floor().clip(0, k - 1), None, float(every[0]), \
+            float(every[-1])  # fmt: skip
+    if np.allclose(steps, steps[0], rtol=1e-9, atol=0):  # equal bins (a histogram's)
+        width = float(steps[0])
+        bucket = ((v - lo) / width).floor().clip(0, nb - 1)
+        return bucket, (ends[:-1] + ends[1:]) / 2, lo, hi
+    if nb <= 64:  # a few ends: the number of them at or below a value
+        bucket = sum(((v >= float(e)).cast(nw.Int64) for e in ends[1:-1]), v * 0)
+        return bucket, (ends[:-1] + ends[1:]) / 2, lo, hi
+    k = _fine(span, hi - lo)
+    return ((v - lo) / (hi - lo) * k).floor().clip(0, k - 1), None, lo, hi
+
+
+def _fine(span: Range, extent: float) -> int:
+    """How many buckets of ``extent`` make each narrower than any range (a quarter of the
+    narrowest), up to ``_FINE``."""
+    widths = span.hi - span.lo
+    widths = widths[np.isfinite(widths) & (widths > 0)]
+    if not len(widths):
+        return 1
+    return int(min(_FINE, max(1, np.ceil(4 * extent / float(widths.min())))))
+
+
+def _counted(where: Where, tests: list[Range | Labels], span: Range | None,
+             panel_of: np.ndarray, ok: np.ndarray, labels: Callable[[str], np.ndarray],
+             values: Callable[[int, Range], np.ndarray], value: np.ndarray | None,
+             weights: np.ndarray | None = None) -> np.ndarray:  # fmt: skip
+    """``counts`` of rows (or of groups of rows, ``weights`` each): their panels, those
+    with the values tested (``ok``), their labels and values of each test, and their value
+    in the ``span`` (a range per summary row)."""
+    n = len(where.panel)
     heads = [(where.panel.astype(str), panel_of.astype(str))]
     if where.color is not None:
-        heads.append((where.color.labels.astype(str), _labels(rows, where.color.name)))
-    for t in tests:
+        heads.append((where.color.labels.astype(str), labels(where.color.name)))
+    for i, t in enumerate(tests):
         if isinstance(t, Labels):
-            heads.append((t.labels.astype(str), _labels(rows, t.name)))
+            heads.append((t.labels.astype(str), labels(t.name)))
         else:  # a value: as written to 12 digits (the database's log10 and numpy's alike)
-            heads.append((np.char.mod("%.12g", t.lo), np.char.mod("%.12g", _axis_values(
-                rows, t.name, t.log))))  # fmt: skip
+            heads.append((np.char.mod("%.12g", t.lo), np.char.mod("%.12g", values(i, t))))
     head_s, head_r = _head_codes(heads)
-    hit = np.full(rows.n, -1, dtype=np.int64)
-    if span is None:
-        first = {}
-        for i, h in enumerate(head_s.tolist()):
-            first.setdefault(h, i)
-        hit = np.array([first.get(h, -1) for h in head_r.tolist()], dtype=np.int64)
-    else:
-        value = _axis_values(rows, span.name, span.log)
+    hit = np.full(len(panel_of), -1, dtype=np.int64)
+    if span is None or value is None:
+        first = np.full(int(max(head_s.max(initial=-1), head_r.max(initial=-1))) + 1, -1,
+                        dtype=np.int64)  # fmt: skip
+        first[head_s[::-1]] = np.arange(n)[::-1]  # each head's first summary row
+        hit = first[head_r]
+    else:  # the range holding the value, among those of the row's head
         is_open = span.open if span.open is not None else np.zeros(n, dtype=bool)
         order = np.lexsort((span.lo, head_s))
-        for h in np.unique(head_r[ok]):
-            block = order[head_s[order] == h]
+        hs = head_s[order]
+        mine_all = np.flatnonzero(ok)
+        mine_all = mine_all[np.argsort(head_r[mine_all], kind="stable")]
+        hr = head_r[mine_all]
+        heads_r, starts = np.unique(hr, return_index=True)
+        ends = np.r_[starts[1:], len(hr)]
+        for h, a, b in zip(heads_r.tolist(), starts.tolist(), ends.tolist(), strict=True):
+            block = order[np.searchsorted(hs, h, "left") : np.searchsorted(hs, h, "right")]
             if not len(block):
                 continue
-            mine = np.flatnonzero(ok & (head_r == h))
+            mine = mine_all[a:b]
             v = value[mine]
             at = np.clip(np.searchsorted(span.lo[block], v, side="right") - 1, 0, len(block) - 1)
             s = block[at]
             inside = (v >= span.lo[s]) & np.where(is_open[s], v < span.hi[s], v <= span.hi[s])
             hit[mine[inside]] = s[inside]
     hit[~ok] = -1
-    return np.bincount(hit[hit >= 0], minlength=n)
+    keep = hit >= 0
+    if weights is None:
+        return np.bincount(hit[keep], minlength=n)
+    return np.bincount(hit[keep], weights=weights[keep], minlength=n).round().astype(np.int64)
 
 
 def _axis_values(rows: Table, name: str, log: bool) -> np.ndarray:

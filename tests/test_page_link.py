@@ -11,12 +11,15 @@ import duckdb
 import numpy as np
 import polars as pl
 import pytest
-from test_page_summaries import ids, readings
+from test_page_summaries import MARKS, TIMES, ids, readings
 from test_query import LAZY
 
 import anytrellis as at
 from anytrellis import Trellis
+from anytrellis.data import Table
 from anytrellis.linking import highlight_message
+from anytrellis.query import combos
+from anytrellis.summaries import _span_of, counts
 
 
 def batched(n: int = 6000) -> pl.DataFrame:
@@ -165,3 +168,69 @@ def test_a_plot_reading_pages_links_by_key() -> None:
     rel = duckdb.from_arrow(df.to_arrow())
     with pytest.raises(ValueError, match="give on="):
         at.link(paged(rel, load="pages").points(x="t", y="v"), Trellis(df).points(x="t", y="v"))
+
+
+@pytest.mark.parametrize("kind", list(LAZY))
+@pytest.mark.parametrize(("mark", "kw", "scale"), MARKS + TIMES)
+def test_the_database_counts_the_rows_of_the_keys_chosen(
+    kind: str, mark: str, kw: dict[str, Any], scale: dict[str, str]
+) -> None:
+    """A summary's rows' counts of the rows of the keys another plot selects, from the
+    database, are those of the rows read: a bin's exactly; a curve's stretches holding any."""
+    import narwhals as nw
+
+    df = batched()
+    p = getattr(paged(LAZY[kind](df), load="pages"), mark)(**kw).scale(**scale)
+    p._scene()
+    whole = p._data
+    assert whole is not None
+    keys = [(str(k),) for k in range(0, 300, 3)] + [(None,)]
+    got = p._linked_summary(p._layers[0], ("batch",), keys)
+    assert got is not None
+    keep = combos(whole, ("batch",), keys)
+    rows = Table(nw.to_native(whole.lazy.filter(keep).collect()))
+    rows.whole = whole
+    panel_of = p._grid.assign(rows)
+    assert panel_of is not None
+    parts = [d.part for d in p._drawn if d.part is not None and d.part.where is not None]
+    assert parts
+    assert set(got) == {id(part) for part in parts}
+    for part in parts:
+        assert part.where is not None
+        want = counts(part.where, rows, panel_of)
+        _, span = _span_of(part.where)
+        if span is None or part.layer.stat == "hist":
+            assert got[id(part)].tolist() == want.tolist()
+        else:
+            assert (got[id(part)] > 0).tolist() == (want > 0).tolist()
+        assert want.sum() > 0 or not len(want)
+
+
+def test_a_plot_drawn_before_it_is_linked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its pages' rows are read again, with the link's columns; then a page turned reads
+    that page's rows, and its summaries' counts are kept."""
+    import narwhals as nw
+
+    df = batched()
+    page = readings_plot(duckdb.from_arrow(df.to_arrow()), load="pages")
+    every = readings_plot(df)
+    page._scene()
+    every._scene()  # (drawn, not linked yet: no batch read)
+    scatter, scatter2 = (Trellis(batches(df)).points(x="mean_t", y="size") for _ in range(2))
+    at.link(scatter, page, on="batch")
+    at.link(scatter2, every, on="batch")
+    scatter.select(x=(4, 6))
+    scatter2.select(x=(4, 6))
+    assert shown(page) == shown(every)
+    asked: list[int] = []
+    collect = nw.LazyFrame.collect
+
+    def counted(self: Any, *args: Any, **kw: Any) -> Any:
+        asked.append(1)
+        return collect(self, *args, **kw)
+
+    monkeypatch.setattr(nw.LazyFrame, "collect", counted)
+    page.show_page(3)
+    every.show_page(3)
+    assert len(asked) == 1  # the rows of the page that came near
+    assert shown(page) == shown(every)
