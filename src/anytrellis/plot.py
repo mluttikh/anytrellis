@@ -90,7 +90,8 @@ from anytrellis.styling import (
     palette_colors,
     rgba,
 )
-from anytrellis.summaries import counts as linked_counts
+from anytrellis.summaries import counts as counts_of_rows
+from anytrellis.summaries import linked_counts
 from anytrellis.summaries import parts as queried_parts
 from anytrellis.summaries import selected as summaries_selected
 
@@ -272,6 +273,9 @@ class Trellis:
         self._linked_keys: tuple[tuple[str, ...], list[tuple[Any, ...]]] | None = None
         """``load="pages"``: the keys another plot of the link selects (its ``on`` columns
         and their values), or None."""
+        self._linked_counts: dict[int, tuple[Any, dict[int, np.ndarray]]] = {}
+        """``load="pages"``: per summary layer, its rows' counts of the rows of the keys
+        chosen last (and what they were counted for): kept while the pages turn."""
         self._scene_cache: tuple[dict[str, Any], Buffers] | None = None
         self._geometry: list[tuple[Layer, Table, Geometry | None]] = []
         self._drawn: list[_Drawn] = []
@@ -1551,7 +1555,8 @@ class Trellis:
     def _linked_summary(self, layer: Layer, on: tuple[str, ...],
                         keys: list[tuple[Any, ...]]) -> dict[int, np.ndarray] | None:  # fmt: skip
         """``load="pages"``: how many rows of the keys another plot of the link selects each
-        of a summary's rows stands for, per part (None: the data has no ``on`` columns)."""
+        of a summary's rows stands for, per part, counted by the database (None: the data
+        has no ``on`` columns)."""
         import narwhals as nw
 
         whole = self._data
@@ -1559,19 +1564,49 @@ class Trellis:
         if not all(name in whole for name in on):
             return None
         self._scene()
-        parts = [d.part for d in self._drawn if d.user is layer and d.part is not None]
-        names = tuple(n for n in dict.fromkeys([*self._grid.columns, *_layer_columns(layer)])
-                      if n is not None and n in whole)  # fmt: skip
-        if keys:
-            query = whole.lazy.filter(combos(whole, on, keys)).select(*names)
-            rows = Table(nw.to_native(query.collect()))
-        else:
-            rows = Table({name: np.zeros(0) for name in names})
-        rows.whole = whole
-        panel_of = self._grid.assign(rows) if rows.n else np.zeros(0, dtype=np.int64)
-        assert panel_of is not None
-        return {id(part): linked_counts(part.where, rows, panel_of)
-                for part in parts if part.where is not None}  # fmt: skip
+        parts = [(d.part, d.part.where) for d in self._drawn if d.user is layer
+                 and d.part is not None and d.part.where is not None]  # fmt: skip
+        if not keys:
+            return {id(part): np.zeros(len(where.panel), dtype=np.int64)
+                    for part, where in parts}  # fmt: skip
+        asked = (on, tuple(keys), tuple(id(part) for part, _ in parts))
+        last = self._linked_counts.get(id(layer))
+        if last is not None and last[0] == asked:  # the same keys (a page turned)
+            return last[1]
+        keep = combos(whole, on, keys)
+        out: dict[int, np.ndarray] = {}
+        rows: tuple[Table, np.ndarray] | None = None
+        for part, where in parts:
+            found = linked_counts(part, whole, self._grid, keep)
+            if found is None:  # the backend can't count them: the rows of the keys, read
+                if rows is None:
+                    names = tuple(n for n in dict.fromkeys([*self._grid.columns,
+                                                            *_layer_columns(layer)])
+                                  if n is not None and n in whole)  # fmt: skip
+                    read = Table(nw.to_native(whole.lazy.filter(keep).select(*names).collect()))
+                    read.whole = whole
+                    panel_of = self._grid.assign(read) if read.n else np.zeros(0, dtype=np.int64)
+                    assert panel_of is not None
+                    rows = (read, panel_of)
+                found = counts_of_rows(where, *rows)
+            out[id(part)] = found
+        self._linked_counts[id(layer)] = (asked, out)
+        return out
+
+    def _read_link_columns(self) -> None:
+        """``load="pages"``: linked by the values of columns not read with the pages (it was
+        drawn before): read the pages' rows again, with them (the database's summaries
+        kept)."""
+        if self._load != "pages" or self._scene_cache is None:
+            return
+        names = self._page_names()
+        if all(name in table for table in self._page_tables.values() for name in names):
+            return
+        self._scene_cache = None
+        self._shadow = None
+        if self._widget is not None:
+            spec, _ = self._scene()
+            self._widget._spec = spec
 
     def _row_mask(self, layer: Layer, table: Table, geom: Geometry) -> np.ndarray:
         brush = self._current_selection()

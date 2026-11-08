@@ -73,6 +73,7 @@ class Link:
         for p in plots:
             p._link_group = self
             p._live(True)
+            p._read_link_columns()
         for p in plots:  # a plot with a selection already: the first one leads
             if p._current_selection() is not None:
                 self.changed(p)
@@ -84,6 +85,7 @@ class Link:
             p._link_group = None
             p._live(False)
             p._linked_keys = None
+            p._linked_counts = {}
             p._set_highlight(None)
         self.source = None
 

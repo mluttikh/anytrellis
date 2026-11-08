@@ -149,8 +149,9 @@ still around it and reads those of the page that came near (240,000) in 0.25 s. 
   brushed. **`anytrellis.link(..., on=)`** links a plot reading pages to others by the
   values of columns (give `on=`: its rows are in the database, not the same rows as
   another's). Its selection is read as the keys chosen; a selection elsewhere lights up
-  the rows of the pages read, and its summaries count the rows of the keys chosen, read
-  from the database (a histogram's bars fill to their share).
+  the rows of the pages read, and the database counts the rows of the keys chosen that
+  each summary stands for, every panel's in one query (a histogram's bars fill to their
+  share). A page turned reads that page's rows only.
 - A wrap of 100 panels or fewer, which doesn't page, reads every row; give `rows=` to
   page it. With `page=`, a page is a level: turning
   to it reads that level's rows (a grid's too).
