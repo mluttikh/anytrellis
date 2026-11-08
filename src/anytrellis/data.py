@@ -84,6 +84,8 @@ class Table:
         self._n: int | None = None
         self.whole: Table | None = None
         """The lazy table these rows were read from (``load="pages"``), or None."""
+        self._categories: frozenset[str] = frozenset()
+        """Number columns read as categories (``Trellis.as_category``)."""
         self._memo: dict[Any, Any] = {}
         import narwhals as nw
 
@@ -148,7 +150,29 @@ class Table:
             return self.column(name).kind
         if name not in self.names:
             raise NotFoundError(f"column {name!r} not found; available: {self.names}")
-        return _kind_of(self._schema[name])
+        kind = _kind_of(self._schema[name])
+        return "category" if kind == "number" and self.categorical(name) else kind
+
+    @property
+    def categories(self) -> frozenset[str]:
+        """The number columns read as categories: their distinct values are the levels, in
+        order (``Trellis.as_category``); those of the table these rows were read from too."""
+        whole = self.whole.categories if self.whole is not None else frozenset()
+        return self._categories | whole
+
+    @categories.setter
+    def categories(self, names: frozenset[str]) -> None:
+        changed = names ^ self._categories
+        if not changed:
+            return
+        for name in changed:  # read again, as numbers or categories
+            self._cache.pop(name, None)
+        self._memo = {}  # (levels, spans: of numbers or of categories)
+        self._categories = names
+
+    def categorical(self, name: str) -> bool:
+        """Whether number column ``name`` is read as categories."""
+        return name in self.categories
 
     def column(self, name: str) -> Column:
         if name not in self._cache:
@@ -158,6 +182,8 @@ class Table:
                 self._wanted[name] = None
                 self._load()
             column = _read(self._frame, name)
+            if column.kind == "number" and self.categorical(name):
+                column = number_categories(column)
             if self.whole is not None and column.kind == "category":
                 column = _recoded(column, self.whole.levels(name))
             self._cache[name] = column
@@ -177,7 +203,12 @@ class Table:
             return self.column(name).levels
         from anytrellis.query import distinct
 
-        return self.memo(("levels", name), lambda: distinct(self, [name]).column(name).levels)
+        def read() -> tuple[str, ...]:
+            found = distinct(self, [name])
+            found.categories = self.categories & {name}
+            return found.column(name).levels
+
+        return self.memo(("levels", name), read)
 
     def span(self, name: str) -> tuple[float, float] | None:
         """The finite range of a number or time column over the whole table these rows
@@ -363,6 +394,34 @@ def _from_array(name: str, values: Any) -> Column:
         if present and all(isinstance(v, int | float | np.number) for v in present):
             return Column(name, "number", np.array(arr, dtype=np.float64))
     return _categories(name, arr, None)
+
+
+def number_label(v: float) -> str:
+    """A number as a level: ``4``, not ``4.0``; ``2.5``; ``MISSING_LABEL`` for NaN."""
+    if v != v:
+        return MISSING_LABEL
+    if float(v).is_integer() and abs(v) < 1e15:
+        return str(int(v))
+    return f"{v:.12g}"
+
+
+def number_categories(column: Column) -> Column:
+    """A number column as categories: its distinct values the levels, in order (−10, −2,
+    3), labelled as numbers, without a value last."""
+    uniq, inverse = np.unique(column.values, return_inverse=True)  # NaNs: one, at the end
+    labels = [number_label(v) for v in uniq]
+    levels = tuple(dict.fromkeys(labels))
+    position = {lv: i for i, lv in enumerate(levels)}
+    level_of = np.array([position[lv] for lv in labels], dtype=np.int64)
+    codes = level_of[inverse.ravel()] if len(uniq) else np.zeros(0, dtype=np.int64)
+    values = np.array(labels, dtype=object)[inverse.ravel()] if len(uniq) \
+        else np.zeros(0, dtype=object)  # fmt: skip
+    return Column(column.name, "category", values, levels, codes)
+
+
+def number_value(label: str) -> float:
+    """The number a level of ``number_categories`` names (NaN: ``MISSING_LABEL``)."""
+    return np.nan if label == MISSING_LABEL else float(label)
 
 
 def _categories(name: str, values: np.ndarray, levels: list[str] | None) -> Column:

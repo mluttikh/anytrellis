@@ -20,6 +20,7 @@ independent with `resolve_scale`:
 | `mark_point()`, `mark_line()`, `mark_bar()` | `.points()`, `.line()`, `.bars()` |
 | `mark_area()`, `mark_rect()`, `mark_text()`, `mark_rule()` | `.area()`, `.rect()`, `.text()`, `.rule()` |
 | `alt.Color("region")` | `color="region"` |
+| `alt.Color("cylinders:N")`, `"cylinders:O"` | `.as_category("cylinders")`, then `color="cylinders"` |
 | `alt.Tooltip(["country"])` | `tooltip=["country"]` |
 | `alt.Scale(type="log")` | `y_scale="log"` |
 | `alt.selection_interval()` | a brush: built in (**s**, then drag) |

@@ -30,9 +30,9 @@ print(plot._embed_html())  # markdown-exec: hide
 | Text and categories | A category axis | A band per category, in alphabetical order unless [ordered](colours.md#order-categories); nulls become a `(missing)` category |
 
 A pandas `Categorical` and a Polars `Enum` keep their declared order. Booleans count as the
-numbers 0 and 1: cast them to text for a category (`pl.col("flag").cast(pl.String)`), and
-do the same for numbers you want as categories, such as years in a bar chart. A facet
-column can be any of these kinds; its levels are the panels.
+numbers 0 and 1: `t.as_category("flag")` reads them as categories, as it does numbers you
+want as categories, such as years in a bar chart. A facet column can be any of these
+kinds; its levels are the panels.
 
 ## A dict of columns
 

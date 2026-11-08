@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Self
 import numpy as np
 
 from anytrellis.codec import Buffers
-from anytrellis.data import Table
+from anytrellis.data import Table, number_label
 from anytrellis.detail import (
     DENSE,
     START_WIDTH,
@@ -255,6 +255,8 @@ class Trellis:
         self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
         self._scales: dict[str, str] = {"x": _scale(x_scale), "y": _scale(y_scale)}
         self._orders: dict[str, Order] = {}
+        self._categories: frozenset[str] = frozenset()
+        """Number columns read as categories (``as_category``)."""
         self._layers: list[Layer] = []
         self._tables: dict[int, Table] = {}
         self.height = height
@@ -1035,6 +1037,21 @@ class Trellis:
             self._scales["y"] = _scale(y)
         return self._changed()
 
+    def as_category(self, *columns: str) -> Self:
+        """Read number columns as categories: their distinct values are the levels, in
+        order (``-10, -2, 3``), labelled as numbers (``4``, not ``4.0``), rows without a
+        value last. A colour then takes the palette's colours and a legend of the levels,
+        an axis a band each, ``group=`` a series each, as a text column would.
+
+        ```python
+        t.as_category("cylinders").points(x="weight", y="mpg", color="cylinders")
+        t.as_category("cylinders").order("cylinders", [8, 6, 4])
+        ```
+        """
+        self._categories = self._categories | set(columns)
+        self._read = None  # rows read with the columns as numbers: read again
+        return self._changed()
+
     def order(
         self,
         column: str,
@@ -1044,7 +1061,8 @@ class Trellis:
         of: str | None = None,
         descending: bool = False,
     ) -> Self:
-        """Order a category column's levels: as ``levels`` lists them (the rest after), or
+        """Order a category column's levels (a number column's too, read as categories:
+        ``as_category``): as ``levels`` lists them (the rest after), or
         by a summary of a column per level (Cleveland's ordering by the median, for one),
         rather than alphabetically. This orders panels (facet columns), bands on an axis
         and colours alike.
@@ -1058,7 +1076,8 @@ class Trellis:
             raise ValueError("order: give levels, or by= (with of=)")
         if by is not None and by not in ("median", "mean", "min", "max", "sum", "count"):
             raise ValueError(f"by must be median, mean, min, max, sum or count, got {by!r}")
-        given = tuple(str(v) for v in levels) if levels is not None else None
+        given = tuple(number_label(v) if isinstance(v, float) else str(v) for v in levels) \
+            if levels is not None else None  # fmt: skip
         self._orders[column] = Order(given, by, of, descending)
         return self._changed()
 
@@ -2168,7 +2187,15 @@ class Trellis:
             table.want(layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text,
                        *layer.group, *layer.tooltip, *ends)  # fmt: skip
         for table in tables:
-            table.want(*shared)
+            table.want(*shared, *self._categories)
+            table.categories = frozenset(n for n in self._categories if n in table)
+        for name in self._categories:
+            having = [t for t in tables if name in t]
+            if not having:
+                raise ValueError(f"as_category({name!r}): no data has this column")
+            if any(t.kind(name) == "time" for t in having):
+                raise ValueError(f"as_category({name!r}): a time column; it reads number "
+                                 "columns as categories")  # fmt: skip
 
     def _build(self, turning: bool = False) -> tuple[dict[str, Any], Buffers]:
         """The spec and buffers (``turning``: a page turned, ``load="pages"``: the layers'
