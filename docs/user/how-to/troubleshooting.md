@@ -28,9 +28,8 @@ takes names, not the values: `x="weight"`, not `x=df["weight"]`.
 
 ## Colours are a scale, not categories
 
-A column of numbers gets a colour scale. Cast it to text for a colour per value:
-`df.with_columns(pl.col("year").cast(pl.String))`. See
-[Colours, legends and order](colours.md).
+A column of numbers gets a colour scale. `t.as_category("year")` reads it as categories,
+for a colour per value. See [Colours, legends and order](colours.md).
 
 ## Bars or a histogram on a log scale fail
 

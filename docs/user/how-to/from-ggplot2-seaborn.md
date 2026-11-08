@@ -22,6 +22,7 @@ redo well-known figures of both.
 | `geom_step()` | `.line(step="post")` |
 | `geom_smooth()`, `geom_smooth(method = "lm")` | `.smooth()`, `.smooth(method="linear")` |
 | `aes(colour = g)`, `aes(group = g)` | `color="g"`, `group="g"` |
+| `aes(colour = factor(cyl))` | `.as_category("cyl")`, then `color="cyl"` |
 | `scale_y_log10()` | `Trellis(..., y_scale="log")` |
 | `position = "dodge"` | `.bars(position="dodge")` |
 | `gghighlight()` | a layer with `facet="exclude"` |

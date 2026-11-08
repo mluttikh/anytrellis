@@ -21,8 +21,22 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
-A number column you mean as categories (years, cylinder counts) gets a colour scale; cast
-it to text for a colour per value: `pl.col("year").cast(pl.String)`.
+A number column you mean as categories (years, cylinder counts) gets a colour scale.
+`as_category()` reads it as categories: a colour per value, from the palette, with a legend
+of the values in order:
+
+```python exec="on" source="above" session="colours" html="true"
+plot = Trellis(cars, wrap="origin", cols=3, panel_height=170).as_category("cylinders")
+plot.points(x="weight", y="mpg", color="cylinders", size=5, tooltip=["name"])
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+The values are the levels, in order (`3, 4, 5, 6, 8`; negative numbers first), labelled as
+numbers (`4`, not `4.0`), rows without one last as `(missing)`. The column is categories
+everywhere in the plot: an axis gets a band per value, `group=` a series per value, and
+`order("cylinders", [8, 6, 4])` orders them. With a database (`load="pages"`), the
+database finds the values and selects by them.
 
 ## A palette
 

@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from anytrellis.data import MISSING_LABEL, Column, Table, group_order
+from anytrellis.data import MISSING_LABEL, Column, Table, group_order, number_label
 
 Summary = Literal["median", "mean", "min", "max", "sum", "count"]
 
@@ -256,9 +256,7 @@ def _format(v: float, kind: str) -> str:
     if kind == "time":
         text = str(np.datetime64(int(v), "ms"))
         return text.removesuffix("T00:00:00.000").removesuffix(".000")
-    if float(v).is_integer() and abs(v) < 1e15:
-        return str(int(v))
-    return f"{v:.12g}"
+    return number_label(v)  # as a number column read as categories
 
 
 def _levels(columns: list[Column], order: Order | None, tables: Sequence[Table]) -> list[str]:

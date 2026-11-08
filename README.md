@@ -134,6 +134,8 @@ row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
   bands on an axis and colours. Text is sorted otherwise; a pandas Categorical or a
   Polars Enum keeps its declared order.
 - `line(..., group=["station", "sensor"])`: one line per combination of the columns.
+- `t.as_category("cylinders")`: a number column as categories (a colour per value, a band
+  per value on an axis), its values in order.
 - A layer whose data lacks the facet columns is drawn in every panel; `facet="exclude"`
   draws, in each panel, the other panels' data (grey context behind it).
 

@@ -6,6 +6,14 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Trellis.as_category("column")`: a number column read as categories. Its distinct values
+  are the levels, in order (`-10, -2, 3`), labelled as numbers (`4`, not `4.0`), rows
+  without one last as `(missing)`: a colour per value from the palette with a legend, a
+  band per value on an axis, a series per value with `group=`, and `order()` with numbers.
+  With `load="pages"`, the database finds the values and selects by them.
+
 ## [0.4.0] - 2026-11-08
 
 ### Added

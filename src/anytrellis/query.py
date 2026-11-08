@@ -221,11 +221,35 @@ def among_labels(table: Table, name: str, labels: Sequence[str]) -> Any:
 
     from anytrellis.data import MISSING_LABEL
 
+    if table.dtype(name).is_numeric():  # a number column read as categories
+        return _among_numbers(table, name, labels)
     c = nw.col(name).cast(nw.String)
     plain = [lv for lv in labels if lv != MISSING_LABEL]
     out = c.is_in(plain) if plain else never(name)
     if MISSING_LABEL in labels:
         out = out | nw.col(name).is_null()
+    return out
+
+
+def _among_numbers(table: Table, name: str, labels: Sequence[str]) -> Any:
+    """Rows of a number column read as categories whose level is one of ``labels``: whole
+    numbers by value, others within the precision of their label (``0.3``: 0.1 + 0.2)."""
+    import narwhals as nw
+
+    from anytrellis.data import MISSING_LABEL, number_value
+
+    c = nw.col(name)
+    values = [number_value(lv) for lv in labels if lv != MISSING_LABEL]
+    floats = table.dtype(name).is_float()
+    whole = [v if floats else int(v) for v in values if float(v).is_integer()]
+    out = c.is_in(whole) if whole else never(name)
+    for v in values:
+        if not float(v).is_integer():
+            out = out | ((c - v).abs() <= abs(v) * 1e-11)
+    if MISSING_LABEL in labels:
+        out = out | c.is_null()
+        if floats:
+            out = out | c.is_nan()
     return out
 
 
