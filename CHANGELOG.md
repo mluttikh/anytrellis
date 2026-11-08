@@ -6,6 +6,8 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
 ### Added
 
 - `Trellis(strips=)`: `"nested"` (the default) or `"joined"`. With several facet columns,
@@ -27,7 +29,8 @@ All notable changes to anytrellis. The format follows
 
 - A plot faceted by several columns (`wrap=["a", "b"]`, `col=[...]`, `row=[...]`) now
   shows nested strips, not one strip per panel naming the levels together (`"a · b"`);
-  `strips="joined"` shows those. Panel names in `panels()` and `open()` are unchanged.
+  `strips="joined"` shows those. Panel names in `panels()` and `open()` are unchanged. See
+  [Upgrading](https://mluttikh.github.io/anytrellis/reference/upgrading.html).
 
 ### Fixed
 
@@ -200,7 +203,8 @@ The first release.
 - `anytrellis.datasets.load`: six small example datasets, with their sources and licences
   in `datasets/SOURCES.md`; example notebooks for Jupyter and marimo.
 
-[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mluttikh/anytrellis/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mluttikh/anytrellis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mluttikh/anytrellis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mluttikh/anytrellis/releases/tag/v0.1.0

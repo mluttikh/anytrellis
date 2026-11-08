@@ -4,7 +4,7 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
-## Unreleased
+## 0.4.0
 
 No code stops working; one change in what a plot shows.
 
@@ -16,7 +16,7 @@ one strip per panel naming the levels together. To keep the old strips:
 # 0.3: one strip per panel, "Adelie · Biscoe"
 Trellis(penguins, wrap=["species", "island"])
 
-# next: the same
+# 0.4: the same
 Trellis(penguins, wrap=["species", "island"], strips="joined")
 ```
 

@@ -16,7 +16,7 @@ pip install "anytrellis[examples]"   # with Polars, for the example notebooks an
 pip install "anytrellis[png]"        # with resvg-py, for save_png
 ```
 
-Status: early development (0.3). One panel per level of the facet columns, every panel
+Status: early development (0.4). One panel per level of the facet columns, every panel
 drawn with the same layers (lines, points, bars, areas, rects, text, histograms, box plots,
 violins, densities, error bars, reference rules), on shared scales unless told otherwise.
 Every panel goes into one canvas, so a grid of hundreds of panels and millions of marks
