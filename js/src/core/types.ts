@@ -33,6 +33,8 @@ export interface PanelSpec {
   label: string;
   /** The panel's level of each facet column. */
   keys: string[];
+  /** With strip_label: the panel's own strip (the margins' and nested strips: none). */
+  strip?: string;
   /** The domain, relative to the axis origin. */
   x: [number, number];
   y: [number, number];
@@ -57,6 +59,8 @@ export interface GridSpec {
   /** With several facet columns, `nested`: a strip per column, spanning the panels of its
    * level; `joined`: one strip naming the levels together. */
   strips?: "nested" | "joined";
+  /** Each panel names itself in a strip of its own (PanelSpec.strip). */
+  strip_label?: boolean;
 }
 
 export interface ColorSpec {

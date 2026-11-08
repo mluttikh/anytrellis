@@ -8,7 +8,8 @@
 // every panel; a grid puts its column labels over the top row and its row labels to the
 // right of the last column. With several facet columns, strips nest: a strip per column,
 // the first outermost, each spanning the panels (rows, columns) next to each other that
-// share its level and those outside it.
+// share its level and those outside it. With strip_label, every panel (a grid's too) has a
+// strip of its own naming it, and there are no others.
 
 import { pageList } from "./pages";
 import { ticks, yTickCount } from "./ticks";
@@ -134,11 +135,12 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
 
   const stripH = Math.round(fs * 1.5 + 4);
   const nested = grid.strips !== "joined";
+  const own = !!grid.strip_label; // each panel's own strip, and no others
   const from = grid.strip_from ?? 0;
   const depth = (keys: string[][] | undefined): number => (nested ? Math.max(1, keys?.[0]?.length ?? 1) : 1);
-  const wrapDepth = grid.kind === "wrap" ? depth(panels.length ? [panels[0].keys.slice(from)] : undefined) : 0;
-  const colDepth = grid.kind === "grid" && grid.col_labels.length ? depth(grid.col_keys) : 0;
-  const rowDepth = grid.kind === "grid" && grid.row_labels.length ? depth(grid.row_keys) : 0;
+  const wrapDepth = own ? 1 : grid.kind === "wrap" ? depth(panels.length ? [panels[0].keys.slice(from)] : undefined) : 0;
+  const colDepth = !own && grid.kind === "grid" && grid.col_labels.length ? depth(grid.col_keys) : 0;
+  const rowDepth = !own && grid.kind === "grid" && grid.row_labels.length ? depth(grid.row_keys) : 0;
   const wrapStrip = wrapDepth * stripH;
   const topStrip = colDepth * stripH;
   const rightStrip = rowDepth * stripH;
@@ -199,7 +201,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
       showY: showY[i],
       // a wrap's own strip: its innermost level's (the outer levels': strips over it)
       strip: wrapStrip ? { x: rect.x, y: rect.y - stripH, w: pw, h: stripH - 1 } : null,
-      label: wrapDepth > 1 ? p.keys[p.keys.length - 1] : p.label,
+      label: own ? (p.strip ?? p.label) : wrapDepth > 1 ? p.keys[p.keys.length - 1] : p.label,
       xAxis: showX[i] ? { x: rect.x, y: rect.y + ph, w: pw, h: xAxisHeight } : null,
       yAxis: showY[i] ? { x: rect.x - yLabelWidth[i], y: rect.y, w: yLabelWidth[i], h: ph } : null,
     };
@@ -329,7 +331,7 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
         showX: true,
         showY: true,
         strip: { x: rect.x, y: top, w, h: stripH - 1 },
-        label: panelName(spec, index),
+        label: p.strip ?? panelName(spec, index),
         xAxis: { x: rect.x, y: rect.y + h, w, h: xAxisHeight },
         yAxis: { x: rect.x - yW, y: rect.y, w: yW, h },
       },
