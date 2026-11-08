@@ -3,6 +3,8 @@ wrap of the level's panels; named by their level, sorted and filtered within a l
 
 from __future__ import annotations
 
+from typing import Any
+
 import duckdb
 import numpy as np
 import polars as pl
@@ -174,6 +176,27 @@ def test_pages_read_from_the_database_a_level_at_a_time(monkeypatch) -> None:
     assert p._table(p._layers[0]).n == len(df.filter(pl.col("site").is_in(["B", "C"])))
     wrap = Trellis(rel, wrap="station", page="site", load="pages").points(x="t", y="v")
     assert wrap.page_names == ["A", "B", "C"]
+
+
+def test_a_level_read_by_its_value(monkeypatch) -> None:
+    import anytrellis.plot
+
+    asked: list[tuple[str, ...]] = []
+    original = anytrellis.plot.combos
+
+    def spy(table: Table, names: Any, rows: Any) -> Any:
+        asked.append(tuple(names))
+        return original(table, names, rows)
+
+    monkeypatch.setattr(anytrellis.plot, "combos", spy)
+    df = readings()
+    rel = duckdb.from_arrow(df.to_arrow())
+    p = Trellis(rel, row="sensor", col="metric", page="site", load="pages").points(x="t", y="v")
+    p._scene()
+    assert asked == [("site",)]  # site in ('A', 'B'): not each cell's sensor and metric
+    sub = Trellis(rel, wrap="station", page="site", rows=1, cols=4, load="pages")
+    sub.points(x="t", y="v")._scene()
+    assert asked[-1] == ("site", "station")  # part of a level: its panels' values
 
 
 def test_what_page_columns_do_not_do() -> None:

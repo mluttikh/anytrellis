@@ -99,8 +99,6 @@ LEGENDS = ("auto", "bottom")
 LOADS = ("all", "pages")
 PAGE_MARKS = ("points", "line", "text")
 """The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
-WINDOWS_KEPT = 4
-"""``load="pages"``: the windows of rows kept, to turn back to without reading them again."""
 _STATIC = Path(__file__).parent / "static"
 
 
@@ -202,8 +200,8 @@ class Trellis:
         self._load = load
         self._page_tables: dict[int, Table] = {}
         """``load="pages"``: the layers drawing the plot's data, and the rows read of it."""
-        self._window_rows: dict[Any, Table] = {}
-        """``load="pages"``: the rows of the last few windows read, by window and columns."""
+        self._read: _Read | None = None
+        """``load="pages"``: the rows read last, of the panels around the page shown."""
         self._row = _names(row)
         self._col = _names(col)
         self._wrap = _names(wrap)
@@ -1829,7 +1827,9 @@ class Trellis:
         return whole.memo(("facets", columns), combinations)
 
     def _panels_filter(self, grid: Grid, panels: Sequence[int]) -> Any:
-        """``load="pages"``: a query's condition for the rows of these panels."""
+        """``load="pages"``: a query's condition for the rows of these panels: their page
+        columns' levels (``page=``) when they are whole levels, else each panel's values of
+        the facet columns."""
         whole = self._data
         assert whole is not None
         facets = self._facets()
@@ -1837,29 +1837,61 @@ class Trellis:
         assert at is not None
         inside = np.zeros(len(grid.panels) + 1, dtype=bool)
         inside[list(panels)] = True
+        names = grid.columns
+        if grid.page_of is not None:  # whole levels: by them alone (site = 'B')
+            levels = np.isin(grid.page_of, grid.page_of[list(panels)])
+            if inside[np.flatnonzero(levels)].all():
+                names = self._page
         picked = np.flatnonzero(inside[at])  # at −1: the last, never inside
-        values = [facets.values(name) for name in grid.columns]
-        return combos(whole, grid.columns, [tuple(v[i] for v in values) for i in picked])
+        values = [facets.values(name) for name in names]
+        wanted = dict.fromkeys(tuple(v[i] for v in values) for i in picked)
+        return combos(whole, names, list(wanted))
 
     def _rows_of(self, grid: Grid, window: frozenset[int] | None) -> Table:
         """``load="pages"``: the rows of the window's panels (None: every row), with the
-        columns the plot draws, read in one query; the last few windows are kept."""
+        columns the plot draws: those of the panels read last kept, the others read in one
+        query."""
         import narwhals as nw
 
         whole = self._data
         assert whole is not None
         names = tuple(whole._wanted)
-        key = (window, names)
-        rows = self._window_rows.pop(key, None)
-        if rows is None:
-            query = whole.lazy
-            if window is not None:
-                query = query.filter(self._panels_filter(grid, sorted(window)))
-            rows = Table(nw.to_native(query.select(*names).collect()))
-            rows.whole = whole
-        self._window_rows[key] = rows  # the latest last
-        while len(self._window_rows) > WINDOWS_KEPT:
-            del self._window_rows[next(iter(self._window_rows))]
+        if window is None:
+            self._read = None
+            return self._query_rows(grid, None, names)
+        keys = [p.keys for p in grid.panels]
+        last = self._read
+        if last is None or last.names != names or last.keys != keys:
+            last = None  # other columns, or other panels: none kept
+        kept = frozenset() if last is None else last.panels & window
+        if last is not None and kept == window == last.panels:
+            return last.rows
+        parts = []
+        if last is not None and kept:
+            keep = np.flatnonzero(np.isin(last.panel_of, list(kept)))
+            parts.append(last.rows._frame[keep])
+        if window - kept or not parts:
+            parts.append(nw.from_native(self._query_rows(grid, window - kept, names).native))
+        frame = parts[0] if len(parts) == 1 else nw.concat(parts, how="vertical")
+        rows = Table(nw.to_native(frame))
+        rows.whole = whole
+        panel_of = grid.assign(rows)
+        assert panel_of is not None
+        self._read = _Read(names, keys, window, rows, panel_of)
+        return rows
+
+    def _query_rows(self, grid: Grid, panels: frozenset[int] | None,
+                    names: tuple[str, ...]) -> Table:  # fmt: skip
+        """``load="pages"``: the rows of these panels (None: every row), in one query."""
+        import narwhals as nw
+
+        whole = self._data
+        assert whole is not None
+        query = whole.lazy
+        if panels is not None:
+            query = query.filter(self._panels_filter(grid, sorted(panels)))
+        rows = Table(nw.to_native(query.select(*names).collect()))
+        rows.whole = whole
         return rows
 
     def _page_extents(self, grid: Grid, extents: dict[str, Extent], logs: list[str]) -> None:
@@ -1927,7 +1959,9 @@ class Trellis:
         for table in tables:
             table.want(*shared)
 
-    def _build(self) -> tuple[dict[str, Any], Buffers]:
+    def _build(self, turning: bool = False) -> tuple[dict[str, Any], Buffers]:
+        """The spec and buffers (``turning``: a page turned, ``load="pages"``: the layers'
+        geometry only, which ``_detail`` sends; the spec's layers are left out)."""
         self._page_tables = {}
         self._want_columns()
         paged = self._load == "pages"
@@ -2128,8 +2162,11 @@ class Trellis:
             self._full.append(full)
             entry = self._windowed(full)
             self._sent.append(entry)
-            layers_spec.append(self._layer_spec(d, entry, buffers, self._window))
+            if not turning:
+                layers_spec.append(self._layer_spec(d, entry, buffers, self._window))
         self._start = list(self._full)
+        if turning:  # the layers shown, their buffers and tooltips: as they were, till sent
+            return spec, buffers
         # what each layer shows (zoomed in: in more detail), and its tooltips by coords
         self._shown_layers = list(layers_spec)
         self._detail_buffers = Buffers()
@@ -2181,7 +2218,10 @@ class Trellis:
             return entry
         inside = np.zeros(self._npanels, dtype=bool)
         inside[list(self._window)] = True
-        return (layer, table, geom.take(np.flatnonzero(inside[geom.panel])), part)
+        here = inside[geom.panel]
+        if here.all():  # (load="pages": the rows read are the window's)
+            return entry
+        return (layer, table, geom.take(np.flatnonzero(here)), part)
 
     def _mark_spec(self, d: _Drawn, entry: _Sent, buffers: Buffers) -> dict[str, Any]:
         """A mark layer in the spec, as sent (``entry``: zoomed in, in more detail)."""
@@ -2302,10 +2342,9 @@ class Trellis:
         """``load="pages"``: the layers built again from the rows of the panels around the
         page shown. The spec the browser has stays (the same panels, scales, legends and
         statistics, from the database): ``_detail`` sends the layers."""
-        scene, history = self._scene_cache, self._history
-        self._build()
+        scene = self._scene_cache
+        self._build(turning=True)
         self._scene_cache = scene
-        self._history = {**history, **self._history}  # tooltips of the layers shown before
 
     def _shown_panels(self, spec: dict[str, Any], view: dict[str, Any]) -> dict[int, Shown]:
         """The panels a view shows: their ranges (axis units) and sizes."""
@@ -2375,7 +2414,7 @@ class Trellis:
             shadow._widget = None
             shadow._link_group = None
             shadow._page_tables = {}
-            shadow._window_rows = {}
+            shadow._read = None
             shadow._shadow = None
             self._shadow = shadow
         shadow = self._shadow
@@ -2433,6 +2472,20 @@ def _scaled(layer: Layer, table: Table, logs: list[str]) -> Table:
         names |= {n for n in (layer.y, layer.y2) if n is not None}
         names |= set(layer.stat_args.get("y_columns", ()))
     return table.log_scaled(names) if names else table
+
+
+@dataclass(frozen=True)
+class _Read:
+    """``load="pages"``: rows read, of some panels."""
+
+    names: tuple[str, ...]
+    """The columns read."""
+    keys: list[tuple[str, ...]]
+    """Each panel's levels, as the panels were numbered when the rows were read."""
+    panels: frozenset[int]
+    rows: Table
+    panel_of: np.ndarray
+    """Each row's panel."""
 
 
 @dataclass

@@ -101,15 +101,33 @@ def test_turning_the_page_reads_its_rows_and_sends_every_layer(kind: str) -> Non
     assert paged._detail(None) is None  # the same page: nothing to send
 
 
-def test_turning_back_reuses_the_rows_read(monkeypatch) -> None:
-    paged, _ = plots("duckdb")
+@pytest.mark.parametrize("kind", ["duckdb", "polars"])
+def test_turning_a_page_reads_only_the_panels_not_read(kind: str, monkeypatch) -> None:
+    paged, _ = plots(kind)
+    queried: list[frozenset[int] | None] = []
+    original = Trellis._query_rows
+
+    def spy(self: Trellis, grid: Any, panels: Any, names: Any) -> Table:
+        queried.append(panels)
+        return original(self, grid, panels, names)
+
+    monkeypatch.setattr(Trellis, "_query_rows", spy)
     paged._scene()
-    first = paged._table(paged._layers[0])
-    paged._paging = {"page": 3}
-    paged._detail(None)
-    paged._paging = {"page": 0}
-    paged._detail(None)
-    assert paged._table(paged._layers[0]) is first
+    assert queried == [frozenset(range(48))]  # the first two pages
+    for page, new in ((1, range(48, 72)), (2, range(72, 96)), (1, range(24))):
+        queried.clear()
+        paged._paging = {"page": page}
+        paged._detail(None)
+        assert queried == [frozenset(new)], page  # the page that came into the window
+        rows = paged._table(paged._layers[0])
+        fresh = Trellis._query_rows(paged, paged._grid, paged._window, tuple(rows.names))
+        assert rows.n == fresh.n  # the same rows as read at once
+        for name in ("temp", "rain", "time"):  # (NaNs sorted last)
+            a, b = np.sort(rows.column(name).values), np.sort(fresh.column(name).values)
+            assert np.array_equal(a, b, equal_nan=True), (page, name)
+    queried.clear()
+    paged._detail(None)  # the same window: nothing read
+    assert queried == []
 
 
 @pytest.mark.parametrize("kind", list(LAZY))
