@@ -6,7 +6,9 @@
 // cell (a wrap's last row, a grid's missing combination) draws into that cell, so it takes no
 // gutter: the rows and columns stay evenly spaced. A wrap puts a strip over
 // every panel; a grid puts its column labels over the top row and its row labels to the
-// right of the last column.
+// right of the last column. With several facet columns, strips nest: a strip per column,
+// the first outermost, each spanning the panels (rows, columns) next to each other that
+// share its level and those outside it.
 
 import { pageList } from "./pages";
 import { ticks, yTickCount } from "./ticks";
@@ -131,9 +133,15 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   if (pages) rowHasX[rows - 1] = true; // a short last page keeps the full pages' height
 
   const stripH = Math.round(fs * 1.5 + 4);
-  const wrapStrip = grid.kind === "wrap" ? stripH : 0;
-  const topStrip = grid.kind === "grid" && grid.col_labels.length ? stripH : 0;
-  const rightStrip = grid.kind === "grid" && grid.row_labels.length ? stripH : 0;
+  const nested = grid.strips !== "joined";
+  const from = grid.strip_from ?? 0;
+  const depth = (keys: string[][] | undefined): number => (nested ? Math.max(1, keys?.[0]?.length ?? 1) : 1);
+  const wrapDepth = grid.kind === "wrap" ? depth(panels.length ? [panels[0].keys.slice(from)] : undefined) : 0;
+  const colDepth = grid.kind === "grid" && grid.col_labels.length ? depth(grid.col_keys) : 0;
+  const rowDepth = grid.kind === "grid" && grid.row_labels.length ? depth(grid.row_keys) : 0;
+  const wrapStrip = wrapDepth * stripH;
+  const topStrip = colDepth * stripH;
+  const rightStrip = rowDepth * stripH;
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
   const xTitleH = spec.x.title ? Math.round(fs * 1.4 + 4) : 0;
   const yTitleW = spec.y.title ? Math.round(fs * 1.4 + 4) : 0;
@@ -189,23 +197,53 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
       rect,
       showX: showX[i],
       showY: showY[i],
-      strip: wrapStrip ? { x: rect.x, y: rect.y - wrapStrip, w: pw, h: wrapStrip - 1 } : null,
-      label: p.label,
+      // a wrap's own strip: its innermost level's (the outer levels': strips over it)
+      strip: wrapStrip ? { x: rect.x, y: rect.y - stripH, w: pw, h: stripH - 1 } : null,
+      label: wrapDepth > 1 ? p.keys[p.keys.length - 1] : p.label,
       xAxis: showX[i] ? { x: rect.x, y: rect.y + ph, w: pw, h: xAxisHeight } : null,
       yAxis: showY[i] ? { x: rect.x - yLabelWidth[i], y: rect.y, w: yLabelWidth[i], h: ph } : null,
     };
   });
 
   const strips: Strip[] = [];
-  if (topStrip) {
+  if (colDepth === 1) {
     grid.col_labels.forEach((label, c) => {
-      strips.push({ rect: { x: colX[c], y: top, w: pw, h: topStrip - 1 }, label, vertical: false });
+      strips.push({ rect: { x: colX[c], y: top, w: pw, h: stripH - 1 }, label, vertical: false });
     });
+  } else if (colDepth > 1) {
+    for (const [k, a, b] of nest(grid.col_keys ?? [], colDepth)) {
+      const x0 = colX[a];
+      strips.push({ rect: { x: x0, y: top + k * stripH, w: colX[b] + pw - x0, h: stripH - 1 }, label: grid.col_keys![a][k], vertical: false });
+    }
   }
-  if (rightStrip) {
+  if (rowDepth === 1) {
     grid.row_labels.forEach((label, r) => {
-      strips.push({ rect: { x: plotRight + GAP, y: rowY[r], w: rightStrip - 1, h: ph }, label, vertical: true });
+      strips.push({ rect: { x: plotRight + GAP, y: rowY[r], w: stripH - 1, h: ph }, label, vertical: true });
     });
+  } else if (rowDepth > 1) {
+    for (const [k, a, b] of nest(grid.row_keys ?? [], rowDepth)) {
+      const x0 = plotRight + GAP + (rowDepth - 1 - k) * stripH; // the first column's outermost
+      strips.push({ rect: { x: x0, y: rowY[a], w: stripH - 1, h: rowY[b] + ph - rowY[a] }, label: grid.row_keys![a][k], vertical: true });
+    }
+  }
+  if (wrapDepth > 1) {
+    // each row's panels side by side, by column: the outer levels' strips over those sharing them
+    for (let r = 0; r < rows; r++) {
+      const inRow = panels.filter((p) => p.row === r).sort((p, q) => p.col - q.col);
+      const runs: number[][] = [];
+      inRow.forEach((p, i) => {
+        if (i && p.col === inRow[i - 1].col + 1) runs[runs.length - 1].push(i);
+        else runs.push([i]);
+      });
+      for (const run of runs) {
+        const keys = run.map((i) => inRow[i].keys.slice(from));
+        for (const [k, a, b] of nest(keys, wrapDepth - 1)) {
+          const x0 = colX[inRow[run[a]].col];
+          const x1 = colX[inRow[run[b]].col] + pw;
+          strips.push({ rect: { x: x0, y: rowY[r] - wrapStrip + k * stripH, w: x1 - x0, h: stripH - 1 }, label: keys[a][k], vertical: false });
+        }
+      }
+    }
   }
 
   // the empty cells after a wrap's last panel, below the axes of the panels above them
@@ -236,6 +274,22 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     xAxisHeight,
     yAxisWidth,
   };
+}
+
+/** Nested strips: for each of the first `depth` levels, the runs of items in turn whose
+ * levels up to it are the same, as [level, first, last]. */
+export function nest(keys: string[][], depth: number): [number, number, number][] {
+  const out: [number, number, number][] = [];
+  for (let k = 0; k < depth; k++) {
+    let a = 0;
+    for (let i = 1; i <= keys.length; i++) {
+      const same = i < keys.length && keys[i].slice(0, k + 1).every((v, j) => v === keys[a][j]);
+      if (same) continue;
+      out.push([k, a, i - 1]);
+      a = i;
+    }
+  }
+  return out;
 }
 
 /** The width of a y axis (labels and ticks) over `domain`, with the ticks a panel `h` px high

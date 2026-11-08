@@ -455,9 +455,21 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         row_has_x[rows - 1] = True  # a short last page keeps the full pages' height
 
     strip_h = _round(fs * 1.5 + 4)
-    wrap_strip = strip_h if grid["kind"] == "wrap" else 0
-    top_strip = strip_h if grid["kind"] == "grid" and grid.get("col_labels") else 0
-    right_strip = strip_h if grid["kind"] == "grid" and grid.get("row_labels") else 0
+    nested = grid.get("strips") != "joined"
+    start = grid.get("strip_from", 0)
+
+    def depth(keys: list[list[str]] | None) -> int:
+        return max(1, len(keys[0]) if keys else 1) if nested else 1
+
+    wrap_depth = depth([panels[0]["keys"][start:]] if panels else None) \
+        if grid["kind"] == "wrap" else 0  # fmt: skip
+    col_depth = depth(grid.get("col_keys")) if grid["kind"] == "grid" and grid.get("col_labels") \
+        else 0  # fmt: skip
+    row_depth = depth(grid.get("row_keys")) if grid["kind"] == "grid" and grid.get("row_labels") \
+        else 0  # fmt: skip
+    wrap_strip = wrap_depth * strip_h
+    top_strip = col_depth * strip_h
+    right_strip = row_depth * strip_h
     x_title_h = _round(fs * 1.4 + 4) if spec["x"]["title"] else 0
     y_title_w = _round(fs * 1.4 + 4) if spec["y"]["title"] else 0
     left = 4 + y_title_w
@@ -508,17 +520,42 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     boxes = []
     for i, p in enumerate(panels):
         rect = Rect(col_x[p["col"]], row_y[p["row"]], pw, ph)
-        strip = Rect(rect.x, rect.y - wrap_strip, pw, wrap_strip - 1) if wrap_strip else None
+        # a wrap's own strip: its innermost level's (the outer levels': strips over it)
+        strip = Rect(rect.x, rect.y - strip_h, pw, strip_h - 1) if wrap_strip else None
         index = shown[i] if shown is not None else i
-        boxes.append(PanelBox(index, rect, show_x[i], show_y[i], strip, p["label"]))
+        label = p["keys"][-1] if wrap_depth > 1 else p["label"]
+        boxes.append(PanelBox(index, rect, show_x[i], show_y[i], strip, label))
     strips = []
-    if top_strip:
+    if col_depth == 1:
         for c, label in enumerate(grid["col_labels"]):
-            strips.append(Strip(Rect(col_x[c], top, pw, top_strip - 1), label, False))
-    if right_strip:
+            strips.append(Strip(Rect(col_x[c], top, pw, strip_h - 1), label, False))
+    elif col_depth > 1:
+        for k, a, b in nest(grid["col_keys"], col_depth):
+            strips.append(Strip(Rect(col_x[a], top + k * strip_h, col_x[b] + pw - col_x[a],
+                                     strip_h - 1), grid["col_keys"][a][k], False))  # fmt: skip
+    if row_depth == 1:
         for r, label in enumerate(grid["row_labels"]):
-            strips.append(Strip(Rect(plot_right + GAP, row_y[r], right_strip - 1, ph), label,
-                                True))  # fmt: skip
+            strips.append(Strip(Rect(plot_right + GAP, row_y[r], strip_h - 1, ph), label, True))
+    elif row_depth > 1:
+        for k, a, b in nest(grid["row_keys"], row_depth):
+            x0 = plot_right + GAP + (row_depth - 1 - k) * strip_h  # the first column outermost
+            strips.append(Strip(Rect(x0, row_y[a], strip_h - 1, row_y[b] + ph - row_y[a]),
+                                grid["row_keys"][a][k], True))  # fmt: skip
+    if wrap_depth > 1:  # the outer levels' strips over the panels side by side sharing them
+        for r in range(rows):
+            in_row = sorted((p for p in panels if p["row"] == r), key=lambda p: p["col"])
+            runs: list[list[dict[str, Any]]] = []
+            for i, p in enumerate(in_row):
+                if i and p["col"] == in_row[i - 1]["col"] + 1:
+                    runs[-1].append(p)
+                else:
+                    runs.append([p])
+            for run in runs:
+                keys = [p["keys"][start:] for p in run]
+                for k, a, b in nest(keys, wrap_depth - 1):
+                    x0, x1 = col_x[run[a]["col"]], col_x[run[b]["col"]] + pw
+                    strips.append(Strip(Rect(x0, row_y[r] - wrap_strip + k * strip_h, x1 - x0,
+                                             strip_h - 1), keys[a][k], False))  # fmt: skip
 
     spare = None
     if grid["kind"] == "wrap" and panels and not pages:
@@ -542,6 +579,20 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         y_title=(4 + fs, centre_y) if y_title_w else None,
         spare=spare,
     )
+
+
+def nest(keys: list[list[str]], depth: int) -> list[tuple[int, int, int]]:
+    """Nested strips: for each of the first ``depth`` levels, the runs of items in turn whose
+    levels up to it are the same, as (level, first, last)."""
+    out = []
+    for k in range(depth):
+        a = 0
+        for i in range(1, len(keys) + 1):
+            if i < len(keys) and keys[i][: k + 1] == keys[a][: k + 1]:
+                continue
+            out.append((k, a, i - 1))
+            a = i
+    return out
 
 
 def _focus_layout(spec: dict[str, Any], width: float, height: float | None,

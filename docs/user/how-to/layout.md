@@ -41,12 +41,26 @@ aligned. `row=` alone makes a column of panels, and `col=` alone a row of them.
 Each of `wrap=`, `row=` and `col=` takes a list of columns too: a panel per combination of
 their levels.
 
-```python
-Trellis(cars, wrap=["origin", "cylinders"])
+```python exec="on" source="above" session="layout" html="true"
+plot = Trellis(penguins, wrap=["species", "island"], cols=3, panel_height=150)
+plot.points(x="flipper_length_mm", y="body_mass_g", color="sex")
+plot
+print(plot._embed_html())  # markdown-exec: hide
 ```
 
-The panel's strip shows both levels, joined by ` · `, which is also its name in
-`panels()` and `open()`.
+Each column gets a strip, the first on the outside. A strip spans the panels next to each
+other that share its level, as ggh4x's nested strips do in R: here one Adelie strip
+over its three islands. A grid nests its strips the same way, the column strips stacked
+on top and the row strips side by side on the right, the first column's outermost.
+
+`strips="joined"` shows one strip per panel instead, with the levels joined by ` · `:
+
+```python
+Trellis(penguins, wrap=["species", "island"], strips="joined")
+```
+
+Either way, a panel's name in `panels()` and `open()` is its levels joined by ` · `
+(`"Adelie · Biscoe"`).
 
 ## Size
 

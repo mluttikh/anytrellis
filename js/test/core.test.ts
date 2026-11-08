@@ -95,6 +95,45 @@ function spec(panels: PanelSpec[], rows: number, cols: number, kind: "grid" | "w
 
 const opts = { width: 600, fontSize: 12, measure: (t: string) => t.length * 7 };
 
+describe("nested strips", () => {
+  const keyed = (row: number, col: number, keys: string[]): PanelSpec => ({ ...panel(row, col), keys, label: keys.join(" · ") });
+
+  it("span the columns and rows of a grid sharing a level", () => {
+    const s = spec([0, 1, 2].flatMap((c) => [panel(0, c), panel(1, c)]), 2, 3, "grid");
+    s.grid = { ...s.grid, col_labels: ["A · x", "A · y", "B · x"], col_keys: [["A", "x"], ["A", "y"], ["B", "x"]], row_labels: ["n · 1", "n · 2"], row_keys: [["n", "1"], ["n", "2"]] };
+    const l = layout(s, opts);
+    const top = l.strips.filter((t) => !t.vertical);
+    const [a, b] = top.filter((t) => t.rect.y === top[0].rect.y);
+    expect([a.label, b.label]).toEqual(["A", "B"]);
+    const cols = l.panels.filter((p) => p.rect.y === l.panels[0].rect.y).map((p) => p.rect);
+    expect(a.rect.x).toBe(cols[0].x);
+    expect(a.rect.x + a.rect.w).toBe(cols[1].x + cols[1].w); // A over its two columns
+    expect(top.filter((t) => t.rect.y > a.rect.y).map((t) => t.label)).toEqual(["x", "y", "x"]);
+    const right = l.strips.filter((t) => t.vertical);
+    const outer = right.filter((t) => t.label === "n");
+    expect(outer).toHaveLength(1); // n over both rows, outermost on the right
+    expect(Math.min(...right.map((t) => t.rect.x))).toBeLessThan(outer[0].rect.x);
+    expect(right.filter((t) => t.label !== "n").map((t) => t.label)).toEqual(["1", "2"]);
+    // joined: a strip a column and a row, as before
+    s.grid.strips = "joined";
+    const j = layout(s, opts);
+    expect(j.strips.map((t) => t.label)).toEqual(["A · x", "A · y", "B · x", "n · 1", "n · 2"]);
+    expect(l.panels[0].rect.y).toBeGreaterThan(j.panels[0].rect.y); // two strips high
+  });
+
+  it("span a wrap's panels side by side in a row", () => {
+    const s = spec([keyed(0, 0, ["north", "a"]), keyed(0, 1, ["north", "b"]), keyed(0, 2, ["south", "a"]), keyed(1, 0, ["south", "b"])], 2, 3);
+    const l = layout(s, opts);
+    expect(l.panels.map((p) => p.label)).toEqual(["a", "b", "a", "b"]);
+    expect(l.strips.map((t) => t.label)).toEqual(["north", "south", "south"]);
+    const north = l.strips[0].rect;
+    expect(north.x + north.w).toBe(l.panels[1].rect.x + l.panels[1].rect.w);
+    expect(north.y + north.h + 1).toBe(l.panels[0].strip!.y); // over the panels' own strips
+    s.grid.strips = "joined";
+    expect(layout(s, opts).panels.map((p) => p.label)).toEqual(["north · a", "north · b", "south · a", "south · b"]);
+  });
+});
+
 describe("layout", () => {
   it("labels only the outer panels when scales are shared", () => {
     const l = layout(spec([panel(0, 0), panel(0, 1), panel(1, 0), panel(1, 1)], 2, 2), opts);
