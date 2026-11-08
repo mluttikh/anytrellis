@@ -16,7 +16,7 @@ pip install "anytrellis[examples]"   # with Polars, for the example notebooks an
 pip install "anytrellis[png]"        # with resvg-py, for save_png
 ```
 
-Status: early development (0.2). One panel per level of the facet columns, every panel
+Status: early development (0.3). One panel per level of the facet columns, every panel
 drawn with the same layers (lines, points, bars, areas, rects, text, histograms, box plots,
 violins, densities, error bars, reference rules), on shared scales unless told otherwise.
 Every panel goes into one canvas, so a grid of hundreds of panels and millions of marks
@@ -93,10 +93,29 @@ p.selected()   # brush any panel: its rows light up in every panel, and come bac
 along its column and its row, and each variable alone on the diagonal (`diag="density"`,
 `"hist"` or `None`). `corner=True` keeps each pair once.
 
+## Tables in a database
+
+```python
+import duckdb
+
+rel = duckdb.sql("select * from 'readings.parquet'")
+t = Trellis(rel, wrap="station", load="pages")
+t.line(x="time", y="temp").smooth(x="time", y="temp")
+t.selected()   # after a brush: a query of the rows selected, not yet read
+```
+
+A Polars `LazyFrame`, a DuckDB relation or an Ibis table is read in one query, with only
+the columns the plot uses. With `load="pages"`, a wrap of many panels reads only the rows
+of the page shown and the pages either side of it, as the pages turn; the panels, their
+statistics, the axes' ranges and the summaries (`hist`, `box`, `violin`, `density`,
+`smooth`, `errorbar`) come from the database, so every page looks as it would with every
+row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
+
 ## Facets and scales
 
 - `Trellis(df, row=..., col=...)`: a grid; `Trellis(df, wrap=..., cols=4)`: a wrap. Each
   takes one column or several (their combinations are the levels).
+- `page="site"`: a page per level of a column, each a grid or a wrap of its own.
 - `aspect=1`: square panels (each panel's height as a multiple of its width).
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),
   `"row"`, `"col"` or `False` (each panel its own). Axes are drawn only where a panel's

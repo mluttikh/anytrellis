@@ -6,6 +6,8 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
 ### Added
 
 - `Trellis(page=)`: a page per level of a column (or columns). A grid (`row=`, `col=`)
@@ -15,7 +17,6 @@ All notable changes to anytrellis. The format follows
   `show_page("north")` and `page_names` do the same from Python. `share_x="page"` and
   `share_y="page"` give each page its own scale. With `load="pages"`, a level's rows are
   read as its page is turned to.
-
 - `pairs()`: a scatterplot matrix of a table's number columns, x by column and y by row,
   each variable's scale shared along its column and its row. The diagonal shows each
   variable alone (a density curve per colour, or a stacked histogram) over its own range.
@@ -56,7 +57,6 @@ All notable changes to anytrellis. The format follows
   are sorted or filtered, or a panel of another page opens; a page further away says it
   is loading until its data comes. A thousand panels of a week's readings start with
   2.2 MB instead of 46 MB. A page from `save_html` or `to_html` still holds every panel.
-
 - Level of detail: what goes to the browser grows with the pixels shown, not the rows. A
   panel of more than 20,000 points of a line sends each series thinned (M4: per column,
   its first, last, lowest and highest point), and a panel of more than 100,000 points is
@@ -70,6 +70,11 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- A lazy table (a Polars `LazyFrame`, a DuckDB relation, an Ibis table) is read when the
+  plot is first drawn, with only the columns it uses, not collected whole when the plot
+  is made. A panel of more than 20,000 points of a line or 100,000 points shows them at
+  the level of detail its pixels need (see Added); zoom in for more. No code changes. See
+  [Upgrading](https://mluttikh.github.io/anytrellis/reference/upgrading.html).
 - Faster selections over linked rows (`link=`): number and category link columns are
   keyed from their values and codes, not their text; and dense points' cells are counted
   and grouped without sorting their points.
@@ -167,6 +172,7 @@ The first release.
 - `anytrellis.datasets.load`: six small example datasets, with their sources and licences
   in `datasets/SOURCES.md`; example notebooks for Jupyter and marimo.
 
-[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mluttikh/anytrellis/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mluttikh/anytrellis/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mluttikh/anytrellis/releases/tag/v0.1.0
