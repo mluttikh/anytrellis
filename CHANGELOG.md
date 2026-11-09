@@ -14,6 +14,13 @@ All notable changes to anytrellis. The format follows
   band per value on an axis, a series per value with `group=`, and `order()` with numbers.
   With `load="pages"`, the database finds the values and selects by them.
 
+### Fixed
+
+- Panel backgrounds, gridlines, strips and axes no longer vanish when the window is
+  resized. A resized plot is drawn again at once instead of a frame later, and a plot
+  whose height brings a page scrollbar at one width and not 17 px narrower (Windows) no
+  longer flips between the two widths every frame, blank each time: it keeps the narrower.
+
 ## [0.4.0] - 2026-11-08
 
 ### Added

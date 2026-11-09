@@ -136,6 +136,11 @@ const HOVER_RADIUS = 10;
 /** An opened panel's height (not full screen): the grid's, within these bounds. */
 const FOCUS_MIN = 320;
 const FOCUS_MAX_SCREEN = 0.85;
+/** A box flipping between two widths at most this far apart (px) keeps the narrower: a
+ * scrollbar that comes and goes with the plot's height (17 px on Windows). */
+const FLIP_MAX = 30;
+/** ... and goes back within this time (ms): a flip happens every frame. */
+const FLIP_MS = 100;
 
 const ICONS = {
   back: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>',
@@ -185,6 +190,7 @@ export class TrellisView {
   private yView = new Map<number, Range>();
   private views: PanelView[] = [];
   private frameRequested = false;
+  private frameId = 0;
   private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: [], texts: [] };
   private drag: Drag | null = null;
   /** What plain drag does: pan, draw a zoom box, or draw a brush. Shift+drag: a zoom box
@@ -234,6 +240,11 @@ export class TrellisView {
   private readonly themeObserver: MutationObserver;
   private readonly abort = new AbortController();
   private width = 0;
+  /** The width laid out before `width`, and two widths the plot's box flips between (the
+   * narrower first), while it does: see steadyWidth. */
+  private widthBefore = 0;
+  private widthAt = 0;
+  private flip: [number, number] | null = null;
   private dpr = 1;
   private specVersion = 0;
   private destroyed = false;
@@ -933,8 +944,9 @@ export class TrellisView {
 
   private relayout(): void {
     if (!this.spec) return;
-    const width = Math.floor(this.stage.clientWidth || this.root.clientWidth);
-    if (width <= 0) return;
+    const box = Math.floor(this.stage.clientWidth || this.root.clientWidth);
+    if (box <= 0) return;
+    const width = this.steadyWidth(box);
     this.width = width;
     this.dpr = window.devicePixelRatio || 1;
     this.theme = readTheme(this.root);
@@ -970,19 +982,49 @@ export class TrellisView {
     }
     const h = this.lay.height;
     this.stage.style.height = `${h}px`;
-    for (const c of [this.back, this.front]) sizeCanvas(c, width, h, this.dpr);
+    let resized = false;
+    for (const c of [this.back, this.front]) resized = sizeCanvas(c, width, h, this.dpr) || resized;
     this.renderer?.resize(width, h, this.dpr);
     if (this.renderer) {
       this.renderer.canvas.style.width = `${width}px`;
       this.renderer.canvas.style.height = `${h}px`;
     }
-    this.request();
+    if (!resized) {
+      this.request();
+      return;
+    }
+    // a resized canvas is cleared: draw now, or the browser paints it blank (a resize
+    // observer runs after the frame's animation frame callbacks)
+    if (this.frameRequested) {
+      cancelAnimationFrame(this.frameId);
+      this.frameRequested = false;
+    }
+    this.draw();
+  }
+
+  /** The width to lay out at in a box `box` px wide. A plot whose height follows its width
+   * can be tall enough for the page to need a scrollbar at one width and short enough not to
+   * 17 px narrower: laid out at each in turn, its box would flip between them every frame,
+   * each relayout clearing the canvases. Back at the width before the last at once, close
+   * to it, the plot keeps the narrower of the two while its box stays at either. */
+  private steadyWidth(box: number): number {
+    if (this.flip && (box === this.flip[0] || box === this.flip[1])) return this.flip[0];
+    this.flip = null;
+    if (box === this.width) return box;
+    const now = performance.now();
+    if (box === this.widthBefore && Math.abs(box - this.width) <= FLIP_MAX && now - this.widthAt < FLIP_MS) {
+      this.flip = [Math.min(box, this.width), Math.max(box, this.width)];
+      return this.flip[0];
+    }
+    this.widthBefore = this.width;
+    this.widthAt = now;
+    return box;
   }
 
   private request(): void {
     if (this.frameRequested || this.destroyed) return;
     this.frameRequested = true;
-    requestAnimationFrame(() => {
+    this.frameId = requestAnimationFrame(() => {
       this.frameRequested = false;
       this.draw();
     });
@@ -1729,13 +1771,16 @@ function zoom(range: Range, at: number, factor: number): Range {
   return [at - (at - range[0]) * factor, at + (range[1] - at) * factor];
 }
 
-function sizeCanvas(c: HTMLCanvasElement, w: number, h: number, dpr: number): void {
+/** Size a canvas; true if its pixels changed size (which clears it). */
+function sizeCanvas(c: HTMLCanvasElement, w: number, h: number, dpr: number): boolean {
   const pw = Math.max(1, Math.round(w * dpr));
   const ph = Math.max(1, Math.round(h * dpr));
+  const resized = c.width !== pw || c.height !== ph;
   if (c.width !== pw) c.width = pw;
   if (c.height !== ph) c.height = ph;
   c.style.width = `${w}px`;
   c.style.height = `${h}px`;
+  return resized;
 }
 
 function fmt(v: number): string {
