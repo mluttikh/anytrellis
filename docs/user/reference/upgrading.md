@@ -4,6 +4,12 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
+## 0.5.0
+
+No code stops working, and plots show what they did. New: `as_category()` reads a number
+column as categories, so a column cast to text for that (`pl.col("year").cast(pl.String)`)
+no longer needs to be.
+
 ## 0.4.0
 
 No code stops working; one change in what a plot shows.
