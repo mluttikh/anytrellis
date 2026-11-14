@@ -3113,7 +3113,7 @@ def _geometry(
         if len(panel) and np.bincount(panel).max() > THIN:
             x = axis_values(table.column(layer.x), x_levels)
             y = axis_values(table.column(layer.y), y_levels)
-            series = series_codes(table, _series_names(layer, table))
+            series = _series(layer, table, panel_of, len(grid.panels))
             xs, ys, ss = x[rows], y[rows], series[rows]
             order = np.lexsort((xs, ss, panel))
             detail = LineDetail(rows[order], panel[order], xs[order], ys[order], ss[order],
@@ -3193,6 +3193,16 @@ def _concat_geometry(a: Geometry, b: Geometry) -> Geometry | None:
     return Geometry(*out)  # ty: ignore[invalid-argument-type]
 
 
+def _series(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> np.ndarray:
+    """Each row's series: its groups' and colour's levels, and its own panel, so that rows
+    drawn in other panels too (a margin's, ``facet="all"`` or ``"exclude"``) stay in their
+    own panel's line there, not joined to another panel's."""
+    codes = series_codes(table, _series_names(layer, table))
+    if panel_of is None:  # data without the facet columns: in every panel alike
+        return codes
+    return codes * (npanels + 1) + (panel_of + 1)
+
+
 def _series_names(layer: Layer, table: Table) -> list[str]:
     """The columns splitting a line, area or band into series: its groups and colour."""
     extra = list(layer.group)
@@ -3212,16 +3222,16 @@ def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
     y = axis_values(table.column(layer.y), y_levels)
     rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet, grid.also)
     if layer.mark == "line":
-        geom = line_geometry(rows, panel, x, y, series_codes(table, _series_names(layer, table)),
+        geom = line_geometry(rows, panel, x, y, _series(layer, table, panel_of, len(grid.panels)),
                              layer.step)  # fmt: skip
     elif layer.mark == "area":
-        geom = area_geometry(rows, panel, x, y, series_codes(table, _series_names(layer, table)),
+        geom = area_geometry(rows, panel, x, y, _series(layer, table, panel_of, len(grid.panels)),
                              stack=layer.position == "stack")  # fmt: skip
     elif layer.mark == "band":
         assert layer.y2 is not None
         upper = axis_values(table.column(layer.y2), y_levels)
         geom = band_geometry(rows, panel, x, y, upper,
-                             series_codes(table, _series_names(layer, table)))  # fmt: skip
+                             _series(layer, table, panel_of, len(grid.panels)))  # fmt: skip
     elif layer.mark in ("points", "text"):
         geom = point_geometry(rows, panel, x, y)
     elif layer.mark == "rect":
