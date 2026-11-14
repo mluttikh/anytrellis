@@ -129,6 +129,12 @@ summarises each panel's rows on its own.
 The width is the notebook's or the page's. A plot keeps the width it is given and fits
 its panels in it.
 
+Full screen and an opened panel take the room the screen gives. Panels with an `aspect`,
+banked or a number, keep their shape there: as large as fits, and narrower and centred
+when the screen is too low for the whole width. An image of a given `height`
+(`save_png(height=...)`) keeps it in the same way. Without an `aspect`, the panels
+stretch to the screen's height.
+
 ### Banking to 45 degrees
 
 How steep a line looks depends on the panel's shape, and changes are easiest to compare
@@ -149,8 +155,8 @@ print(plot._embed_html())  # markdown-exec: hide
 
 It banks the `smooth()` fits, or without them the `line()` layers. Day-to-day noise has
 steep segments, so a noisy line alone banks to a flat, wide panel: add a smooth to bank
-the trend instead, with the line still drawn around it. Segments that neither rise nor fall don't count, and the shape stays between
-0.02 and 5 times as high as wide. `panel_height=` and `height=` take precedence. With
+the trend instead, with the line still drawn around it. Segments that neither rise nor
+fall don't count, and the shape stays between 0.02 and 5 times as high as wide. `panel_height=` and `height=` take precedence. With
 `load="pages"`, the shape comes from the panels read first and stays as the pages turn.
 
 ## Titles

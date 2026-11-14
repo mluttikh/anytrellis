@@ -574,6 +574,46 @@ describe("an opened panel", () => {
   });
 });
 
+describe("panels with a shape (aspect)", () => {
+  const shaped = (aspect: number) => ({ ...spec([panel(0, 0), panel(0, 1), panel(1, 0), panel(1, 1)], 2, 2), panel_height: null, aspect });
+  const ratio = (r: { w: number; h: number }) => r.h / r.w;
+
+  it("keep it in full screen, narrowed and centred when the screen is too low", () => {
+    const low = layout(shaped(1), { ...opts, height: 300 });
+    const [a, b] = low.panels;
+    expect(ratio(a.rect)).toBeCloseTo(1, 1);
+    expect(low.height).toBeLessThanOrEqual(302);
+    const left = a.rect.x - low.yAxisWidth[0];
+    const right = 600 - (b.rect.x + b.rect.w);
+    expect(Math.abs(left - right)).toBeLessThan(16); // centred
+    expect(right).toBeGreaterThan(100);
+  });
+
+  it("keep it in full screen at the whole width when the screen is high enough", () => {
+    const wide = layout(shaped(0.25), { ...opts, height: 900 });
+    expect(wide.panels[0].rect).toEqual(layout(shaped(0.25), opts).panels[0].rect);
+    expect(wide.height).toBeLessThan(400); // shorter than the screen, not stretched
+  });
+
+  it("keep it in an opened panel, within the height given", () => {
+    const flat = layout(shaped(0.2), { ...opts, focused: 0, height: 600 });
+    expect(flat.panels[0].rect.w).toBeGreaterThan(500);
+    expect(ratio(flat.panels[0].rect)).toBeCloseTo(0.2, 2);
+    const tall = layout(shaped(2), { ...opts, focused: 0, height: 400 });
+    const box = tall.panels[0];
+    expect(ratio(box.rect)).toBeCloseTo(2, 1);
+    expect(tall.height).toBeLessThanOrEqual(402);
+    expect(box.yAxis!.x + box.yAxis!.w).toBe(box.rect.x);
+    expect(box.rect.x).toBeGreaterThan(150); // centred
+  });
+
+  it("are not kept when a height sets the panels' height", () => {
+    const s = { ...shaped(1), panel_height: 100 };
+    const full = layout(s, { ...opts, height: 900 });
+    expect(full.panels[0].rect.h).toBeGreaterThan(300);
+  });
+});
+
 describe("exported images", () => {
   const measure = (text: string): number => text.length * 6;
   const svg = (draw: (ctx: CanvasRenderingContext2D) => void): string => {

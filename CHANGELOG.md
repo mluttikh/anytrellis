@@ -6,6 +6,14 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Panels with an `aspect` (banked or a number) keep their shape in full screen, in an
+  opened panel and in an image of a given `height`: as large as fits, narrower and centred
+  when the height is too low for the whole width. An opened panel is then at most 85% of
+  the window high (720 px in an image), and at least 320 px. Before, the height given
+  overrode the shape. Plots without an `aspect` are unchanged.
+
 ### Added
 
 - `Trellis(aspect="bank")`: the panels' shape that shows the median slope of the lines'

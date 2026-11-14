@@ -32,7 +32,7 @@
 import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readTheme } from "./drawing";
 import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fileName, NO_DOWNLOADS, PNG_SCALE, pageMeasure, paintHtml, SvgContext, svgMessage } from "./export";
 import { drawMarks } from "./renderers/canvas2d";
-import { type Layout, type Rect, layout as computeLayout, panelName } from "./layout";
+import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
 import { Pager } from "./pager";
 import { pageLabels, pageList, panelOrder } from "./pages";
 import { createRenderer } from "./renderers/select";
@@ -989,7 +989,7 @@ export class TrellisView {
     ctx.font = `${this.theme.fontSize}px ${this.theme.font}`;
     const base = { width, fontSize: this.theme.fontSize, measure: (t: string) => ctx.measureText(t).width, title: false };
     // full screen: the screen less the header and the legend; an opened panel otherwise:
-    // about the grid's height, so the page does not jump
+    // about the grid's height, so the page does not jump (panels with a shape keep it in both)
     let height: number | null = null;
     if (this.isFullscreen()) {
       const css = getComputedStyle(this.root);
@@ -1012,7 +1012,9 @@ export class TrellisView {
       this.placeLegend(null);
       if (height !== null) height -= this.legend.offsetHeight;
       if (height === null) this.gridHeight = computeLayout(this.spec, base).height;
-      const h = height ?? Math.max(FOCUS_MIN, Math.min(this.gridHeight, window.innerHeight * FOCUS_MAX_SCREEN));
+      // with a shape (aspect): at most this high, the layout keeping the shape within it
+      const most = panelShape(this.spec) ? window.innerHeight * FOCUS_MAX_SCREEN : this.gridHeight;
+      const h = height ?? Math.max(FOCUS_MIN, Math.min(most, window.innerHeight * FOCUS_MAX_SCREEN));
       this.lay = computeLayout(this.spec, { ...base, height: h, focused: this.focused });
     }
     const h = this.lay.height;
