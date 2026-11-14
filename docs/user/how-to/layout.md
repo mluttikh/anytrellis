@@ -94,6 +94,28 @@ the database's query. A panel without one is named by its levels. The rows' and 
 strips go, since each panel names itself. The panel's name in `panels()` and `open()` stays
 its levels (`"Adelie · Biscoe"`).
 
+## Margins: the rows and columns together
+
+`margins=True` adds an "(all)" row under a grid's rows and an "(all)" column right of its
+columns, as ggplot2's `facet_grid(margins = TRUE)` does. Each panel of the (all) column has
+every row of its row, each panel of the (all) row every row of its column, and the corner
+has them all. Every layer draws them, and summaries (a smooth, a histogram, a box) are
+computed from their rows, so each margin shows what its row or column has in common:
+
+```python exec="on" source="above" session="layout" html="true"
+cars = load("cars").filter(pl.col("cylinders").is_in([4, 6, 8]))
+plot = Trellis(cars, row="origin", col="cylinders", margins=True, panel_height=110)
+plot.points(x="horsepower", y="mpg", size=4).smooth(x="horsepower", y="mpg")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+`margins="row"` adds the (all) row alone, `margins="col"` the (all) column. A row selected
+in a margin is selected in its own panel too, and `selected()` has it once. Margins work
+with `empty="blank"` (a margin is drawn when its row or column has data) and with `page=`
+(each page's grid has its own), but not with `load="pages"`, where the database
+summarises each panel's rows on its own.
+
 ## Size
 
 | Argument | Sets |

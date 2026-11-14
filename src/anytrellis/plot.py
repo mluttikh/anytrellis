@@ -103,6 +103,7 @@ RENDERERS = ("auto", "webgpu", "webgl2", "canvas2d")
 LEGENDS = ("auto", "bottom")
 STRIPS = ("nested", "joined")
 EMPTY = ("draw", "blank")
+MARGINS = (False, True, "row", "col")
 LOADS = ("all", "pages")
 PAGE_MARKS = ("points", "line", "text")
 """The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
@@ -171,6 +172,11 @@ class Trellis:
             combination shows) or ``"blank"`` (left out, the others in their rows and
             columns: a triangle stays a triangle). With ``page=``: the cells without data
             on every page, so each page has the same cells.
+        margins: A grid's "(all)" panels, each of the rows of several panels (as ggplot2's
+            ``facet_grid(margins=TRUE)``): ``"row"``, an (all) row under the rows, each
+            panel the rows of its column; ``"col"``, an (all) column right of the columns,
+            each panel the rows of its row; ``True``, both and a corner of every row. Every
+            layer draws them, summaries (hist, box, smooth, ...) computed of their rows.
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
@@ -212,6 +218,7 @@ class Trellis:
         strips: str = "nested",
         strip_label: str | None = None,
         empty: str = "draw",
+        margins: bool | str = False,
         fit_y: bool = False,
         link: str | Sequence[str] | None = None,
         load: str = "all",
@@ -279,6 +286,17 @@ class Trellis:
         if empty not in EMPTY:
             raise ValueError(f"empty must be one of {EMPTY}, got {empty!r}")
         self._keep_empty = empty == "draw"
+        if margins not in MARGINS:
+            raise ValueError(f"margins must be one of {MARGINS}, got {margins!r}")
+        if margins is not False and not (self._row or self._col):
+            raise ValueError("margins= adds an (all) row or column to a grid: give row= "
+                             "or col=")  # fmt: skip
+        # (an (all) row, an (all) column); True: those the grid has rows and columns for
+        both = margins is True
+        self._margins = (
+            margins == "row" or (both and bool(self._row)),
+            margins == "col" or (both and bool(self._col)),
+        )
         if strip_label is not None and not (self._row or self._col or self._wrap or self._page):
             raise ValueError("strip_label= names facet panels: give row=, col= or wrap=")
         self.strip_label = strip_label
@@ -1998,6 +2016,9 @@ class Trellis:
             if layer.facet in ("all", "exclude"):
                 raise ValueError(f"load='pages': {layer.name} draws every panel's rows "
                                  f"(facet={layer.facet!r}): give it its own data")  # fmt: skip
+        if any(self._margins):
+            raise ValueError("margins= draws the rows of several panels in each (all) "
+                             "panel: use load='all'")  # fmt: skip
 
     def _facets(self) -> Table:
         """``load="pages"``: the combinations of the facet columns, from the database."""
@@ -2217,7 +2238,7 @@ class Trellis:
         grid = build_grid([self._facets(), *own] if paged else tables, row=self._row,
                           col=self._col, wrap=self._wrap, cols=self._cols,
                           orders=self._orders, keep_empty=self._keep_empty,
-                          page=self._page)  # fmt: skip
+                          page=self._page, margins=self._margins)  # fmt: skip
         npanels = len(grid.panels)
         texts = None
         paged_keys = len(self._page) if self._row or self._col or self._wrap else 0
@@ -2254,7 +2275,7 @@ class Trellis:
                 if layer.mark not in SUMMARIES:
                     drawn.append(_Drawn(layer, layer, table, None))
                     continue
-                made = summary_parts(layer, table, grid.assign(table), npanels)
+                made = summary_parts(layer, table, grid.assign(table), npanels, grid.also)
             for part in made:
                 part.layer.stat = layer.mark
                 drawn.append(_Drawn(layer, part.layer, part.table, part))
@@ -3031,7 +3052,7 @@ def _geometry(
     if panel_of is None:
         panel_of = grid.assign(table)
     if layer.mark == "line":
-        rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet)
+        rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet, grid.also)
         if len(panel) and np.bincount(panel).max() > THIN:
             x = axis_values(table.column(layer.x), x_levels)
             y = axis_values(table.column(layer.y), y_levels)
@@ -3132,7 +3153,7 @@ def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
     assert layer.y is not None
     x = axis_values(table.column(layer.x), x_levels)
     y = axis_values(table.column(layer.y), y_levels)
-    rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet)
+    rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet, grid.also)
     if layer.mark == "line":
         geom = line_geometry(rows, panel, x, y, series_codes(table, _series_names(layer, table)),
                              layer.step)  # fmt: skip

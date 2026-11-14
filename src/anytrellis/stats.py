@@ -132,34 +132,47 @@ def no_members(n: int) -> Members:
     return Members(np.zeros(n + 1, dtype=np.int64), np.zeros(0, dtype=np.int64))
 
 
-def parts(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
-    """A summary layer's drawn parts."""
+def parts(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
+    """A summary layer's drawn parts. ``also``: each panel's margin panels (``Grid.also``),
+    which summarise its rows too."""
     if layer.mark == "hist":
-        return hist(layer, table, panel_of, npanels)
+        return hist(layer, table, panel_of, npanels, also)
     if layer.mark == "box":
-        return box(layer, table, panel_of, npanels)
+        return box(layer, table, panel_of, npanels, also)
     if layer.mark == "density":
-        return density(layer, table, panel_of, npanels)
+        return density(layer, table, panel_of, npanels, also)
     if layer.mark == "smooth":
-        return smooth(layer, table, panel_of, npanels)
+        return smooth(layer, table, panel_of, npanels, also)
     if layer.mark == "violin":
-        return violin(layer, table, panel_of, npanels)
+        return violin(layer, table, panel_of, npanels, also)
     if layer.mark == "errorbar":
-        return errorbar(layer, table, panel_of, npanels)
+        return errorbar(layer, table, panel_of, npanels, also)
     raise ValueError(f"{layer.mark!r} is not a summary mark")
 
 
 # ---- histograms ---------------------------------------------------------------------------
 
 
-def hist(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+def hist(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
     """Counts in bins shared by every panel, a bar per (panel, colour, bin): stacked by
     colour, or overlapping (``position="identity"``). A category x counts its categories."""
     assert layer.x is not None
     args = layer.stat_args
     col = table.column(layer.x)
     color = _color(layer, table)
-    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
     edges: np.ndarray | None = None
     if col.kind == "category":
         bin_of = col.level_codes()
@@ -405,7 +418,13 @@ class _Groups(Keys):
         return sv[first + lo] + (h - lo) * (sv[first + hi] - sv[first + lo])
 
 
-def _grouped(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> _Groups:
+def _grouped(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> _Groups:
     """The layer's values grouped by panel, position (x, or a category y) and colour."""
     assert layer.x is not None
     assert layer.y is not None
@@ -418,7 +437,7 @@ def _grouped(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: i
             "of x and y gives the positions, the other the numbers)"
         )
     color = _color(layer, table)
-    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
     v = val.values[rows]
     keep = np.isfinite(v)
     if pos.kind != "category":
@@ -474,12 +493,18 @@ class _Slots:
         return _sorted(g)
 
 
-def box(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+def box(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
     """A box per (panel, position, colour): the quartiles, a line at the median, whiskers
     to the furthest values within ``whis`` IQRs of the box, and the values beyond as
     points. Vertical, or horizontal when y is the category and x the numbers."""
     args = layer.stat_args
-    g = _grouped(layer, table, panel_of, npanels)
+    g = _grouped(layer, table, panel_of, npanels, also)
     sv, sg, srows, first = g.sv, g.sg, g.srows, g.first
     q1, med, q3 = g.quantile(0.25), g.quantile(0.5), g.quantile(0.75)
     iqr = q3 - q1
@@ -563,14 +588,20 @@ VIOLIN_SCALES = ("area", "count", "width")
 VIOLIN_INNER = ("quartiles", "points", None)
 
 
-def violin(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+def violin(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
     """A violin per (panel, position, colour): the values' density (a Gaussian kernel
     estimate, ``cut`` bandwidths past them) mirrored around the position, as wide as
     ``scale`` says: ``"area"``, every violin the same area; ``"count"``, areas as the
     counts; ``"width"``, every violin the same width. Inside it: its median and quartiles
     (``inner="quartiles"``), or its values (``"points"``)."""
     args = layer.stat_args
-    g = _grouped(layer, table, panel_of, npanels)
+    g = _grouped(layer, table, panel_of, npanels, also)
     q1, med, q3 = g.quantile(0.25), g.quantile(0.5), g.quantile(0.75)
     cut, gridsize, adjust = float(args["cut"]), int(args["gridsize"]), float(args["bw_adjust"])
     curves: list[tuple[int, np.ndarray, np.ndarray]] = []
@@ -697,7 +728,7 @@ EXTENTS = ("ci", "se", "sd", "range")
 
 
 def errorbar(layer: Layer, table: Table, panel_of: np.ndarray | None,
-             npanels: int) -> list[Part]:  # fmt: skip
+             npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
     """Error bars: from given lows to highs (``ymin`` and ``ymax``, or ``xmin`` and
     ``xmax``), or, from the values, around each group's mean: ``extent="ci"`` (its
     ``level`` confidence interval, Student's t), ``"se"`` (one standard error), ``"sd"``
@@ -706,13 +737,13 @@ def errorbar(layer: Layer, table: Table, panel_of: np.ndarray | None,
     point."""
     args = layer.stat_args
     if args.get("lo") is None:
-        return _errorbar_summary(layer, table, panel_of, npanels)
-    return _errorbar_given(layer, table, panel_of, npanels)
+        return _errorbar_summary(layer, table, panel_of, npanels, also)
+    return _errorbar_given(layer, table, panel_of, npanels, also)
 
 
 def _errorbar_summary(layer: Layer, table: Table, panel_of: np.ndarray | None,
-                      npanels: int) -> list[Part]:  # fmt: skip
-    g = _grouped(layer, table, panel_of, npanels)
+                      npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
+    g = _grouped(layer, table, panel_of, npanels, also)
     n = g.counts.astype(np.float64)
     first = g.first
     if len(g.sv):
@@ -762,7 +793,7 @@ def errorbar_parts(g: Keys, mean: np.ndarray, sd: np.ndarray, least: np.ndarray,
 
 
 def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
-                    npanels: int) -> list[Part]:  # fmt: skip
+                    npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
     args = layer.stat_args
     horizontal = bool(args["horizontal"])
     pos_name = layer.y if horizontal else layer.x
@@ -775,7 +806,7 @@ def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
         if col.kind == "category":
             raise ValueError(f"errorbar(): {col.name!r} holds categories; the ends (and the "
                              "centre) must be numbers or times")  # fmt: skip
-    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
     lo, hi = ends[0].values[rows], ends[1].values[rows]
     keep = np.isfinite(lo) & np.isfinite(hi)
     keep &= (pos.level_codes()[rows] >= 0) if pos.kind == "category" else \
@@ -856,7 +887,13 @@ def _errorbar_parts(layer: Layer, bars: Table, panel: np.ndarray, slots: _Slots,
 # ---- densities ----------------------------------------------------------------------------
 
 
-def density(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+def density(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
     """A Gaussian kernel density estimate per (panel, colour), each covering an area of 1,
     on an x grid shared by every panel, ``cut`` bandwidths past the data; the bandwidth
     is Scott's rule times ``bw_adjust``. ``fill``: the area under it too."""
@@ -866,7 +903,7 @@ def density(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: in
     if col.kind == "category":
         raise ValueError(f"density(): x must be numbers or times; {col.name!r} holds categories")
     color = _color(layer, table)
-    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
     v = col.values[rows]
     keep = np.isfinite(v)
     rows, panel, v = rows[keep], panel[keep], v[keep]
@@ -973,7 +1010,13 @@ def _pieces(col: Column, x: np.ndarray, curve: np.ndarray) -> Range:
 # ---- smooth fits ---------------------------------------------------------------------------
 
 
-def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> list[Part]:
+def smooth(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
     """A fit of y on x per (panel, colour), at ``n`` points over its x range (or every
     panel's, ``fullrange``), with a confidence band for the mean: least squares, or loess
     (local linear fits with tricube weights over a ``span`` share of the points)."""
@@ -987,7 +1030,7 @@ def smooth(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int
                 f"smooth(): x and y must be numbers or times; {c.name!r} holds categories"
             )
     color = _color(layer, table)
-    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
     xv, yv = xc.values[rows], yc.values[rows]
     keep = np.isfinite(xv) & np.isfinite(yv)
     rows, panel, xv, yv = rows[keep], panel[keep], xv[keep], yv[keep]

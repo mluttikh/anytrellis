@@ -8,6 +8,15 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- `Trellis(margins=)`: a grid's "(all)" panels, as ggplot2's `facet_grid(margins = TRUE)`.
+  `True` adds an (all) row under the rows (each panel the rows of its column) and an (all)
+  column right of the columns (each panel the rows of its row), with a corner of every
+  row; `"row"` or `"col"` adds one. Every layer draws them, summaries computed from their
+  rows; a row selected in a margin is selected once. With `empty="blank"` and `page=`;
+  not with `load="pages"` or a wrap.
+
+### Added
+
 - `share_x="sliced"` / `share_y="sliced"` (also in `share()`): each panel its own range,
   about its own data, every one as wide as the widest, so a change of 5 looks the same size
   in every panel (lattice's `relation="sliced"`). Zooming one panel zooms all to its width,

@@ -119,7 +119,8 @@ row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
   that share its level (as ggh4x's); `strips="joined"` shows one strip per panel.
 - `empty="blank"`: a grid's cells without data left out, the others in place (a
   triangle stays a triangle); `strip_label="title"`: each panel named by a column, in a
-  strip of its own.
+  strip of its own; `margins=True`: a grid's "(all)" row and column, each panel the rows
+  of its column or row (`"row"` or `"col"`: one of them).
 - `page="site"`: a page per level of a column, each a grid or a wrap of its own.
 - `aspect=1`: square panels (each panel's height as a multiple of its width).
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),

@@ -13,6 +13,7 @@ redo well-known figures of both.
 | --- | --- |
 | `facet_wrap(~ a, ncol = 3)` | `Trellis(df, wrap="a", cols=3)` |
 | `facet_grid(a ~ b)` | `Trellis(df, row="a", col="b")` |
+| `facet_grid(a ~ b, margins = TRUE)` | `Trellis(df, row="a", col="b", margins=True)` |
 | `scales = "free_y"` / `"free"` | `share_y=False` / `share_x=False, share_y=False` |
 | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()` |
 | `geom_area()`, `geom_ribbon()`, `geom_tile()`, `geom_text()` | `.area()`, `.band()`, `.rect()`, `.text()` |
