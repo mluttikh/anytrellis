@@ -21,9 +21,9 @@ from anytrellis.data import Column, Table
 
 Mark = Literal[
     "line", "points", "bars", "area", "band", "rect", "text", "rule", "hist", "box", "density",
-    "smooth", "violin", "errorbar",
+    "smooth", "violin", "errorbar", "horizon",
 ]  # fmt: skip
-SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar")
+SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar", "horizon")
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "dodge", "identity"]
 
@@ -66,6 +66,9 @@ class Layer:
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
     dash: list[float] = field(default_factory=list)
+    colors: tuple[str, ...] = ()
+    """A category colour column's colours, by level, in place of the palette (a horizon's
+    bands)."""
 
 
 @dataclass

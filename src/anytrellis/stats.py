@@ -153,6 +153,8 @@ def parts(
         return violin(layer, table, panel_of, npanels, also)
     if layer.mark == "errorbar":
         return errorbar(layer, table, panel_of, npanels, also)
+    if layer.mark == "horizon":
+        return horizon(layer, table, panel_of, npanels, also)
     raise ValueError(f"{layer.mark!r} is not a summary mark")
 
 
@@ -1005,6 +1007,139 @@ def _pieces(col: Column, x: np.ndarray, curve: np.ndarray) -> Range:
         lo[1:] = np.where(same, x[1:], -np.inf)
         lo[0] = -np.inf
     return Range(col.name, col.kind, lo, hi, col.log, np.ones(len(x), dtype=bool))
+
+
+# ---- horizon charts ------------------------------------------------------------------------
+
+HORIZON_UP = ("#c6dbef", "#08306b")
+"""The lightest and darkest band above the origin (blues)."""
+HORIZON_DOWN = ("#fcbba1", "#67000d")
+"""... and below it (reds)."""
+
+
+def horizon(
+    layer: Layer,
+    table: Table,
+    panel_of: np.ndarray | None,
+    npanels: int,
+    also: np.ndarray | None = None,
+) -> list[Part]:
+    """A horizon chart in each panel: the series' distance from ``origin`` cut into bands
+    ``step`` high (default: a round number, so ``bands`` of them reach the farthest value of
+    any panel), the bands laid over each other in the panel's height, darker the farther,
+    blues above the origin and reds below it (folded up). A part per band and side, each an
+    area from 0 to the band's share of the value; points are added where the series crosses
+    a band's edge, so the bands meet there exactly. Not in margins (``also``): a margin
+    has several panels' series, and a horizon draws one."""
+    assert layer.x is not None
+    assert layer.y is not None
+    args = layer.stat_args
+    bands, origin = int(args["bands"]), float(args["origin"])
+    xcol, ycol = table.column(layer.x), table.column(layer.y)
+    for col, axis in ((xcol, "x"), (ycol, "y")):
+        if col.kind == "category":
+            raise ValueError(f"horizon(): {axis} must be numbers or times; {col.name!r} holds "
+                             "categories")  # fmt: skip
+    if ycol.log:
+        raise ValueError("horizon(): not on a log y (its bands are distances from the origin)")
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet)
+    x, v = xcol.values[rows], ycol.values[rows]
+    keep = np.isfinite(x) & np.isfinite(v)
+    rows, panel, x, v = rows[keep], panel[keep], x[keep], v[keep]
+    order = np.lexsort((x, panel))
+    rows, panel, x, v = rows[order], panel[order], x[order], v[order]
+    far = float(np.max(np.abs(v - origin))) if len(v) else 0.0
+    step = float(args["step"]) if args["step"] is not None else nice_step(far / bands)
+    rows, panel, x, v = _crossings(rows, panel, x, v, origin + step * np.arange(-bands, bands + 1))
+    labels = band_labels(bands, origin, step)
+    up = ramp(*HORIZON_UP, bands)
+    down = ramp(*HORIZON_DOWN, bands)
+    name = f"{ycol.name} band"
+    members = Members.each(rows)
+    pair = np.flatnonzero(panel[1:] == panel[:-1])
+    extra = {xcol.name: _times(x)} if xcol.kind == "time" else {}
+    out: list[Part] = []
+    # the legend's order: the top band above the origin first, the bottom band below last
+    sides = [(1, k, bands - 1 - k) for k in range(bands)]
+    sides += [(-1, k, bands + k) for k in range(bands)]
+    colors = tuple(reversed(up)) + tuple(down)
+    for sign, k, at in sides:
+        height = np.clip(sign * (v - origin) - k * step, 0.0, step)
+        segs = pair[(height[pair] > 0) | (height[pair + 1] > 0)]
+        if not len(segs):
+            continue
+        band = np.full(len(v), labels[at], dtype=object)
+        cols = [
+            Column(PANEL, "number", panel.astype(np.float64)),
+            Column(xcol.name, xcol.kind, x),
+            Column(ycol.name, "number", v),
+            Column(name, "category", band, tuple(labels)),
+        ]
+        part = replace(layer, mark="area", color=name, colors=colors, tooltip=[])
+
+        def build(_x: Any, _y: Any, _c: Any, h: np.ndarray = height,
+                  a: np.ndarray = segs) -> Geometry:  # fmt: skip
+            g = Geometry(panel[a], x[a], h[a], x[a + 1], h[a + 1], a, rows_end=a + 1)
+            g.base0, g.base1 = np.zeros(len(a)), np.zeros(len(a))
+            return _sorted(g)
+
+        out.append(Part(part, _table(cols, extra), build, members, family=True))
+    return out
+
+
+def _crossings(rows: np.ndarray, panel: np.ndarray, x: np.ndarray, v: np.ndarray,
+               edges: np.ndarray) -> tuple[np.ndarray, ...]:  # fmt: skip
+    """The points of each panel's series (sorted by panel, then x) with a point added where
+    a segment crosses one of ``edges``, at the crossing (its row: the segment's first)."""
+    if len(v) < 2:
+        return rows, panel, x, v
+    a, b = v[:-1, None], v[1:, None]
+    same = (panel[1:] == panel[:-1])[:, None]
+    seg, edge = np.nonzero(same & (edges > np.minimum(a, b)) & (edges < np.maximum(a, b)))
+    t = (edges[edge] - v[seg]) / (v[seg + 1] - v[seg])
+    at = np.concatenate([np.arange(len(v), dtype=np.float64), seg + t])
+    order = np.argsort(at, kind="stable")
+    cx = x[seg] + t * (x[seg + 1] - x[seg])
+    return (np.concatenate([rows, rows[seg]])[order], np.concatenate([panel, panel[seg]])[order],
+            np.concatenate([x, cx])[order], np.concatenate([v, edges[edge]])[order])  # fmt: skip
+
+
+def nice_step(span: float) -> float:
+    """The smallest round number (1, 2, 2.5 or 5 times a power of ten) at least ``span``."""
+    if not span > 0:
+        return 1.0
+    power = 10.0 ** np.floor(np.log10(span))
+    for m in (1.0, 2.0, 2.5, 5.0, 10.0):
+        if m * power >= span * (1 - 1e-12):
+            return float(m * power)
+    return float(10 * power)
+
+
+def band_labels(bands: int, origin: float, step: float) -> list[str]:
+    """The bands' names, the top band above the origin first: ``"≥ 10"``, ``"5 to 10"``,
+    ``"0 to 5"``, ``"-5 to 0"``, ``"-10 to -5"``, ``"≤ -10"`` (3 bands of 5 about 0; the
+    outermost bands hold every value past their inner edge), rounded to two digits finer
+    than the step."""
+    from anytrellis.data import number_label
+
+    digits = max(0, 2 - int(np.floor(np.log10(step))))  # two digits finer than the step
+
+    def at(k: int) -> str:
+        return number_label(round(origin + k * step, digits) + 0.0)  # + 0.0: no "-0"
+
+    above = [f"≥ {at(k)}" if k == bands - 1 else f"{at(k)} to {at(k + 1)}"
+             for k in reversed(range(bands))]  # fmt: skip
+    below = [f"≤ {at(-k + 1)}" if k == bands else f"{at(-k)} to {at(-k + 1)}"
+             for k in range(1, bands + 1)]  # fmt: skip
+    return above + below
+
+
+def ramp(light: str, dark: str, n: int) -> list[str]:
+    """``n`` colours from ``light`` to ``dark`` (one: between them)."""
+    a = np.array([int(light[i : i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
+    b = np.array([int(dark[i : i + 2], 16) for i in (1, 3, 5)], dtype=np.float64)
+    ts = np.linspace(0.0, 1.0, n) if n > 1 else np.array([0.6])
+    return ["#" + "".join(f"{round(c):02x}" for c in a + (b - a) * t) for t in ts]
 
 
 # ---- smooth fits ---------------------------------------------------------------------------

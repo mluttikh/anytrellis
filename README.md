@@ -62,6 +62,7 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `density(x, color, fill=False, bw_adjust=1)` | a kernel density curve per panel and colour |
 | `errorbar(x, y, color, extent="ci"\|"se"\|"sd"\|"range")` / `errorbar(x, ymin=, ymax=)` | a mean and its interval per position, or intervals you computed |
 | `smooth(x, y, color, method="loess"\|"linear", se=True)` | a fitted line per panel and colour, with a confidence band |
+| `horizon(x, y, bands=3, origin=0, step=None)` | a horizon chart per panel: a series in bands, for many series in little height |
 
 A number column as `color` gets a continuous scale (and a gradient legend); text gets a
 palette. On a category axis a rect is one band wide by default. A text label's `dx`/`dy`
