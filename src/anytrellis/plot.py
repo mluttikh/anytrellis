@@ -141,7 +141,9 @@ class Trellis:
             ``col``: the same rows and columns on every page) or wrap (its panels, sorted
             and filtered as any paged wrap's). The reader picks the page by its level.
         share_x: Share the x scale: ``True`` (all panels), ``"row"``, ``"col"``, ``"page"``
-            (the panels of a page of ``page``) or ``False`` (each panel its own).
+            (the panels of a page of ``page``), ``False`` (each panel its own) or
+            ``"sliced"`` (each panel its own range, all as wide as the widest, so a change
+            of 5 looks the same size in every panel; zooming one zooms all to its width).
         share_y: The same for y.
         x_scale: ``"linear"`` or ``"log"`` (log10: values of 0 or less are left out; a
             histogram's bins and a density are computed on the log scale).
@@ -1021,8 +1023,9 @@ class Trellis:
         return self._add(layer)
 
     def share(self, x: bool | str | None = None, y: bool | str | None = None) -> Self:
-        """Share scales across panels: ``True`` (all), ``"row"``, ``"col"`` or ``False``
-        (each panel its own). Panels that share a scale also zoom together."""
+        """Share scales across panels: ``True`` (all), ``"row"``, ``"col"``, ``"page"``,
+        ``False`` (each panel its own) or ``"sliced"`` (each its own range, all as wide as the
+        widest). Panels that share a scale also zoom together."""
         if x is not None:
             self._share["x"] = share_mode(x)
         if y is not None:
@@ -2340,10 +2343,29 @@ class Trellis:
         self._geometry = built
         self._details = details
         zero = any(lr.mark in ("bars", "area") or lr.stat == "density" for lr in shown)
+        for axis, kind in (("x", x_kind), ("y", y_kind)):
+            if self._share[axis] == "sliced" and kind == "band":
+                raise ValueError(
+                    f"share_{axis}='sliced': {axis} has categories, which have no "
+                    "width to share; use False to give each panel its own"
+                )
         xg = group_ids(grid, self._share["x"])
         yg = group_ids(grid, self._share["y"])
-        xd = domains(extents["x"], xg, x_kind, band_size=len(x_levels or []))
-        yd = domains(extents["y"], yg, y_kind, band_size=len(y_levels or []), zero_base=zero)
+        xd = domains(
+            extents["x"],
+            xg,
+            x_kind,
+            band_size=len(x_levels or []),
+            sliced=self._share["x"] == "sliced",
+        )
+        yd = domains(
+            extents["y"],
+            yg,
+            y_kind,
+            band_size=len(y_levels or []),
+            zero_base=zero,
+            sliced=self._share["y"] == "sliced",
+        )
         x_origin = _origin(xd, x_kind)
         y_origin = _origin(yd, y_kind)
         self._axes = {"x": (x_kind, x_levels, x_origin), "y": (y_kind, y_levels, y_origin)}

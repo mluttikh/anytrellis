@@ -6,6 +6,15 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `share_x="sliced"` / `share_y="sliced"` (also in `share()`): each panel its own range,
+  about its own data, every one as wide as the widest, so a change of 5 looks the same size
+  in every panel (lattice's `relation="sliced"`). Zooming one panel zooms all to its width,
+  each about its own centre; panning moves one; fitting y keeps them as wide. Bars keep
+  their base at 0. With `load="pages"`, the widths come from every panel's range in the
+  database. Not on an axis of categories.
+
 ## [0.5.0] - 2026-11-09
 
 ### Added

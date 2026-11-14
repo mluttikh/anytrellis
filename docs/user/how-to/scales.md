@@ -10,6 +10,7 @@ values differ so much that a shared scale flattens some of them.
 | `"row"` | the panels of a row (a grid, or a wrap's row) |
 | `"col"` | the panels of a column |
 | `False` | nothing: each panel has its own |
+| `"sliced"` | nothing, but every panel's range is as wide as the widest |
 
 Set them when you make the plot, or later with `share()`:
 
@@ -41,6 +42,27 @@ print(plot._embed_html())  # markdown-exec: hide
 ```
 
 x is still shared: zoom in on x in one panel and all of them follow.
+
+## The same width in every panel: sliced scales
+
+Free scales stretch each panel's data over the whole panel, so a small change looks as
+big as a large one. `share_y="sliced"` gives each panel its own range, about its own data,
+but makes every range as wide as the widest: a change of 10 years is as tall in every panel,
+whatever its level. This is lattice's `relation="sliced"`.
+
+```python exec="on" source="above" session="scales" html="true"
+life = gapminder.group_by("region", "year").agg(pl.col("life_expect").median())
+plot = Trellis(life, wrap="region", cols=3, panel_height=120, share_y="sliced",
+               title="Median life expectancy by region")
+plot.line(x="year", y="life_expect")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+Europe's rise is half as tall as South Asia's, as it is in years. Zooming y in one panel
+zooms every panel to the same width, each about its own centre; panning moves one panel
+alone. Bars keep their base at 0 and grow upwards. An axis of categories has no width to
+share, so it can't be sliced.
 
 ## A scale per row or per column of a grid
 

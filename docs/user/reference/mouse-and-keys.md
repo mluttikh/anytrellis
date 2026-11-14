@@ -21,7 +21,8 @@ shortcuts don't also act on them.
 | Shift, Cmd or Ctrl+click | a legend entry | add or remove a colour |
 
 Zoom and pan apply to every panel that shares the scale. An axis stands for its whole
-scale: with `share_y="row"`, zooming the left axis of a row zooms that row.
+scale: with `share_y="row"`, zooming the left axis of a row zooms that row. With
+`share_y="sliced"`, zooming one panel zooms every panel to its width; panning moves one.
 
 ## Keys
 

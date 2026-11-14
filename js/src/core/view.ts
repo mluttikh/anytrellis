@@ -578,16 +578,30 @@ export class TrellisView {
   /** x of group `xg` changed: y follows when it is fitted. */
   private setX(xg: number, range: Range): void {
     this.xView.set(xg, range);
+    this.slice("x", xg, range);
     if (this.fitY) this.needFit = true;
   }
 
   /** y zoomed or panned by hand: it is no longer fitted. */
   private setY(yg: number, range: Range): void {
     this.yView.set(yg, range);
+    this.slice("y", yg, range);
     if (this.fitY) {
       this.setFitY(false, false);
       this.notify("y zoomed by hand: no longer fitted (y fits again)");
     }
+  }
+
+  private sliced(axis: Axis): boolean {
+    return this.spec?.[axis].share === "sliced";
+  }
+
+  /** A sliced axis: group `g` now shows `range`, so every other group shows as wide a range
+   * about its own centre (a pan moves `g` alone). */
+  private slice(axis: Axis, g: number, range: Range): void {
+    if (!this.sliced(axis)) return;
+    const views = axis === "x" ? this.xView : this.yView;
+    for (const [h, r] of views) if (h !== g) views.set(h, sliceOf(r, range));
   }
 
   private setFitY(on: boolean, user: boolean): void {
@@ -754,6 +768,16 @@ export class TrellisView {
       }
       this.yView.set(g, [lo, hi]);
     }
+    if (!this.sliced("y")) return;
+    // sliced: each as wide as the widest fitted, an end at a bar's base kept
+    let width = 0;
+    for (const g of ext.keys()) width = Math.max(width, this.yView.get(g)![1] - this.yView.get(g)![0]);
+    for (const [g, e] of ext) {
+      const [lo, hi] = this.yView.get(g)!;
+      if (e.baseLo && !e.baseHi) this.yView.set(g, [lo, lo + width]);
+      else if (e.baseHi && !e.baseLo) this.yView.set(g, [hi - width, hi]);
+      else this.yView.set(g, sliceOf([lo, hi], [0, width]));
+    }
   }
 
   /** The axis (of views[view]) under a point, or null. */
@@ -797,12 +821,17 @@ export class TrellisView {
     this.views.forEach((v, i) => {
       if (i === vi) return;
       const p = spec.panels[v.panel];
-      const sameX = along !== "y" && p.xg === sp.xg;
-      const sameY = along !== "x" && p.yg === sp.yg;
+      // a sliced axis: every panel zooms to the box's width, about its own centre
+      const slicedX = along !== "y" && this.sliced("x");
+      const slicedY = along !== "x" && this.sliced("y");
+      const sameX = slicedX || (along !== "y" && p.xg === sp.xg);
+      const sameY = slicedY || (along !== "x" && p.yg === sp.yg);
       if (!sameX && !sameY) return;
       const r = v.rect;
-      const gx = sameX ? [v.map.ox + x0 * v.map.sx, v.map.ox + x1 * v.map.sx] : [r.x, r.x + r.w];
-      const gy = sameY ? [v.map.oy + y1 * v.map.sy, v.map.oy + y0 * v.map.sy] : [r.y, r.y + r.h];
+      const [gx0, gx1] = slicedX && p.xg !== sp.xg ? sliceOf(v.x, [x0, x1]) : [x0, x1];
+      const [gy0, gy1] = slicedY && p.yg !== sp.yg ? sliceOf(v.y, [y0, y1]) : [y0, y1];
+      const gx = sameX ? [v.map.ox + gx0 * v.map.sx, v.map.ox + gx1 * v.map.sx] : [r.x, r.x + r.w];
+      const gy = sameY ? [v.map.oy + gy1 * v.map.sy, v.map.oy + gy0 * v.map.sy] : [r.y, r.y + r.h];
       out.push({ x: gx[0], y: gy[0], w: gx[1] - gx[0], h: gy[1] - gy[0] });
     });
     return out;
@@ -824,7 +853,13 @@ export class TrellisView {
     const v = this.views[vi];
     const p = this.spec!.panels[v.panel];
     this.remember();
-    if (axis === "x") this.setX(p.xg, [p.x[0], p.x[1]]);
+    if (this.sliced(axis)) {
+      // every panel's own domain (setX/setY would centre the others where they are now)
+      const views = axis === "x" ? this.xView : this.yView;
+      for (const q of this.spec!.panels) views.set(axis === "x" ? q.xg : q.yg, [...q[axis]]);
+      if (axis === "x" && this.fitY) this.needFit = true;
+      if (axis === "y" && this.fitY) this.setFitY(false, false);
+    } else if (axis === "x") this.setX(p.xg, [p.x[0], p.x[1]]);
     else this.setY(p.yg, [p.y[0], p.y[1]]);
     this.hideTip();
     this.request();
@@ -1769,6 +1804,13 @@ export class TrellisView {
 
 function zoom(range: Range, at: number, factor: number): Range {
   return [at - (at - range[0]) * factor, at + (range[1] - at) * factor];
+}
+
+/** `range` re-centred: as wide as `like`, about its own centre. */
+function sliceOf(range: Range, like: Range): Range {
+  const mid = (range[0] + range[1]) / 2;
+  const half = (like[1] - like[0]) / 2;
+  return [mid - half, mid + half];
 }
 
 /** Size a canvas; true if its pixels changed size (which clears it). */

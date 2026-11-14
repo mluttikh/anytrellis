@@ -167,6 +167,34 @@ def test_share_by_row() -> None:
     assert [p["yg"] for p in spec["panels"]] == [0, 0, 1, 1, 2, 2]
 
 
+def test_sliced_y_gives_each_panel_its_range_all_as_wide() -> None:
+    spec, _ = scene(Trellis(SMALL, wrap="g", share_y="sliced").points(x="t", y="v"))
+    assert spec["y"]["share"] == "sliced"
+    assert [p["yg"] for p in spec["panels"]] == [0, 1, 2]
+    origin = spec["y"]["origin"]
+    ranges = [(lo + origin, hi + origin) for lo, hi in (p["y"] for p in spec["panels"])]
+    widths = [hi - lo for lo, hi in ranges]
+    assert widths == pytest.approx([widths[0]] * 3)
+    assert widths[0] == pytest.approx(100 * 1.08)  # the widest, c's 100 to 200, padded
+    for (lo, hi), data in zip(ranges, [(1, 2), (10, 20), (100, 200)], strict=True):
+        assert (lo + hi) / 2 == pytest.approx(sum(data) / 2)  # about its own data
+
+
+def test_sliced_bars_keep_their_base_at_zero() -> None:
+    data = {"g": ["a", "a", "b", "b"], "c": ["p", "q", "p", "q"], "v": [1.0, 2.0, 10.0, 50.0]}
+    spec, _ = scene(Trellis(data, wrap="g", share_y="sliced").bars(x="c", y="v"))
+    (lo_a, hi_a), (lo_b, hi_b) = (p["y"] for p in spec["panels"])
+    assert lo_a == lo_b == 0.0
+    assert hi_a == pytest.approx(hi_b)
+
+
+def test_sliced_needs_a_continuous_axis() -> None:
+    with pytest.raises(ValueError, match="sliced"):
+        scene(Trellis(sales(), wrap="store", share_x="sliced").bars(x="month", y="units"))
+    with pytest.raises(ValueError, match="sliced"):
+        Trellis(SMALL, share_y="slice")
+
+
 def test_bars_domain_starts_at_zero() -> None:
     spec, _ = scene(Trellis(sales()).bars(x="month", y="units"))
     assert spec["panels"][0]["y"][0] == 0.0
