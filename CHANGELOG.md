@@ -6,6 +6,14 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Trellis(aspect="bank")`: the panels' shape that shows the median slope of the lines'
+  segments at 45 degrees, each measured in its own panel's ranges (Cleveland's banking):
+  the `smooth()` fits' (a trend, not the noise around it), or without them the `line()`
+  layers'. Between 0.02 and 5 times as
+  high as wide; with `load="pages"`, kept from the panels read first.
+
 ### Fixed
 
 - Lines, areas and bands drawn in other panels than their own (a margin's, or with

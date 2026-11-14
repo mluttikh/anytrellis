@@ -123,10 +123,35 @@ summarises each panel's rows on its own.
 | `panel_height=160` | Each panel's height in pixels |
 | `height=600` | The whole plot's height; the panels share it |
 | `aspect=1` | Each panel's height as a multiple of its width: `1` is square |
+| `aspect="bank"` | The shape that shows the lines' median slope at 45 degrees |
 | none of them | Each panel is about 0.6 times as high as it is wide, from 90 to 300 pixels |
 
 The width is the notebook's or the page's. A plot keeps the width it is given and fits
 its panels in it.
+
+### Banking to 45 degrees
+
+How steep a line looks depends on the panel's shape, and changes are easiest to compare
+when the line's segments slope at about 45 degrees (Cleveland, *Visualizing Data*, 1993).
+`aspect="bank"` picks the shape that shows the median slope of every line's segments at
+45 degrees, each measured in its own panel's ranges:
+
+```python exec="on" source="above" session="layout" html="true"
+weather = load("seattle_weather").with_columns(
+    year=pl.col("date").dt.year().cast(pl.String),
+    day=pl.col("date").dt.ordinal_day().cast(pl.Float64),
+)
+plot = Trellis(weather, wrap="year", cols=1, aspect="bank")
+plot.smooth(x="day", y="temp_max", span=0.3, se=False)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+It banks the `smooth()` fits, or without them the `line()` layers. Day-to-day noise has
+steep segments, so a noisy line alone banks to a flat, wide panel: add a smooth to bank
+the trend instead, with the line still drawn around it. Segments that neither rise nor fall don't count, and the shape stays between
+0.02 and 5 times as high as wide. `panel_height=` and `height=` take precedence. With
+`load="pages"`, the shape comes from the panels read first and stays as the pages turn.
 
 ## Titles
 
