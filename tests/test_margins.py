@@ -130,3 +130,25 @@ def test_not_with_pages_read_from_a_database() -> None:
     t = Trellis(DATA.lazy(), row="r", col="c", page="p", margins=True, load="pages")
     with pytest.raises(ValueError, match="margins"):
         t.points(x="t", y="v")._scene()
+
+
+def test_a_line_in_a_margin_keeps_each_panels_rows_apart() -> None:
+    data = pl.DataFrame({"r": ["a", "a", "b", "b"], "c": ["x"] * 4,
+                         "t": [0.0, 2.0, 1.0, 3.0], "v": [1.0, 2.0, 3.0, 4.0]})  # fmt: skip
+    t = Trellis(data, row="r", col="c", margins="row").line(x="t", y="v")
+    t._scene()
+    geom = geometry(t)
+    in_margin = geom.panel == 2
+    pairs = sorted(zip(geom.x0[in_margin].tolist(), geom.x1[in_margin].tolist(), strict=True))
+    assert pairs == [(0.0, 2.0), (1.0, 3.0)]  # a's line and b's, not 0-1-2-3 zigzagging
+
+
+def test_context_lines_keep_each_panels_rows_apart() -> None:
+    data = pl.DataFrame({"g": ["a", "a", "b", "b", "c", "c"],
+                         "t": [0.0, 2.0, 1.0, 3.0, 0.0, 3.0], "v": [1.0] * 6})  # fmt: skip
+    t = Trellis(data, wrap="g").line(x="t", y="v", facet="exclude")
+    t._scene()
+    geom = geometry(t)
+    first = geom.panel == 0  # a's panel: b's and c's lines
+    pairs = sorted(zip(geom.x0[first].tolist(), geom.x1[first].tolist(), strict=True))
+    assert pairs == [(0.0, 3.0), (1.0, 3.0)]

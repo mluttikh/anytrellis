@@ -6,6 +6,12 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Lines, areas and bands drawn in other panels than their own (a margin's, or with
+  `facet="all"` or `"exclude"`) no longer join the rows of several panels into one line
+  zigzagging between them: each panel's rows stay a line of their own.
+
 ### Added
 
 - `horizon(x, y, bands=3, origin=0, step=None)`: a horizon chart in each panel. A series'
