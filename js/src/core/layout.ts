@@ -87,6 +87,12 @@ const GAP = 6;
 const TICK = 4;
 const MIN_PANEL = 24;
 
+/** The panels' shape, height over width, that full screen and an opened panel keep: the
+ * spec's aspect, unless its height or panel_height sets their height instead. */
+export function panelShape(spec: TrellisSpec): number | null {
+  return spec.aspect && !spec.height && !spec.panel_height ? spec.aspect : null;
+}
+
 export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   if (opts.focused !== null && opts.focused !== undefined && spec.panels[opts.focused]) return focusLayout(spec, opts, opts.focused);
   const { grid } = spec;
@@ -153,13 +159,21 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   const bottom = 4 + xTitleH;
 
   const axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
-  const panelSize = (): [number, number] => {
+  const shape = panelShape(spec);
+  // the width the panels share
+  const freeWidth = (): number => {
     const gutters = yAxisWidth.reduce((a, b) => a + b, 0);
-    const free = opts.width - left - right - gutters - (cols - 1) * GAP - rightStrip - (rightStrip ? GAP : 0);
-    const w = Math.max(MIN_PANEL, Math.floor(free / cols));
+    return opts.width - left - right - gutters - (cols - 1) * GAP - rightStrip - (rightStrip ? GAP : 0);
+  };
+  const panelSize = (): [number, number] => {
+    let w = Math.max(MIN_PANEL, Math.floor(freeWidth() / cols));
     let h: number;
-    if (opts.height) h = (opts.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
-    else if (spec.panel_height) h = spec.panel_height;
+    if (opts.height) {
+      h = (opts.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
+      // the panels' shape kept, as large as fits: narrower when the height is too low for it
+      if (shape && w * shape <= h) h = w * shape;
+      else if (shape) w = Math.max(MIN_PANEL, Math.floor(h / shape));
+    } else if (spec.panel_height) h = spec.panel_height;
     else if (spec.height) h = (spec.height - top - bottom - topStrip - axisRows - rows * wrapStrip - (rows - 1) * GAP) / rows;
     else if (spec.aspect) h = w * spec.aspect;
     else h = Math.min(300, Math.max(90, w * 0.62));
@@ -174,9 +188,11 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   });
   yGutters();
   [pw, ph] = panelSize();
+  // panels narrowed to keep their shape: the grid centred
+  const shift = Math.max(0, Math.floor((freeWidth() - cols * pw) / 2));
 
   const colX: number[] = [];
-  let x = left;
+  let x = left + shift;
   for (let c = 0; c < cols; c++) {
     x += yAxisWidth[c];
     colX.push(x);
@@ -271,7 +287,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     strips,
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
     xTitle: xTitleH ? { x: centreX, y: plotBottom + xTitleH - 2 } : null,
-    yTitle: yTitleW ? { x: 4 + fs, y: centreY } : null,
+    yTitle: yTitleW ? { x: shift + 4 + fs, y: centreY } : null,
     spare,
     xAxisHeight,
     yAxisWidth,
@@ -316,10 +332,25 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
   const top = 6 + titleH;
   const bottom = 4 + xTitleH;
   const total = opts.height ?? 360;
-  const h = Math.max(MIN_PANEL, Math.floor(total - top - stripH - xAxisHeight - bottom - 2));
-  const yW = yLabelsWidth(spec, p.y, opts, h);
-  const w = Math.max(MIN_PANEL, opts.width - left - yW - right);
-  const rect = { x: left + yW, y: top + stripH, w, h };
+  const most = Math.max(MIN_PANEL, Math.floor(total - top - stripH - xAxisHeight - bottom - 2));
+  let h = most;
+  let yW = yLabelsWidth(spec, p.y, opts, h);
+  let w = Math.max(MIN_PANEL, opts.width - left - yW - right);
+  let shift = 0;
+  const shape = panelShape(spec);
+  if (shape) {
+    // the panel's shape, as large as fits the height given: on the whole width, or
+    // narrower and centred
+    const fit = (): void => {
+      const room = Math.max(MIN_PANEL, opts.width - left - yW - right);
+      [w, h] = room * shape <= most ? [room, Math.max(MIN_PANEL, Math.floor(room * shape))] : [Math.max(MIN_PANEL, Math.floor(most / shape)), most];
+      shift = Math.max(0, Math.floor((room - w) / 2));
+    };
+    fit();
+    yW = yLabelsWidth(spec, p.y, opts, h); // the ticks the panel's height draws
+    fit();
+  }
+  const rect = { x: left + shift + yW, y: top + stripH, w, h };
   const plotBottom = rect.y + h + xAxisHeight;
   return {
     width: opts.width,
@@ -339,7 +370,7 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
     strips: [],
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
     xTitle: xTitleH ? { x: rect.x + w / 2, y: plotBottom + xTitleH - 2 } : null,
-    yTitle: yTitleW ? { x: 4 + fs, y: rect.y + h / 2 } : null,
+    yTitle: yTitleW ? { x: shift + 4 + fs, y: rect.y + h / 2 } : null,
     spare: null,
     xAxisHeight,
     yAxisWidth: [yW],

@@ -85,5 +85,7 @@ saving next to the notebook never overwrites: a second `Sales.png` becomes `Sale
 
 ## Full screen
 
-Browsers allow full screen only from a click or a key, so not from Python. Where a page
+The plot takes the screen's height, or with an `aspect` keeps its panels' shape as large
+as fits ([size](../how-to/layout.md#size)). Browsers allow full screen only from a click
+or a key, so not from Python. Where a page
 forbids it (some notebook frames, Safari on iPhone) the button is not shown.

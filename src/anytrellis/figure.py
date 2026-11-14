@@ -404,6 +404,13 @@ def _y_labels_width(spec: dict[str, Any], domain: list[float], h: float | None) 
     return math.ceil(max([0.0, *(text_width(s) for _, s in labels)])) + TICK + 4
 
 
+def panel_shape(spec: dict[str, Any]) -> float | None:
+    """The panels' shape, height over width, that full screen and an opened panel keep: the
+    spec's aspect, unless its height or panel_height sets their height instead."""
+    aspect = spec.get("aspect")
+    return aspect if aspect and not spec.get("height") and not spec.get("panel_height") else None
+
+
 def layout(spec: dict[str, Any], width: float, height: float | None = None,
            focused: int | None = None, page: list[int] | None = None) -> Layout:  # fmt: skip
     """Where the panels, strips and titles sit, ``width`` px wide; ``height``: the plot's
@@ -483,13 +490,22 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     bottom = 4 + x_title_h
     axis_rows = sum(x_axis_h for r in row_has_x if r)
 
-    def panel_size() -> tuple[float, float]:
-        free = (width - left - right - sum(y_axis) - (cols - 1) * GAP - right_strip
+    shape = panel_shape(spec)
+
+    def free_width() -> float:  # the width the panels share
+        return (width - left - right - sum(y_axis) - (cols - 1) * GAP - right_strip
                 - (GAP if right_strip else 0))  # fmt: skip
-        w = max(MIN_PANEL, math.floor(free / cols))
+
+    def panel_size() -> tuple[float, float]:
+        w = max(MIN_PANEL, math.floor(free_width() / cols))
         fixed = top + bottom + top_strip + axis_rows + rows * wrap_strip + (rows - 1) * GAP
         if height:
             h = (height - fixed) / rows
+            # the panels' shape kept, as large as fits: narrower when the height is too low
+            if shape and w * shape <= h:
+                h = w * shape
+            elif shape:
+                w = max(MIN_PANEL, math.floor(h / shape))
         elif spec.get("panel_height"):
             h = spec["panel_height"]
         elif spec.get("height"):
@@ -506,9 +522,10 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
             y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], ph))
     gutters()
     pw, ph = panel_size()
+    shift = max(0, math.floor((free_width() - cols * pw) / 2))  # narrowed panels: centred
 
     col_x: list[float] = []
-    x = float(left)
+    x = float(left + shift)
     for c in range(cols):
         x += y_axis[c]
         col_x.append(x)
@@ -584,7 +601,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         panels=boxes,
         strips=strips,
         x_title=(centre_x, plot_bottom + x_title_h - 2) if x_title_h else None,
-        y_title=(4 + fs, centre_y) if y_title_w else None,
+        y_title=(shift + 4 + fs, centre_y) if y_title_w else None,
         spare=spare,
         x_axis_h=x_axis_h,
     )
@@ -614,10 +631,27 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
     y_title_w = _round(fs * 1.4 + 4) if spec["y"]["title"] else 0
     left, right, top, bottom = 4 + y_title_w, 10, 6, 4 + x_title_h
     total = height if height is not None else 360
-    h = max(MIN_PANEL, math.floor(total - top - strip_h - x_axis_h - bottom - 2))
+    most = max(MIN_PANEL, math.floor(total - top - strip_h - x_axis_h - bottom - 2))
+    h = most
     yw = _y_labels_width(spec, p["y"], h)
     w = max(MIN_PANEL, width - left - yw - right)
-    rect = Rect(left + yw, top + strip_h, w, h)
+    shift = 0
+    shape = panel_shape(spec)
+    if shape:
+        # the panel's shape, as large as fits the height given: on the whole width, or
+        # narrower and centred
+        def fit(yw: float) -> tuple[float, float, int]:
+            room = max(MIN_PANEL, width - left - yw - right)
+            if room * shape <= most:
+                w, h = room, max(MIN_PANEL, math.floor(room * shape))
+            else:
+                w, h = max(MIN_PANEL, math.floor(most / shape)), most
+            return w, h, max(0, math.floor((room - w) / 2))
+
+        w, h, shift = fit(yw)
+        yw = _y_labels_width(spec, p["y"], h)  # the ticks the panel's height draws
+        w, h, shift = fit(yw)
+    rect = Rect(left + shift + yw, top + strip_h, w, h)
     plot_bottom = rect.y + h + x_axis_h
     box = PanelBox(index, rect, True, True, Rect(rect.x, top, w, strip_h - 1),
                    p.get("strip", panel_name(spec, index)), y_axis_x=rect.x - yw)  # fmt: skip
@@ -627,7 +661,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
         panels=[box],
         strips=[],
         x_title=(rect.x + w / 2, plot_bottom + x_title_h - 2) if x_title_h else None,
-        y_title=(4 + fs, rect.y + h / 2) if y_title_w else None,
+        y_title=(shift + 4 + fs, rect.y + h / 2) if y_title_w else None,
         spare=None,
         x_axis_h=x_axis_h,
     )
@@ -1413,8 +1447,9 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     else:
         if groups:
             placed, legend_h = _legend_below(groups, width)
-        h = stage_h - legend_h if stage_h is not None else max(
-            FOCUS_MIN, min(layout(spec, width).height, FOCUS_MAX))  # fmt: skip
+        # with a shape (aspect): at most FOCUS_MAX high, the layout keeping the shape
+        most = FOCUS_MAX if panel_shape(spec) else layout(spec, width).height
+        h = stage_h - legend_h if stage_h is not None else max(FOCUS_MIN, min(most, FOCUS_MAX))
         lay = layout(spec, width, h, focused)
     inset_legend = bool(placed) and legend_h == 0
 

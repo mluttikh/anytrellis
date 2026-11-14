@@ -1957,7 +1957,8 @@ class Trellis:
             path: The file to write.
             width: The image's width in CSS pixels (default: the width the plot was last
                 shown at, else 800).
-            height: The image's height in CSS pixels (default: as the plot lays out).
+            height: The image's height in CSS pixels (default: as the plot lays out);
+                panels with an ``aspect`` keep their shape within it.
             theme: ``"light"`` or ``"dark"``.
         """
         from anytrellis.figure import figure_svg
