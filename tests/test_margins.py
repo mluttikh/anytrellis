@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 from anytrellis import Trellis
+from anytrellis.layers import Geometry
 
 DATA = pl.DataFrame(
     {
@@ -21,11 +22,18 @@ DATA = pl.DataFrame(
 )
 
 
+def geometry(t: Trellis, layer: int = 0) -> Geometry:
+    """A drawn layer's marks (built by ``_scene``)."""
+    geom = t._geometry[layer][2]
+    assert geom is not None
+    return geom
+
+
 def counts(t: Trellis, layer: int = 0) -> dict[str, int]:
     """How many marks each panel draws, by its name."""
     spec, _ = t._scene()
     names = t.panels()
-    geom = t._geometry[layer][2]
+    geom = geometry(t, layer)
     found = np.bincount(geom.panel, minlength=len(spec["panels"]))
     return dict(zip(names, found.tolist(), strict=True))
 
@@ -58,7 +66,7 @@ def test_true_adds_the_margins_the_grid_has() -> None:
 def test_summaries_of_a_margin_are_of_its_rows() -> None:
     t = Trellis(DATA, row="r", col="c", margins=True).hist(x="v", bins=3)
     spec, _ = t._scene()
-    geom = t._geometry[0][2]
+    geom = geometry(t)
     heights = np.bincount(geom.panel, weights=geom.y1 - geom.y0, minlength=len(spec["panels"]))
     total = dict(zip(t.panels(), heights.tolist(), strict=True))
     assert total["(all) · (all)"] == 7
