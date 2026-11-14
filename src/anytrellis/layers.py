@@ -121,13 +121,18 @@ def axis_values(column: Column, levels: list[str] | None) -> np.ndarray:
 
 
 def expand(
-    panel_of: np.ndarray | None, n: int, panels: int, mode: FacetMode
+    panel_of: np.ndarray | None,
+    n: int,
+    panels: int,
+    mode: FacetMode,
+    also: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The rows each panel draws, as (rows, panel) pairs.
 
     ``auto`` and ``include``: each row in its own panel (``auto``: in every panel when the
     data has no facet columns); ``all``: every row in every panel; ``exclude``: in every
-    panel, the rows of the other panels (context).
+    panel, the rows of the other panels (context). ``also``: each panel's margin panels
+    (−1: none; ``Grid.also``), where its rows are drawn too.
     """
     rows = np.arange(n, dtype=np.int64)
     if mode == "all" or (panel_of is None and mode == "auto"):
@@ -136,14 +141,18 @@ def expand(
         raise ValueError(
             f"facet={mode!r} needs the facet columns in the layer's data; it has none of them"
         )
+    keep = panel_of >= 0
+    picked, owner = rows[keep], panel_of[keep]
+    if also is not None and also.shape[1]:  # its own panel's rows, in its margins too
+        extra = also[owner].ravel()
+        ok = extra >= 0
+        picked = np.concatenate([picked, np.repeat(picked, also.shape[1])[ok]])
+        owner = np.concatenate([owner, extra[ok]])
     if mode == "exclude":
-        keep = panel_of >= 0
-        picked, owner = rows[keep], panel_of[keep]
-        out_rows = [picked[owner != p] for p in range(panels)]
+        out_rows = [rows[keep][~np.isin(rows[keep], picked[owner == p])] for p in range(panels)]
         out_panel = [np.full(len(r), p, dtype=np.int64) for p, r in enumerate(out_rows)]
         return np.concatenate(out_rows), np.concatenate(out_panel)
-    keep = panel_of >= 0
-    return rows[keep], panel_of[keep]
+    return picked, owner
 
 
 STEPS = ("pre", "post", "mid")

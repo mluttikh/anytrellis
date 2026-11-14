@@ -8,6 +8,11 @@ each; their combinations are the levels, in the order of the first column, then 
 Page columns (``page=``) split either into pages, one per level: a grid's every cell on each
 page (the same rows and columns on all; with ``keep_empty=False``, those with data on some
 page), a wrap's combinations present on each page.
+
+Margins: a grid's "(all)" row under its rows, each panel the rows of its column, and/or an
+"(all)" column right of its columns, each panel the rows of its row (both: a corner with
+every row), as ggplot2's ``facet_grid(margins=TRUE)``. A row goes to its own panel
+(``assign``) and is drawn in its margin panels too (``also``).
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ import numpy as np
 from anytrellis.data import MISSING_LABEL, Column, Table, group_order, number_label
 
 Summary = Literal["median", "mean", "min", "max", "sum", "count"]
+
+ALL_LABEL = "(all)"
+"""The level of a margin's row or column."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +86,9 @@ class Grid:
     _page_combos: np.ndarray | None = None
     _kept: np.ndarray | None = None
     """A grid without its empty cells: each cell's panel (−1: dropped), by row * cols + col."""
+    also: np.ndarray | None = None
+    """Margins: each panel's margin panels, which draw its rows too (−1: none), one row per
+    panel; None: no margins."""
 
     def assign(self, table: Table) -> np.ndarray | None:
         """The panel of each row of ``table`` (−1: a level not in the trellis), or None when
@@ -129,11 +140,20 @@ def build_grid(
     orders: dict[str, Order],
     keep_empty: bool = True,
     page: tuple[str, ...] = (),
+    margins: tuple[bool, bool] = (False, False),
 ) -> Grid:
     """The grid of panels for the facet columns, from the tables that have them; with page
-    columns, a grid or wrap per page level, their panels in turn."""
+    columns, a grid or wrap per page level, their panels in turn. ``margins``: an "(all)"
+    row, and an "(all)" column, of a grid."""
     if wrap and (row or col):
         raise ValueError("use wrap= alone, or row= and/or col= (a grid), not both")
+    margin_row, margin_col = margins
+    if (margin_row or margin_col) and not (row or col):
+        raise ValueError("margins= adds an (all) row or column to a grid: give row= or col=")
+    if margin_row and not row:
+        raise ValueError("margins='row' adds an (all) row: give row=")
+    if margin_col and not col:
+        raise ValueError("margins='col' adds an (all) column: give col=")
     columns = (*page, *row, *col, *wrap)
     if not columns:
         return Grid("single", 1, 1, [Panel(0, 0, 0, "")])
@@ -176,19 +196,20 @@ def build_grid(
     col_combos = _present(sources, col, levels) if col else np.zeros((1, 0), dtype=np.int64)
     row_keys = [tuple(levels[v][k] for v, k in zip(row, c, strict=True)) for c in row_combos]
     col_keys = [tuple(levels[v][k] for v, k in zip(col, c, strict=True)) for c in col_combos]
+    data_rows, data_cols = len(row_keys), len(col_keys)
+    if margin_row:
+        row_keys.append((ALL_LABEL,) * len(row))
+    if margin_col:
+        col_keys.append((ALL_LABEL,) * len(col))
     row_labels = [" · ".join(k) for k in row_keys]
     col_labels = [" · ".join(k) for k in col_keys]
-    nrows, ncols = len(row_combos), len(col_combos)
+    nrows, ncols = len(row_keys), len(col_keys)
     panels = []
     pages = page_keys or [()]
     for g, keys_of_page in enumerate(pages):
         for r in range(nrows):
             for c in range(ncols):
-                keys = (
-                    keys_of_page
-                    + tuple(levels[v][k] for v, k in zip(row, row_combos[r], strict=True))
-                    + tuple(levels[v][k] for v, k in zip(col, col_combos[c], strict=True))
-                )
+                keys = keys_of_page + row_keys[r] + col_keys[c]
                 panels.append(Panel((g * nrows + r) * ncols + c, r, c, "", keys))
     page_of = None if page_combos is None else \
         np.repeat(np.arange(len(pages), dtype=np.int64), nrows * ncols)  # fmt: skip
@@ -202,15 +223,37 @@ def build_grid(
         _row_vars=row, _col_vars=col, _page_vars=page,
         _page_combos=page_combos if page_combos is not None else np.zeros((1, 0), np.int64),
     )  # fmt: skip
+
+    def margins_of(r: int, c: int) -> list[tuple[int, int]]:
+        """The margin cells drawing the rows of cell (r, c) too."""
+        if r >= data_rows or c >= data_cols:
+            return []
+        out = [(r, data_cols)] if margin_col else []
+        if margin_row:
+            out.append((data_rows, c))
+        if margin_row and margin_col:
+            out.append((data_rows, data_cols))
+        return out
+
     if not keep_empty:  # the cells with data on some page, numbered in turn, on every page
         cells = nrows * ncols
         used = {i % cells for i in _used(grid, sources)}
+        used |= {m * ncols + n for i in used for m, n in margins_of(*divmod(i, ncols))}
         kept = [p for p in grid.panels if p.index % cells in used]
         grid._kept = np.full(len(pages) * cells, -1, dtype=np.int64)
         grid._kept[[p.index for p in kept]] = np.arange(len(kept))
         if page_of is not None:
             grid.page_of = page_of[[p.index for p in kept]]
         grid.panels = [replace(p, index=i) for i, p in enumerate(kept)]
+    if margin_row or margin_col:
+        width = margin_row + margin_col + (margin_row and margin_col)
+        also = np.full((len(grid.panels), width), -1, dtype=np.int64)
+        for i, p in enumerate(grid.panels):
+            g = 0 if grid.page_of is None else int(grid.page_of[i])
+            for j, (m, n) in enumerate(margins_of(p.row, p.col)):
+                cell = (g * nrows + m) * ncols + n
+                also[i, j] = cell if grid._kept is None else grid._kept[cell]
+        grid.also = also
     return grid
 
 
