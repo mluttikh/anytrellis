@@ -123,7 +123,8 @@ row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
   strip of its own; `margins=True`: a grid's "(all)" row and column, each panel the rows
   of its column or row (`"row"` or `"col"`: one of them).
 - `page="site"`: a page per level of a column, each a grid or a wrap of its own.
-- `aspect=1`: square panels (each panel's height as a multiple of its width).
+- `aspect=1`: square panels (each panel's height as a multiple of its width);
+  `aspect="bank"`: the shape that shows the lines' median slope at 45 degrees (banking).
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),
   `"row"`, `"col"`, `False` (each panel its own) or `"sliced"` (each panel its own range,
   all as wide as the widest, so a change of 5 looks the same size in every panel). Axes are

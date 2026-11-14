@@ -79,7 +79,7 @@ from anytrellis.query import (
 )
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
 from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
-from anytrellis.stats import Members, Part
+from anytrellis.stats import PANEL, Members, Part
 from anytrellis.stats import parts as summary_parts
 from anytrellis.styling import (
     CONTEXT_COLOR,
@@ -152,7 +152,10 @@ class Trellis:
             densities).
         height: The plot's height in CSS pixels (default: from ``panel_height``).
         panel_height: Each panel's height in CSS pixels (default: from its width).
-        aspect: Each panel's height as a multiple of its width (``1``: square), unless
+        aspect: Each panel's height as a multiple of its width (``1``: square), or
+            ``"bank"``: the one showing the lines' median slope at 45 degrees, where
+            changes are easiest to compare (Cleveland's banking; the ``smooth()`` fits', or
+            without them the ``line()`` layers'), unless
             ``height`` or ``panel_height`` is given (default: about 0.62, between 90 and
             300 px).
         title: A title over the plot.
@@ -209,7 +212,7 @@ class Trellis:
         y_scale: str = "linear",
         height: int | None = None,
         panel_height: int | None = None,
-        aspect: float | None = None,
+        aspect: float | str | None = None,
         title: str = "",
         x_title: str | None = None,
         y_title: str | None = None,
@@ -270,9 +273,13 @@ class Trellis:
         self._tables: dict[int, Table] = {}
         self.height = height
         self.panel_height = panel_height
-        if aspect is not None and not aspect > 0:
-            raise ValueError(f"aspect must be positive, got {aspect!r}")
+        if aspect is not None and aspect != "bank" and \
+                not (isinstance(aspect, int | float) and aspect > 0):  # fmt: skip
+            raise ValueError(f"aspect must be positive or 'bank', got {aspect!r}")
         self.aspect = aspect
+        self._banked: float | None = None
+        """``aspect="bank"`` with ``load="pages"``: the aspect banked from the rows read
+        first, kept so that turning the pages doesn't change the panels' shape."""
         self.title = title
         self.x_title = x_title
         self.y_title = y_title
@@ -2158,6 +2165,41 @@ class Trellis:
                 names += _layer_columns(layer)
         return tuple(n for n in dict.fromkeys(names) if n is not None and n in whole)
 
+    def _aspect(self, drawn: list[_Drawn], grid: Grid, xd: list[tuple[float, float]],
+                yd: list[tuple[float, float]], x_levels: list[str] | None,
+                y_levels: list[str] | None) -> float | None:  # fmt: skip
+        """The panels' height as a multiple of their width: ``aspect``, or (``"bank"``) the
+        one banking the plot's lines to 45 degrees."""
+        if not isinstance(self.aspect, str):
+            return self.aspect
+        if self._banked is not None:
+            return self._banked
+        # the smooths' fits (a trend, not the noise around it); without them, the lines
+        lines = [d for d in drawn if d.layer.mark == "line" and d.layer.stat == "smooth"] or \
+            [d for d in drawn if d.layer.mark == "line" and d.part is None]  # fmt: skip
+        if not lines:
+            raise ValueError("aspect='bank' shapes the panels for the lines' slopes: draw a "
+                             "line() or smooth(), or give aspect a number")  # fmt: skip
+        slopes = []
+        for d in lines:
+            layer, table = d.layer, d.table
+            assert layer.x is not None
+            assert layer.y is not None
+            if d.part is not None:  # a summary's rows: each its panel's
+                panel_of = table.column(PANEL).values.astype(np.int64)
+            else:
+                panel_of = grid.assign(table)
+            if panel_of is None:  # in every panel alike: banked in the first
+                panel_of = np.zeros(table.n, dtype=np.int64)
+            x = axis_values(table.column(layer.x), x_levels)
+            y = axis_values(table.column(layer.y), y_levels)
+            series = _series(layer, table, panel_of, len(grid.panels))
+            slopes.append(bank_slopes(panel_of, series, x, y, np.asarray(xd), np.asarray(yd)))
+        aspect = banked_aspect(np.concatenate(slopes))
+        if self._load == "pages":
+            self._banked = aspect
+        return aspect
+
     def _page_summary(self, layer: Layer, grid: Grid, logs: list[str]) -> list[Part]:
         """``load="pages"``: a summary layer's parts, every panel's: from the database, or
         (a summary it doesn't compute) from every row of the columns it draws, read once."""
@@ -2471,7 +2513,7 @@ class Trellis:
             "legends": colors.legends(),
             "height": self.height,
             "panel_height": self.panel_height,
-            "aspect": self.aspect,
+            "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
             "legend_position": self.legend,
             "fit_y": self.fit_y,
             "pages": pages,
@@ -3191,6 +3233,35 @@ def _concat_geometry(a: Geometry, b: Geometry) -> Geometry | None:
         else:
             out.append(np.concatenate([u, v]))
     return Geometry(*out)  # ty: ignore[invalid-argument-type]
+
+
+BANK_LIMITS = (0.02, 5.0)
+"""The flattest and the tallest panels banking gives (height as a multiple of width)."""
+
+
+def bank_slopes(panel_of: np.ndarray, series: np.ndarray, x: np.ndarray, y: np.ndarray,
+                xd: np.ndarray, yd: np.ndarray) -> np.ndarray:  # fmt: skip
+    """The absolute slope of each segment of each series in its own panel, in units of its
+    panel's ranges (``xd``, ``yd``: each panel's domain): a segment across the whole width
+    and up the whole height has slope 1. Segments without a rise or fall are left out."""
+    keep = (panel_of >= 0) & np.isfinite(x) & np.isfinite(y)
+    p, s, x, y = panel_of[keep], series[keep], x[keep], y[keep]
+    order = np.lexsort((x, s, p))
+    p, s, x, y = p[order], s[order], x[order], y[order]
+    same = (p[1:] == p[:-1]) & (s[1:] == s[:-1])
+    dx, dy, at = np.diff(x)[same], np.diff(y)[same], p[:-1][same]
+    width = xd[at, 1] - xd[at, 0]
+    height = yd[at, 1] - yd[at, 0]
+    ok = (dx != 0) & (dy != 0) & (width > 0) & (height > 0)
+    return (np.abs(dy[ok]) / height[ok]) / (np.abs(dx[ok]) / width[ok])
+
+
+def banked_aspect(slopes: np.ndarray) -> float:
+    """The height as a multiple of the width that shows the median slope at 45 degrees
+    (Cleveland's median absolute slope banking), within ``BANK_LIMITS``."""
+    if not len(slopes):
+        return 0.62
+    return float(np.clip(1.0 / np.median(slopes), *BANK_LIMITS))
 
 
 def _series(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: int) -> np.ndarray:
