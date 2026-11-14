@@ -831,6 +831,50 @@ class Trellis:
                                (), facet, width=width, opacity=opacity,
                                stat_args=args))  # fmt: skip
 
+    def horizon(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        bands: int = 3,
+        origin: float = 0.0,
+        step: float | None = None,
+        name: str | None = None,
+    ) -> Self:
+        """A horizon chart in each panel: a series in a short panel, its distance from
+        ``origin`` cut into bands, each band laid over the one before in the panel's height
+        and darker, blues above the origin and reds below it (folded up). A hundred series
+        fit on a screen, and their highs and lows still show (Heer, Kong and Agrawala 2009).
+
+        ```python
+        Trellis(readings, wrap="station", cols=1, panel_height=24).horizon(
+            x="time", y="temp", origin=10)
+        ```
+
+        The y axis shows the height within a band; the legend names each band's range.
+        Each panel draws one series: give each x one y. Margins (``margins=``) are left
+        empty, since each has several panels' series.
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The column along the panel (numbers or times).
+            y: The values (numbers).
+            bands: Bands on each side of the origin.
+            origin: The value the bands start from.
+            step: Each band's height in y's units (default: a round number, so the bands
+                reach the farthest value from the origin in any panel; values past the
+                last band fill it).
+            name: The layer's name.
+        """
+        if not 1 <= bands <= 6:
+            raise ValueError("horizon(): bands must be 1 to 6")
+        if step is not None and not step > 0:
+            raise ValueError("horizon(): step must be positive")
+        args = {"bands": bands, "origin": float(origin), "step": step}
+        return self._add(Layer("horizon", name or self._name("horizon"), data, x, y,
+                               stat_args=args))  # fmt: skip
+
     def violin(
         self,
         data: Any = None,
@@ -2387,6 +2431,9 @@ class Trellis:
             zero_base=zero,
             sliced=self._share["y"] == "sliced",
         )
+        if shown and all(lr.stat == "horizon" for lr in shown):  # the bands' height, unpadded
+            top = float(np.nanmax(extents["y"].hi, initial=0.0)) or 1.0
+            yd = [(0.0, top)] * len(yd)
         x_origin = _origin(xd, x_kind)
         y_origin = _origin(yd, y_kind)
         self._axes = {"x": (x_kind, x_levels, x_origin), "y": (y_kind, y_levels, y_origin)}
@@ -2975,6 +3022,8 @@ class _ColorScales:
         self.levels: dict[str, list[str]] = {}
         self.ranges: dict[str, tuple[float, float]] = {}
         self.order: list[str] = []
+        self.fixed: dict[str, dict[str, str]] = {}
+        """Colours of a column's levels given by its layers (a horizon's bands)."""
         for layer in marks:
             table = table_of(layer)
             name = layer.color
@@ -2984,6 +3033,10 @@ class _ColorScales:
             if name not in self.order:
                 self.order.append(name)
             if column.kind == "category":
+                if layer.colors:
+                    self.fixed.setdefault(name, {}).update(
+                        zip(column.levels, layer.colors, strict=True)
+                    )
                 seen = self.levels.setdefault(name, [])
                 seen.extend(
                     v for v in _reorder(list(column.levels), given.get(name)) if v not in seen
@@ -3003,10 +3056,14 @@ class _ColorScales:
     def key(self) -> tuple[Any, ...]:
         """What the colours are made from: the same key, the same colours."""
         return (tuple(self.palette or ()), tuple((k, tuple(v)) for k, v in self.levels.items()),
-                tuple(self.ranges.items()), tuple(self.order))  # fmt: skip
+                tuple(self.ranges.items()), tuple(self.order),
+                tuple((k, tuple(v.items())) for k, v in self.fixed.items()))  # fmt: skip
 
     def colors(self, name: str) -> list[str]:
-        return palette_colors(self.palette, len(self.levels[name]))
+        levels = self.levels[name]
+        palette = palette_colors(self.palette, len(levels))
+        fixed = self.fixed.get(name, {})
+        return [fixed.get(level, c) for level, c in zip(levels, palette, strict=True)]
 
     def legends(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []

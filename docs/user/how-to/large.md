@@ -98,6 +98,27 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
+### Horizon charts: many series in little height
+
+A line needs height to show its highs and lows. `horizon()` folds a series into bands
+instead: its distance from `origin` is cut into `bands` bands of the same height, laid over
+each other in the panel and darker the farther they reach, blues above the origin and reds
+below it (folded up). A panel 24 px high then shows what a line shows in about 150, so a
+hundred series fit on a screen (Heer, Kong and Agrawala, *Sizing the horizon*, 2009):
+
+```python exec="on" source="above" session="large" html="true"
+plot = Trellis(week, wrap="station", cols=2, panel_height=24, title="60 stations")
+plot.horizon(x="time", y="temp", origin=10)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+The legend names each band's range, and clicking one selects the times a series reaches
+it. Every panel shares the band height (`step=`, by default a round number so the bands
+reach the farthest value of any panel), so a dark band means the same in every panel.
+The y axis shows the height within a band. Each panel draws one series (one y per x), and
+margins are left empty.
+
 A wrap of more panels shows them a page at a time, which the reader sorts and filters by
 each panel's statistics: see [Page through many panels](pages.md). In a notebook, only
 the pages near the one shown are sent to the browser, so a thousand panels start as fast

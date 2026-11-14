@@ -8,6 +8,16 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- `horizon(x, y, bands=3, origin=0, step=None)`: a horizon chart in each panel. A series'
+  distance from `origin` is cut into bands of one height, laid over each other and darker
+  the farther, blues above the origin and reds below it, so a series shows its highs and
+  lows in a panel 24 px high. Every panel shares the band height (by default a round
+  number reaching the farthest value of any panel); the legend names each band's range,
+  and clicking it selects the times a series reaches it. Works with `load="pages"`;
+  margins are left empty.
+
+### Added
+
 - `Trellis(margins=)`: a grid's "(all)" panels, as ggplot2's `facet_grid(margins = TRUE)`.
   `True` adds an (all) row under the rows (each panel the rows of its column) and an (all)
   column right of the columns (each panel the rows of its row), with a corner of every
