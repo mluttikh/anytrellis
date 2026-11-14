@@ -67,6 +67,7 @@ panels, labels in strips over the panels, and panels ordered by what they show.
 | `dotplot`, `bwplot`, `histogram`, `densityplot` | `.points()`, `.box()`, `.hist()`, `.density()` |
 | `splom(~ df[1:4], groups = g)` | `pairs(df, ["a", "b", "c", "d"], color="g")` |
 | `scales = list(y = "free")` | `share_y=False` |
+| `scales = list(y = "sliced")` | `share_y="sliced"` |
 | `index.cond`, `reorder()` | `.order(...)` |
 
 Cleveland's barley data, as a dot plot with sites and varieties ordered by their median

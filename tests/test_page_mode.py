@@ -176,6 +176,22 @@ def test_selected_by_a_time_range_and_a_category_axis() -> None:
     assert paged._scene()[0]["x"]["levels"] == eager._scene()[0]["x"]["levels"]
 
 
+@pytest.mark.parametrize("kind", list(LAZY))
+def test_sliced_ranges_are_those_of_every_row(kind: str) -> None:
+    df = frame(30_000)
+    paged = Trellis(LAZY[kind](df), wrap="station", load="pages", share_y="sliced")
+    eager = Trellis(df, wrap="station", share_y="sliced")
+    spec_p, _ = paged.line(x="time", y="temp")._scene()
+    spec_e, _ = eager.line(x="time", y="temp")._scene()
+    widths = {round(p["y"][1] - p["y"][0], 9) for p in spec_p["panels"]}
+    assert len(widths) == 1  # also the panels of pages not read
+
+    def ranges(spec: dict[str, Any]) -> list[float]:
+        return [y + spec["y"]["origin"] for p in spec["panels"] for y in p["y"]]
+
+    assert ranges(spec_p) == pytest.approx(ranges(spec_e))
+
+
 def test_order_by_a_summary_from_the_database() -> None:
     paged, eager = plots("duckdb")
     for p in (paged, eager):

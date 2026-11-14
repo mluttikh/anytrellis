@@ -2,8 +2,10 @@
 
 ``share`` per axis: ``"all"`` (every panel the same domain: the default, so panels compare),
 ``"row"`` / ``"col"`` (the same within a grid row / column), ``"page"`` (the same within a
-page of ``page=``), or ``"none"`` (each panel its own). Panels with the same domain form a
-group, zoomed together in the browser.
+page of ``page=``), ``"none"`` (each panel its own), or ``"sliced"`` (each panel its own
+range, all as wide as the widest: a change of 5 looks the same size in every panel, as
+lattice's ``relation="sliced"``). Panels with the same domain form a group, zoomed together
+in the browser; sliced panels zoom to the same width, each about its own centre.
 """
 
 from __future__ import annotations
@@ -17,22 +19,24 @@ from anytrellis.facets import Grid
 
 AxisKind = Literal["number", "time", "band", "log"]
 """``log``: numbers in log10 units (a log scale); padded and zoomed like numbers."""
-Share = Literal["all", "row", "col", "page", "none"]
+Share = Literal["all", "row", "col", "page", "none", "sliced"]
 
 PAD = 0.04
 """Room on each side of a continuous domain, as a fraction of its span."""
 
 
 def share_mode(value: bool | str) -> Share:
-    """``True``/``"all"``, ``False``/``"none"``/``"free"``, ``"row"``, ``"col"`` or
-    ``"page"``."""
+    """``True``/``"all"``, ``False``/``"none"``/``"free"``, ``"row"``, ``"col"``, ``"page"``
+    or ``"sliced"``."""
     if value is True or value == "all":
         return "all"
     if value is False or value in ("none", "free"):
         return "none"
-    if value in ("row", "col", "page"):
+    if value in ("row", "col", "page", "sliced"):
         return value
-    raise ValueError(f"share: expected True, False, 'row', 'col' or 'page', got {value!r}")
+    raise ValueError(
+        f"share: expected True, False, 'row', 'col', 'page' or 'sliced', got {value!r}"
+    )
 
 
 @dataclass
@@ -89,8 +93,10 @@ def domains(
     *,
     band_size: int = 0,
     zero_base: bool = False,
+    sliced: bool = False,
 ) -> list[tuple[float, float]]:
-    """Each panel's domain: the union of its group's extents, padded."""
+    """Each panel's domain: the union of its group's extents, padded. ``sliced``: each
+    group's own, widened to the widest (see ``slice_domains``)."""
     out: list[tuple[float, float]] = []
     cache: dict[int, tuple[float, float]] = {}
     groups_arr = np.asarray(groups)
@@ -98,6 +104,30 @@ def domains(
         if g not in cache:
             cache[g] = _padded(extent, groups_arr == g, kind, band_size, zero_base)
         out.append(cache[g])
+    if sliced:
+        data = [bool(np.isfinite(extent.lo[groups_arr == g]).any()) for g in groups]
+        out = slice_domains(out, data, zero_base=zero_base)
+    return out
+
+
+def slice_domains(
+    domains: list[tuple[float, float]], data: list[bool], *, zero_base: bool = False
+) -> list[tuple[float, float]]:
+    """Domains widened to the widest of those with ``data``, each about its centre; an end at
+    0 of a ``zero_base`` axis (a bar's base) stays, the other end taking the whole width."""
+    widths = [hi - lo for (lo, hi), d in zip(domains, data, strict=True) if d]
+    if not widths:
+        return domains
+    width = max(widths)
+    out: list[tuple[float, float]] = []
+    for lo, hi in domains:
+        if zero_base and lo == 0:
+            out.append((lo, lo + width))
+        elif zero_base and hi == 0:
+            out.append((hi - width, hi))
+        else:
+            mid = (lo + hi) / 2
+            out.append((float(mid - width / 2), float(mid + width / 2)))
     return out
 
 

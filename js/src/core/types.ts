@@ -14,7 +14,9 @@ export interface BufferRef {
 /** `log`: numbers in log10 units (a log scale): zoomed and panned like numbers, labelled
  * as the values. */
 export type AxisKind = "number" | "time" | "band" | "log";
-export type Share = "all" | "row" | "col" | "page" | "none";
+/** `sliced`: each panel its own group, every domain as wide as the widest (lattice's
+ * relation="sliced"); zooming one panel gives every panel its width, about its own centre. */
+export type Share = "all" | "row" | "col" | "page" | "none" | "sliced";
 
 export interface AxisSpec {
   kind: AxisKind;

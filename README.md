@@ -123,8 +123,9 @@ row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
 - `page="site"`: a page per level of a column, each a grid or a wrap of its own.
 - `aspect=1`: square panels (each panel's height as a multiple of its width).
 - `share_x=` / `share_y=` (or `t.share(x=..., y=...)`): `True` (all panels, the default),
-  `"row"`, `"col"` or `False` (each panel its own). Axes are drawn only where a panel's
-  scale differs from its neighbour's.
+  `"row"`, `"col"`, `False` (each panel its own) or `"sliced"` (each panel its own range,
+  all as wide as the widest, so a change of 5 looks the same size in every panel). Axes are
+  drawn only where a panel's scale differs from its neighbour's.
 - `x_scale="log"` / `y_scale="log"` (or `t.scale(y="log")`): a log10 scale, with ticks at
   decades (and 2 and 5 between when they fit). Values of 0 or less are left out; marks
   drawn from zero (bars, areas, histograms, densities) don't go on a log y. Summaries are

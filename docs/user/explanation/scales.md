@@ -10,6 +10,7 @@ default, and lets you free one per row, per column or per panel.
 | --- | --- | --- |
 | Shared | Levels across panels, at a glance | Detail in panels with small values |
 | Free | Each panel's shape and change | Levels: the axes must be read |
+| Sliced | Each panel's change, in the same units: a rise of 5 is as tall everywhere | Levels: the axes must be read |
 | Shared per row or column | Levels along a row or a column | Levels across them |
 | Log, shared | Ratios and growth rates across panels, at a glance | Differences in absolute terms |
 
@@ -20,10 +21,12 @@ panel's scale differs from its neighbour's, it draws its own ticks.
 
 A shared scale is one scale: zooming it in one panel zooms it in all the panels that share
 it. A panel with a free scale zooms alone. In a grid with `share_y="row"`, zooming y in one
-panel zooms its row.
+panel zooms its row. A sliced scale keeps every panel as wide: zooming one panel zooms all
+of them to its width, each about its own centre, and panning moves one panel alone.
 
 Fitting y to the data in view (**y**) fits each scale to the data of all its panels, so
-panels that share y stay comparable while it fits.
+panels that share y stay comparable while it fits. A sliced y fits each panel to its own
+data, every one as wide as the widest.
 
 ## Why log scales are often better than free ones
 
