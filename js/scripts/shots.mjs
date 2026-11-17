@@ -2,7 +2,7 @@
 // pages and the manifest):
 //   node scripts/shots.mjs <manifest.json>
 // The manifest lists {page, out, width, height, scale?, labels?}. A label puts a numbered badge on a
-// part of the plot: "title", "toolbar", "legend", "badge" (the renderer), or "strip:i",
+// part of the plot: "title", "toolbar", "legend", or "strip:i",
 // "panel:i", "yaxis:i", "xaxis:i" for the i-th panel's.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -47,9 +47,9 @@ for (const shot of shots) {
         if (kind === "panel") return [sx + p.rect.x + p.rect.w * 0.8, sy + p.rect.y + p.rect.h * 0.25];
         if (kind === "yaxis") return [sx + p.yAxis.x - 12, sy + p.yAxis.y + p.yAxis.h * 0.2];
         if (kind === "xaxis") return [sx + p.xAxis.x + p.xAxis.w * 0.5, sy + p.xAxis.y + p.xAxis.h + 8];
-        const sel = { title: ".atr-title", toolbar: ".atr-toolbar", legend: ".atr-legend", badge: ".atr-badge" }[kind];
-        const el = root.querySelector(sel);
-        if (kind === "badge") el.style.opacity = "0.9";
+        const sel = { title: ".atr-title", toolbar: ".atr-toolbar", legend: ".atr-legend" }[kind];
+        const el = sel && root.querySelector(sel);
+        if (!el) throw new Error(`no part "${target}" to label`);
         const r = el.getBoundingClientRect();
         if (kind === "legend") {
           const first = el.firstElementChild?.getBoundingClientRect() ?? r;

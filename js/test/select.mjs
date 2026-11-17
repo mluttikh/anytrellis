@@ -62,7 +62,7 @@ await page.mouse.click(...at(p0, 0.5, 0.5));
 await page.keyboard.press("Escape"); // a selection saved with the page: gone
 await page.keyboard.press("s");
 let s = await state();
-check(s.mode === "select" && (await page.$eval(".atr-toolbar [aria-pressed='true']", (b) => b.title)).startsWith("Select"), "s: select mode, and its button shows it");
+check(s.mode === "select" && (await page.$eval(".atr-toolbar [role='radio'][aria-checked='true']", (b) => b.title)).startsWith("Select"), "s: select mode, and its button shows it");
 
 // a sideways brush: an x range, in every panel
 await drag(at(p0, 0.2, 0.5), at(p0, 0.5, 0.52));

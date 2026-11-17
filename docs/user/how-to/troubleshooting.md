@@ -13,8 +13,8 @@ The notebook shows the plot's text form, `Trellis(...)`, when it cannot show wid
 
 ## The plot is blank, or says it could not draw
 
-Hover over the plot: its bottom-right corner says which renderer draws. If it says Canvas
-2D on a machine with a GPU, or the plot is blank:
+Press ++question++ over the plot (or its **?** button): the help says which renderer draws.
+If it says Canvas 2D on a machine with a GPU, or the plot is blank:
 
 - The browser may have no GPU access (remote desktops, some virtual machines, a GPU
   blocklist). Canvas 2D still draws, more slowly with many marks.

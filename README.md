@@ -256,6 +256,7 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | Enter | open the panel under the pointer |
 | Page Up / Page Down | previous / next panel (with none opened: page) |
 | Backspace | back to all panels |
+| `?` | the keys and mouse, the renderer and the version |
 
 These keys stay in the plot, so JupyterLab's own shortcuts don't also act on them.
 
@@ -303,6 +304,7 @@ node test/interact.mjs <page.html>                 # hover, linked zoom, pan, re
 node test/zoom.mjs <page.html>                     # one axis, box zoom, fit y, undo
 node test/select.mjs <page.html> [dir] [renderer]  # brushing, moving, clearing
 node test/legend.mjs <page.html> [dir] [renderer]  # clicking legend entries
+node test/toolbar.mjs <page.html> [dir] [renderer] # drag modes, state chips, the ? help
 node test/export.mjs <page.html> [dir] [renderer]  # the Export menu: PNG, SVG, clipboard
 node test/details.mjs <dir of pages> [dir] [renderer] # page styles, a partly selected histogram
 node test/notebooks.mjs jupyter|marimo <url> <out> # a live notebook: run it, screenshot plots

@@ -172,7 +172,6 @@ GLANCE_LABELS = [
     {"n": 5, "target": "yaxis:0"},
     {"n": 6, "target": "xaxis:2"},
     {"n": 7, "target": "legend"},
-    {"n": 8, "target": "badge"},
 ]
 
 

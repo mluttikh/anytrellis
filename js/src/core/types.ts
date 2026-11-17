@@ -178,6 +178,8 @@ export interface LegendSpec {
 
 export interface TrellisSpec {
   version: 1;
+  /** The anytrellis that made the spec (shown in the help, ?). */
+  package_version?: string;
   title: string;
   /** A line or two under the title. */
   subtitle?: string;

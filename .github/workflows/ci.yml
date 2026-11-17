@@ -133,6 +133,7 @@ jobs:
             node test/legend.mjs "$pages/years.html" "$shots" "$r"
             node test/legend.mjs "$pages/density.html" "$shots" "$r"
             node test/legend.mjs "$pages/legend-right.html" "$shots" "$r"
+            node test/toolbar.mjs "$pages/years.html" "$shots" "$r"
             node test/many.mjs "$pages/many.html" "$shots" "$r"
             node test/export.mjs "$pages/years.html" "$shots" "$r"
             node test/export.mjs "$pages/labelled.html" "$shots" "$r"

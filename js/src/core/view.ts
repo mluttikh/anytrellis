@@ -146,6 +146,8 @@ const FLIP_MAX = 30;
 const FLIP_MS = 100;
 
 const ICONS = {
+  pan: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" /></svg>',
+  help: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" /><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.5" /><path d="M8 11.6v.1" /></svg>',
   back: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>',
   prev: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>',
   next: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>',
@@ -165,6 +167,8 @@ export class TrellisView {
   private readonly toolbar: HTMLDivElement;
   private readonly backButton: HTMLButtonElement;
   private readonly resetButton: HTMLButtonElement;
+  /** The drag mode, one of three always on: pan, box zoom, select. */
+  private readonly modeButtons: Record<Mode, HTMLButtonElement>;
   private readonly boxButton: HTMLButtonElement;
   private readonly selectButton: HTMLButtonElement;
   private readonly fitButton: HTMLButtonElement;
@@ -181,7 +185,14 @@ export class TrellisView {
   private readonly tip: HTMLDivElement;
   private readonly status: HTMLDivElement;
   private readonly notice: HTMLDivElement;
-  private readonly badge: HTMLDivElement;
+  /** What the plot shows that differs from its start (zoomed, selected, filtered), each
+   * with its way back; in the header, so the plot does not move when one appears. */
+  private readonly chips: HTMLDivElement;
+  private chipsKey = "";
+  /** Keys and mouse, the renderer and the version (?). */
+  private readonly help: HTMLDivElement;
+  private readonly helpButton: HTMLButtonElement;
+  private rendererName = "";
   private renderer: Renderer | null = null;
   private rendererReady: Promise<void>;
   private spec: TrellisSpec | null = null;
@@ -266,11 +277,42 @@ export class TrellisView {
     this.backButton = button(ICONS.back, "All panels (Backspace)", () => this.setFocus(null, true));
     this.backButton.hidden = true;
     this.resetButton = button(ICONS.reset, "Reset zoom (r)", () => this.resetZoom());
-    this.boxButton = button(ICONS.box, "Box zoom: drag a box (z; Shift+drag at any time)", () => this.setMode(this.mode === "zoom" ? "pan" : "zoom"));
-    this.selectButton = button(ICONS.select, "Select: drag a brush (s)", () => this.setMode(this.mode === "select" ? "pan" : "select"));
-    this.selectButton.setAttribute("aria-pressed", "false");
+    const panButton = button(ICONS.pan, "Pan: drag moves the view", () => this.setMode("pan"));
+    this.boxButton = button(ICONS.box, "Box zoom: drag a box (z; Shift+drag at any time)", () => this.setMode("zoom"));
+    this.selectButton = button(ICONS.select, "Select: drag a brush (s)", () => this.setMode("select"));
+    this.modeButtons = { pan: panButton, zoom: this.boxButton, select: this.selectButton };
+    const modes = el("div", "atr-segmented");
+    modes.setAttribute("role", "radiogroup");
+    modes.setAttribute("aria-label", "Drag");
+    for (const [mode, b] of Object.entries(this.modeButtons) as [Mode, HTMLButtonElement][]) {
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String(mode === "pan"));
+      b.tabIndex = mode === "pan" ? 0 : -1;
+      modes.append(b);
+    }
+    // a radio group: the arrows move along it, choosing as they go
+    modes.addEventListener("keydown", (e) => {
+      const order: Mode[] = ["pan", "zoom", "select"];
+      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      const next = order[(order.indexOf(this.mode) + step + order.length) % order.length];
+      this.setMode(next);
+      this.modeButtons[next].focus();
+      e.preventDefault();
+      e.stopPropagation();
+    });
     this.fitButton = button(ICONS.fitY, "Fit y to the data in view (y)", () => this.setFitY(!this.fitY, true));
-    for (const b of [this.boxButton, this.fitButton]) b.setAttribute("aria-pressed", "false");
+    this.fitButton.setAttribute("aria-pressed", "false");
+    this.helpButton = button(ICONS.help, "Keys and mouse (?)", () => this.toggleHelp());
+    this.helpButton.setAttribute("aria-haspopup", "dialog");
+    this.helpButton.setAttribute("aria-expanded", "false");
+    this.help = el("div", "atr-help");
+    this.help.setAttribute("role", "dialog");
+    this.help.setAttribute("aria-label", "Keys and mouse");
+    this.help.tabIndex = -1;
+    this.help.hidden = true;
+    this.chips = el("div", "atr-chips");
+    this.chips.setAttribute("aria-live", "polite");
     this.fullButton = button(ICONS.expand, "Full screen (f)", () => this.toggleFullscreen());
     this.fullButton.hidden = !document.fullscreenEnabled; // in some frames (and iPhones): none
     this.exportButton = button(ICONS.export, "Export an image: copy or download a PNG or SVG (e)", () => this.toggleExport());
@@ -279,8 +321,8 @@ export class TrellisView {
     this.exportMenu = el("div", "atr-export");
     this.exportMenu.setAttribute("role", "menu");
     this.exportMenu.hidden = true;
-    this.toolbar.append(this.backButton, this.selectButton, this.boxButton, this.fitButton, this.resetButton, this.exportButton, this.fullButton);
-    this.header.append(this.heading, this.toolbar);
+    this.toolbar.append(this.backButton, modes, this.fitButton, this.resetButton, this.exportButton, this.helpButton, this.fullButton);
+    this.header.append(this.heading, this.chips, this.toolbar);
     this.pager = new Pager((paging) => this.setPaging(paging, true));
     this.pager.el.hidden = true;
     this.legend = el("div", "atr-legend");
@@ -295,11 +337,10 @@ export class TrellisView {
     this.status = el("div", "atr-status");
     this.notice = el("div", "atr-notice");
     this.notice.hidden = true;
-    this.badge = el("div", "atr-badge");
     this.empty = el("div", "atr-empty", "No panel matches the filters");
     this.empty.hidden = true;
     this.stage.append(this.back, this.front, this.tip, this.status, this.notice, this.empty);
-    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.badge, this.exportMenu);
+    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.help);
     host.append(this.root);
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
@@ -339,7 +380,8 @@ export class TrellisView {
         this.renderer = null;
         this.rendererReady = this.makeRenderer("auto", [...skip, failed]).then(() => this.relayout());
       };
-      this.badge.textContent = renderer.description;
+      this.rendererName = renderer.description;
+      if (!this.help.hidden) this.fillHelp();
       this.root.dataset.renderer = renderer.kind;
     } catch (err) {
       this.setStatus(`Cannot draw: ${err instanceof Error ? err.message : String(err)}`);
@@ -628,8 +670,10 @@ export class TrellisView {
 
   private setMode(mode: Mode): void {
     this.mode = mode;
-    this.boxButton.setAttribute("aria-pressed", String(mode === "zoom"));
-    this.selectButton.setAttribute("aria-pressed", String(mode === "select"));
+    for (const [m, b] of Object.entries(this.modeButtons) as [Mode, HTMLButtonElement][]) {
+      b.setAttribute("aria-checked", String(m === mode));
+      b.tabIndex = m === mode ? 0 : -1;
+    }
     this.notify(
       mode === "zoom"
         ? "Drag a box to zoom (z or Shift+drag: pan)"
@@ -738,12 +782,6 @@ export class TrellisView {
       panel: linked ? v.panel : null,
       legend: this.brush?.legend ?? null, // chosen legend entries: only their colours
     };
-  }
-
-  private selectedNotice(): void {
-    this.settleSelection();
-    const s = this.selection;
-    if (s) this.notify(`${s.selected.toLocaleString()} of ${s.total.toLocaleString()} marks selected`);
   }
 
   /** Each y group fitted to its panels' data where their x is now. */
@@ -1135,7 +1173,126 @@ export class TrellisView {
     this.front_.texts = this.scene.texts;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.theme, this.front_);
+    this.updateChips();
     this.reportView();
+  }
+
+  // ---- state chips ----------------------------------------------------------------------
+
+  /** Which axes are zoomed away from where the plot started ("": none). y fitted to x is
+   * the fit's doing (its button shows it), not a zoom. */
+  private zoomedAxes(): string {
+    const spec = this.spec;
+    if (!spec) return "";
+    const off = (now: Range | undefined, home: Range): boolean => {
+      if (!now) return false;
+      const tol = Math.abs(home[1] - home[0]) * 1e-6;
+      return Math.abs(now[0] - home[0]) > tol || Math.abs(now[1] - home[1]) > tol;
+    };
+    let x = false;
+    let y = false;
+    for (const p of spec.panels) {
+      x ||= off(this.xView.get(p.xg), p.x);
+      y ||= !this.fitY && off(this.yView.get(p.yg), p.y);
+    }
+    return x && y ? "x and y" : x ? "x" : y ? "y" : "";
+  }
+
+  /** The chips for the plot's state now; rebuilt only when what they say changes. */
+  private updateChips(): void {
+    const chips: [string, string, string, () => void][] = [];
+    const zoomed = this.zoomedAxes();
+    if (zoomed) chips.push(["zoom", `Zoomed in ${zoomed}`, "Reset", () => this.resetZoom()]);
+    const sel = this.selection;
+    if (sel && this.brush) {
+      chips.push(["select", `${sel.selected.toLocaleString()} of ${sel.total.toLocaleString()} marks selected`, "Clear", () => this.setBrush(null, true)]);
+    } else if (sel && this.highlight && this.opts.onClear) {
+      const clear = this.opts.onClear;
+      chips.push(["select", "Selected in a linked plot", "Clear", () => clear()]);
+    }
+    const filters = this.filterCount();
+    if (filters && this.order && this.spec) {
+      const of = `${this.order.length} of ${this.spec.panels.length} panels`;
+      chips.push(["filter", `${filters} ${filters === 1 ? "filter" : "filters"}: ${of}`, "Clear", () => this.setPaging({ ...this.paging, where: {}, name: "", page: 0 }, true)]);
+    }
+    const key = chips.map((c) => c[1]).join("|");
+    if (key === this.chipsKey) return;
+    this.chipsKey = key;
+    this.chips.replaceChildren(
+      ...chips.map(([kind, text, action, undo]) => {
+        const chip = el("span", "atr-chip");
+        chip.dataset.chip = kind;
+        const b = el("button", "atr-link", action);
+        b.type = "button";
+        b.setAttribute("aria-label", `${action}: ${text}`);
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          undo();
+          this.root.focus({ preventScroll: true }); // the chip goes: the keys stay with the plot
+        });
+        chip.append(el("span", "", text), b);
+        return chip;
+      }),
+    );
+  }
+
+  /** The paging filters set: the name's words, and each statistic's range or text. */
+  private filterCount(): number {
+    const where = Object.values(this.paging.where ?? {}).filter((v) =>
+      typeof v === "string" ? v.trim() !== "" : Array.isArray(v) && (v[0] !== null || v[1] !== null),
+    );
+    return where.length + (this.paging.name?.trim() ? 1 : 0);
+  }
+
+  // ---- help -----------------------------------------------------------------------------
+
+  /** Show or hide the keys and mouse (its toolbar button, ?). */
+  private toggleHelp(show = this.help.hidden): void {
+    this.help.hidden = !show;
+    this.helpButton.setAttribute("aria-expanded", String(show));
+    if (!show) return;
+    this.hideTip();
+    this.toggleExport(false);
+    this.fillHelp();
+    this.help.focus();
+  }
+
+  private fillHelp(): void {
+    const table = (caption: string, rows: [string, string][]): HTMLElement => {
+      const t = el("table", "atr-help-table");
+      t.append(el("caption", "", caption));
+      for (const [k, v] of rows) {
+        const tr = el("tr");
+        tr.append(el("th", "", k), el("td", "", v));
+        t.append(tr);
+      }
+      return t;
+    };
+    const close = button('<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>', "Close (Esc)", () => this.toggleHelp(false));
+    close.classList.add("atr-help-close");
+    const version = this.spec?.package_version;
+    const about = [this.rendererName && `Drawn with ${this.rendererName}`, version && `anytrellis ${version}`].filter(Boolean).join(" · ");
+    const cols = el("div", "atr-help-cols");
+    cols.append(
+      table("Mouse", [
+        ["Scroll", "zoom x (Shift: y; over an axis: that axis)"],
+        ["Drag", "pan, draw a zoom box or select, as the mode on the left of the toolbar says"],
+        ["Shift+drag", "box zoom"],
+        ["Double-click", "open a panel (an axis: reset it)"],
+        ["Click a legend entry", "select its colour (Shift: add one)"],
+      ]),
+      table("Keys", [
+        ["z  s", "box zoom, select (again: pan)"],
+        ["y", "fit y to the data in view"],
+        ["r  u", "reset the zoom, undo the last"],
+        ["Esc", "clear the selection, close a panel"],
+        ["Enter", "open the panel under the pointer"],
+        ["Page Up / Down", "the previous / next panel or page"],
+        ["e  f", "export, full screen"],
+        ["?", "these keys"],
+      ]),
+    );
+    this.help.replaceChildren(close, el("div", "atr-help-lead", "Click the plot first: then the keys go to it, not the notebook."), cols, el("div", "atr-help-about", about));
   }
 
   /** Tell Python what the plot shows, once it has stayed put a moment. */
@@ -1222,6 +1379,7 @@ export class TrellisView {
       (e) => {
         const path = e.composedPath();
         if (!this.exportMenu.hidden && !path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
+        if (!this.help.hidden && !path.includes(this.help) && !path.includes(this.helpButton)) this.toggleHelp(false);
         if (this.pager.menuOpen && !path.includes(this.pager.el)) this.pager.toggleMenu(false);
       },
       { signal, capture: true },
@@ -1346,8 +1504,7 @@ export class TrellisView {
           else if (this.highlight) this.opts.onClear?.();
           return;
         }
-        this.opts.onSelect?.(this.brush);
-        this.selectedNotice();
+        this.opts.onSelect?.(this.brush); // its count: in the selection's chip
         return;
       }
       if (d?.kind === "box" && (this.front_.box || this.front_.ghosts.length)) {
@@ -1431,6 +1588,9 @@ export class TrellisView {
       case "e":
         this.toggleExport();
         return true;
+      case "?":
+        this.toggleHelp();
+        return true;
       case "r":
       case "0":
         this.resetZoom();
@@ -1457,6 +1617,11 @@ export class TrellisView {
         this.setFocus(this.pointerPanel, true);
         return true;
       case "Escape":
+        if (!this.help.hidden) {
+          this.toggleHelp(false);
+          this.root.focus();
+          return true;
+        }
         if (!this.exportMenu.hidden) {
           this.toggleExport(false);
           return true;
@@ -1687,7 +1852,6 @@ export class TrellisView {
     const b = this.brush;
     const legend = toggleLegend(b?.legend ?? null, index, level, add);
     this.setBrush({ x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend }, true);
-    this.selectedNotice();
   }
 
   /** The chosen legend entries stand out; the others fade while some are chosen. */
@@ -1773,6 +1937,7 @@ export class TrellisView {
     this.exportMenu.hidden = !show;
     this.exportButton.setAttribute("aria-expanded", String(show));
     if (!show) return;
+    this.toggleHelp(false);
     this.hideTip();
     const actions: [string, string, ExportHow][] = [];
     if (canCopyImages()) actions.push(["Copy image", "a PNG, to paste into slides", "copy"]);

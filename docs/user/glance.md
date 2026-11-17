@@ -11,9 +11,13 @@ Trellis(cars, wrap="origin", cols=2, panel_height=150,
 ```
 
 1. **Title**: `title=`.
-2. **Toolbar**: select, box zoom, fit y, reset, export and full screen. Each has a key;
-   see [Mouse and keys](reference/mouse-and-keys.md#the-toolbar). Export copies or saves
-   an image of the plot: see [Share a plot](how-to/share.md#images-for-slides-and-reports).
+2. **Toolbar**: what a drag does (pan, box zoom or select), then fit y, reset, export,
+   help and full screen. Each has a key; see
+   [Mouse and keys](reference/mouse-and-keys.md#the-toolbar). Export copies or saves an
+   image of the plot: see [Share a plot](how-to/share.md#images-for-slides-and-reports).
+   Help (++question++) lists the keys and says which renderer draws the plot, WebGPU,
+   WebGL2 or Canvas 2D ([How the plot is drawn](explanation/drawing.md)). Once the plot
+   is zoomed, selected or filtered, a chip beside the toolbar says so, with its way back.
 3. **Strip**: the value of the facet column for the panel under it (`wrap=`, or `row=`
    and `col=` for a grid). With a panel opened, it holds *All panels* and the previous and
    next buttons. See [Choose a facet layout](how-to/layout.md).
@@ -25,5 +29,3 @@ Trellis(cars, wrap="origin", cols=2, panel_height=150,
 6. **X axis**: the same, for x.
 7. **Legend**: a colour per category, or a colour scale for numbers as here. Click an
    entry to select its marks. See [Colours, legends and order](how-to/colours.md).
-8. **Renderer**: WebGPU, WebGL2 or Canvas 2D, shown when the pointer is over the plot. See
-   [How the plot is drawn](explanation/drawing.md).

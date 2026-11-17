@@ -99,7 +99,7 @@ A page from `save_html` (or `to_html`) has no Python to ask, so it holds every p
 data: all its pages turn, sort and filter as in the notebook.
 
 Two things count only the panels whose data the browser has: `fit_y=True` with a shared
-y fits the panels sent, and the count of selected marks in the corner is of the marks
+y fits the panels sent, and the count of selected marks in the header is of the marks
 sent. `selected()` in Python uses every row.
 
 ## The page's size

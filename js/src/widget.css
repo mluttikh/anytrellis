@@ -228,19 +228,6 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   color: var(--atr-muted);
   z-index: 3;
 }
-.atr-badge {
-  position: absolute;
-  right: 6px;
-  bottom: 2px;
-  font-size: 10px;
-  color: var(--atr-muted);
-  opacity: 0;
-  transition: opacity 0.2s;
-  pointer-events: none;
-}
-.atr-root:hover .atr-badge {
-  opacity: 0.7;
-}
 
 /* header: the title, the way back from an opened panel, and the toolbar */
 .atr-header {
@@ -309,19 +296,62 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 .atr-link:hover {
   text-decoration: underline;
 }
+/* the toolbar: icons in the muted colour at rest (over 3:1 on the background, WCAG
+   1.4.11), the text colour on hover and focus */
 .atr-toolbar {
   display: flex;
+  align-items: center;
   gap: 2px;
   flex: none;
   margin-left: auto;
-  opacity: 0.45;
-  transition: opacity 0.15s;
 }
-.atr-root:hover .atr-toolbar,
-.atr-root:focus-within .atr-toolbar,
-.atr-root.atr-fullscreen .atr-toolbar,
-.atr-root.atr-open .atr-toolbar {
-  opacity: 1;
+/* the drag mode: one of three, always one on */
+.atr-segmented {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  margin-right: 4px;
+  border: 1px solid var(--atr-border);
+  border-radius: 5px;
+}
+.atr-segmented .atr-button {
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: none;
+  border-radius: 3px;
+}
+.atr-segmented .atr-button[aria-checked="true"] {
+  color: var(--atr-bg);
+  background: var(--atr-muted);
+}
+.atr-segmented .atr-button[aria-checked="true"]:hover {
+  color: var(--atr-bg);
+  background: var(--atr-text);
+}
+/* what differs from the start (zoomed, selected, filtered), each with its way back */
+.atr-chips {
+  display: flex;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.atr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--atr-border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--atr-muted);
+  white-space: nowrap;
+}
+.atr-chip .atr-link {
+  font-size: 11px;
+  padding: 0 6px 0 2px;
 }
 /* buttons: 24 px squares (WCAG 2.2 target size) */
 .atr-button {
@@ -342,7 +372,8 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 .atr-button[hidden] {
   display: none;
 }
-.atr-button:hover:not(:disabled) {
+.atr-button:hover:not(:disabled),
+.atr-button:focus-visible {
   color: var(--atr-text);
   border-color: var(--atr-border);
   background: var(--atr-panel);
@@ -424,6 +455,69 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 }
 .atr-export[hidden] {
   display: none;
+}
+/* the keys and mouse (?): over the plot, under the toolbar */
+.atr-help {
+  position: absolute;
+  top: 28px;
+  right: 4px;
+  z-index: 4;
+  box-sizing: border-box;
+  width: min(560px, calc(100% - 8px));
+  max-height: calc(100% - 32px);
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--atr-border);
+  border-radius: 6px;
+  background: var(--atr-bg);
+  color: var(--atr-text);
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.atr-help[hidden] {
+  display: none;
+}
+.atr-help:focus {
+  outline: none;
+}
+.atr-help-close {
+  float: right;
+  margin: -4px -6px 0 4px;
+}
+.atr-help-lead,
+.atr-help-about {
+  color: var(--atr-muted);
+}
+.atr-help-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin: 6px 0;
+}
+.atr-help-table {
+  flex: 1 1 220px;
+  border-collapse: collapse;
+}
+.atr-help-table caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 2px 0 4px;
+}
+.atr-help-table th,
+.atr-help-table td {
+  padding: 2px 8px 2px 0;
+  text-align: left;
+  vertical-align: top;
+  font-weight: normal;
+}
+.atr-help-table th {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--atr-text);
+}
+.atr-help-table td {
+  color: var(--atr-muted);
 }
 .atr-export-item {
   display: flex;

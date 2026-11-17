@@ -39,13 +39,31 @@ scale: with `share_y="row"`, zooming the left axis of a row zooms that row. With
 | ++backspace++ | back to all panels |
 | ++e++ | the Export menu: copy, download or save an image |
 | ++f++ | full screen, and back |
+| ++question++ | the keys and mouse, the renderer drawing the plot and the anytrellis version |
 
 ## The toolbar
 
-The buttons at the top right do the same as keys: select (++s++), box zoom (++z++), fit y
-(++y++), reset (++r++), export (++e++) and full screen (++f++). With a panel opened, the strip over it has
-*All panels* and the previous and next buttons. Over a paged wrap, a bar turns the pages,
-sorts the panels and filters them ([Page through many panels](../how-to/pages.md)).
+The buttons at the top right do the same as keys. The first three choose what a drag
+does, one of them always on: pan, box zoom (++z++) or select (++s++); with one focused, the
+arrow keys move along them. Then fit y (++y++), reset (++r++), export (++e++), the keys
+and mouse (++question++) and full screen (++f++). With a panel opened, the strip over it
+has *All panels* and the previous and next buttons. Over a paged wrap, a bar turns the
+pages, sorts the panels and filters them ([Page through many panels](../how-to/pages.md)).
+
+## What the plot shows
+
+When the plot no longer shows what it started with, the header says so, beside the
+toolbar, each with its way back:
+
+| Chip | Button |
+| --- | --- |
+| Zoomed in x (y, x and y) | Reset: the zoom the plot started with |
+| 267 of 693 marks selected | Clear: no selection |
+| Selected in a linked plot | Clear: that plot's selection |
+| 2 filters: 12 of 40 panels | Clear: the paged wrap's filters and name search |
+
+A plot scrolled by accident, or a selection made a while ago, then explains itself. y
+fitted to the data in view (++y++) is not counted as a zoom: its button shows it.
 
 ## Selecting
 
