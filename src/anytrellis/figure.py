@@ -23,6 +23,7 @@ from xml.sax.saxutils import escape
 import numpy as np
 
 from anytrellis.codec import DTYPES, Buffers
+from anytrellis.formats import axis_format, number_format
 from anytrellis.pages import page_list
 from anytrellis.theme import PRESETS
 
@@ -65,6 +66,8 @@ TITLE_SIZE = FONT_SIZE * 1.15
 CAPTION_SIZE = 11
 """The caption's font size (widget.css .atr-caption)."""
 FOCUS_MIN = 320
+RIGHT_MOST = 0.35
+"""A legend right of the plot takes at most this share of its width."""
 FOCUS_MAX = 720
 """An opened panel's plot is about the grid's height, within these (px)."""
 FADED = 0.15
@@ -180,8 +183,18 @@ def y_tick_count(kind: str, lo: float, hi: float, h: float) -> int:
 
 
 def ticks(kind: str, lo: float, hi: float, origin: float, count: int,
-          levels: list[str] | None = None) -> list[Tick]:  # fmt: skip
-    """Ticks over [lo, hi] (axis units relative to ``origin``), about ``count`` of them."""
+          levels: list[str] | None = None, format: str | None = None) -> list[Tick]:  # fmt: skip
+    """Ticks over [lo, hi] (axis units relative to ``origin``), about ``count`` of them,
+    labelled by ``format`` when one is given (formats.py)."""
+    out = _placed_ticks(kind, lo, hi, origin, count, levels)
+    f = axis_format(kind, format)
+    if f is None:
+        return out
+    return [(v, f(10 ** (v + origin) if kind == "log" else v + origin)) for v, _ in out]
+
+
+def _placed_ticks(kind: str, lo: float, hi: float, origin: float, count: int,
+                  levels: list[str] | None) -> list[Tick]:  # fmt: skip
     if not (hi > lo) or not math.isfinite(lo) or not math.isfinite(hi):
         return []
     count = max(1, count)
@@ -457,7 +470,8 @@ def _y_labels_width(spec: dict[str, Any], domain: list[float], h: float | None) 
     y = spec["y"]
     count = (1000 if y["kind"] == "band" else 5 if h is None
              else y_tick_count(y["kind"], domain[0], domain[1], h))  # fmt: skip
-    labels = ticks(y["kind"], domain[0], domain[1], y["origin"], count, y["levels"])
+    labels = ticks(y["kind"], domain[0], domain[1], y["origin"], count, y["levels"],
+                   y.get("format"))  # fmt: skip
     return math.ceil(max([0.0, *(text_width(s) for _, s in labels)])) + TICK + 4
 
 
@@ -1004,13 +1018,14 @@ def _x_ticks(spec: dict[str, Any], v: _View, mode: str = "flat") -> list[Tick]:
         per = v.rect.w / shown
         room = 0 if mode == "wrap" else FONT_SIZE * 1.5 if mode == "angle" else longest * 7.2 + 10
         count = math.floor(shown / max(1, math.ceil(room / per)))
-    return ticks(ax["kind"], v.x[0], v.x[1], ax["origin"], max(2, count), ax["levels"])
+    return ticks(ax["kind"], v.x[0], v.x[1], ax["origin"], max(2, count), ax["levels"],
+                 ax.get("format"))  # fmt: skip
 
 
 def _y_ticks(spec: dict[str, Any], v: _View) -> list[Tick]:
     ax = spec["y"]
     count = y_tick_count(ax["kind"], v.y[0], v.y[1], v.rect.h)
-    return ticks(ax["kind"], v.y[0], v.y[1], ax["origin"], count, ax["levels"])
+    return ticks(ax["kind"], v.y[0], v.y[1], ax["origin"], count, ax["levels"], ax.get("format"))
 
 
 def _hex(rgb: Any) -> str:
@@ -1514,9 +1529,10 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
                     state = "on" if i in chosen["levels"] else "off"
                 entries.append(_Entry("item", label, color, state=state))
         else:
-            entries += [_Entry("text", _legend_label(lg.get("lo", 0))),
+            end = number_format(lg["format"]) if lg.get("format") else _legend_label
+            entries += [_Entry("text", end(lg.get("lo", 0))),
                         _Entry("gradient", colors=tuple(lg["colors"])),
-                        _Entry("text", _legend_label(lg.get("hi", 1)))]  # fmt: skip
+                        _Entry("text", end(lg.get("hi", 1)))]  # fmt: skip
         groups.append(entries)
     return groups
 
@@ -1579,6 +1595,14 @@ def _legend_below(groups: list[list[_Entry]], width: float) -> tuple[list[_Place
             tallest = max(tallest, h)
         y += tallest + 4
     return placed, y - 4 + 6
+
+
+def legend_width(groups: list[list[_Entry]], most: float) -> float:
+    """A legend right of the plot: as wide as its widest group set as a list (a category's
+    entries a line each), its padding included, at most ``most``."""
+    widths = [(_column(g) if any(e.kind == "item" for e in g) else _wrapped(g, most))[1]
+              for g in groups]  # fmt: skip
+    return min(most, math.ceil(max(widths, default=0.0)) + 8)
 
 
 def _legend_inset(groups: list[list[_Entry]], spare: Rect) -> list[_Placed] | None:
@@ -1691,14 +1715,33 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     focus_name = plot.focused
     focused = names.index(focus_name) if focus_name in names else None
     brush = plot._current_selection()
-    groups = _legend_groups(spec, brush)
+    position = spec.get("legend_position") or "auto"
+    groups = [] if position == "none" else _legend_groups(spec, brush)
 
     placed: list[_Placed] = []
     legend_h = 0.0
     page = _page(plot, spec)
-    if focused is None:
+
+    def focus_height(legend_h: float) -> float:
+        # with a shape (aspect): at most FOCUS_MAX high, the layout keeping the shape
+        most = FOCUS_MAX if panel_shape(spec) else layout(spec, width).height
+        return stage_h - legend_h if stage_h is not None else max(FOCUS_MIN, min(most, FOCUS_MAX))
+
+    def plot_layout(w: float, legend_h: float) -> Layout:
+        if focused is not None:
+            return layout(spec, w, focus_height(legend_h), focused)
+        return layout(spec, w, None if stage_h is None else stage_h - legend_h, page=page)
+
+    right = None
+    if position == "right" and groups:
+        # a column right of the plot, the plot narrowed for it (layout as wide as the rest)
+        lw = legend_width(groups, width * RIGHT_MOST)
+        lay = plot_layout(width - lw, 0.0)
+        right = _legend_inset(groups, Rect(width - lw, 0, lw, lay.height))
+        placed = right or []
+    if right is None and focused is None:
         lay = layout(spec, width, stage_h, page=page)
-        spare = None if spec.get("legend_position") == "bottom" else lay.spare
+        spare = lay.spare if position == "auto" else None
         inset = _legend_inset(groups, spare) if groups and spare is not None else None
         if inset is not None:
             placed = inset
@@ -1706,14 +1749,12 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
             placed, legend_h = _legend_below(groups, width)
             if stage_h is not None:
                 lay = layout(spec, width, stage_h - legend_h, page=page)
-        _note_sorted(spec, lay, plot.paging)
-    else:
+    elif right is None:
         if groups:
             placed, legend_h = _legend_below(groups, width)
-        # with a shape (aspect): at most FOCUS_MAX high, the layout keeping the shape
-        most = FOCUS_MAX if panel_shape(spec) else layout(spec, width).height
-        h = stage_h - legend_h if stage_h is not None else max(FOCUS_MIN, min(most, FOCUS_MAX))
-        lay = layout(spec, width, h, focused)
+        lay = plot_layout(width, legend_h)
+    if focused is None:
+        _note_sorted(spec, lay, plot.paging)
     inset_legend = bool(placed) and legend_h == 0
 
     total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box

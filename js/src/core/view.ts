@@ -41,6 +41,7 @@ import { type Brush, type Highlight, type Selection, filled, highlighted, select
 
 export type { Highlight } from "./selection";
 import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
+import { numberFormat } from "./format";
 import { formatValue } from "./ticks";
 import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type TrellisSpec, isMark } from "./types";
 
@@ -136,6 +137,8 @@ const HOVER_RADIUS = 10;
 /** An opened panel's height (not full screen): the grid's, within these bounds. */
 const FOCUS_MIN = 320;
 const FOCUS_MAX_SCREEN = 0.85;
+/** A legend right of the plot takes at most this share of its width (figure.py: RIGHT_MOST). */
+const RIGHT_MOST = 0.35;
 /** A box flipping between two widths at most this far apart (px) keeps the narrower: a
  * scrollbar that comes and goes with the plot's height (17 px on Windows). */
 const FLIP_MAX = 30;
@@ -1007,27 +1010,47 @@ export class TrellisView {
       const text = this.header.offsetHeight + this.subtitle.offsetHeight + this.caption.offsetHeight;
       height = Math.max(200, this.root.clientHeight - pad - text - 4);
     }
+    const position = this.spec.legend_position ?? "auto";
+    // "right": a column right of the plot, the plot narrowed for it; under the plot when it
+    // doesn't fit there
+    const right = position === "right" && this.spec.legends.length > 0;
+    const legendW = right ? this.legendWidth(width) : 0;
+    let lay: Layout | null = null;
     if (this.focused === null) {
       const page = this.pagePanels();
-      this.lay = computeLayout(this.spec, { ...base, height, page });
-      const spare = this.spec.legend_position === "bottom" ? null : this.lay.spare;
-      if (!this.placeLegend(spare) && height !== null) {
-        // under the plot after all: full screen leaves it room
-        this.lay = computeLayout(this.spec, { ...base, height: height - this.legend.offsetHeight, page });
+      let placed = false;
+      if (right) {
+        lay = computeLayout(this.spec, { ...base, width: width - legendW, height, page });
+        placed = this.placeLegend({ x: width - legendW, y: 0, w: legendW, h: lay.height });
       }
-      this.gridHeight = this.lay.height;
-      this.noteSorted(this.lay);
+      if (!placed) {
+        lay = computeLayout(this.spec, { ...base, height, page });
+        const spare = position === "auto" ? lay.spare : null;
+        if (!this.placeLegend(spare) && height !== null) {
+          // under the plot after all: full screen leaves it room
+          lay = computeLayout(this.spec, { ...base, height: height - this.legend.offsetHeight, page });
+        }
+      }
+      this.gridHeight = lay!.height;
+      this.noteSorted(lay!);
       this.empty.hidden = page === null || page.length > 0;
     } else {
       this.empty.hidden = true;
-      this.placeLegend(null);
-      if (height !== null) height -= this.legend.offsetHeight;
       if (height === null) this.gridHeight = computeLayout(this.spec, base).height;
       // with a shape (aspect): at most this high, the layout keeping the shape within it
       const most = panelShape(this.spec) ? window.innerHeight * FOCUS_MAX_SCREEN : this.gridHeight;
-      const h = height ?? Math.max(FOCUS_MIN, Math.min(most, window.innerHeight * FOCUS_MAX_SCREEN));
-      this.lay = computeLayout(this.spec, { ...base, height: h, focused: this.focused });
+      const focusH = (legendH: number): number => (height !== null ? height - legendH : Math.max(FOCUS_MIN, Math.min(most, window.innerHeight * FOCUS_MAX_SCREEN)));
+      let placed = false;
+      if (right) {
+        lay = computeLayout(this.spec, { ...base, width: width - legendW, height: focusH(0), focused: this.focused });
+        placed = this.placeLegend({ x: width - legendW, y: 0, w: legendW, h: lay.height });
+      }
+      if (!placed) {
+        this.placeLegend(null);
+        lay = computeLayout(this.spec, { ...base, height: focusH(this.legend.offsetHeight), focused: this.focused });
+      }
     }
+    this.lay = lay!;
     const h = this.lay.height;
     this.stage.style.height = `${h}px`;
     let resized = false;
@@ -1520,8 +1543,8 @@ export class TrellisView {
     // a bar's or a stacked area's own value: from its base
     const isBar = layer.spec.type === "bars" || layer.spec.type === "area";
     const hide = layer.spec.hide ?? [];
-    if (!hide.includes("x")) rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels)]);
-    if (!hide.includes("y")) rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels)]);
+    if (!hide.includes("x")) rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format)]);
+    if (!hide.includes("y")) rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format)]);
     const legend = layer.spec.color.legend;
     if (layer.codes && legend !== null) {
       const lg = spec.legends[legend];
@@ -1586,6 +1609,17 @@ export class TrellisView {
 
   /** The legend in `spare` (a wrap's empty cells) if it fits there, as a list or else in
    * rows; under the plot otherwise. True when it went in. */
+  /** The legend's width as a column right of the plot: its widest group, its entries a
+   * line each, at most RIGHT_MOST of the plot's width. */
+  private legendWidth(width: number): number {
+    const lg = this.legend;
+    if (lg.parentElement !== this.stage) this.stage.append(lg);
+    lg.classList.add("atr-inset");
+    lg.classList.remove("atr-inset-rows");
+    Object.assign(lg.style, { left: "0px", top: "0px", width: "max-content", height: "auto" });
+    return Math.min(Math.floor(width * RIGHT_MOST), Math.ceil(lg.getBoundingClientRect().width));
+  }
+
   private placeLegend(spare: Rect | null): boolean {
     const lg = this.legend;
     if (spare && this.spec?.legends.length) {
@@ -1637,11 +1671,12 @@ export class TrellisView {
       } else {
         const bar = el("span", "atr-gradient");
         bar.style.background = `linear-gradient(to right, ${lg.colors.join(", ")})`;
-        box.append(el("span", "atr-legend-item", fmt(lg.lo ?? 0)), bar, el("span", "atr-legend-item", fmt(lg.hi ?? 1)));
+        const end = lg.format ? numberFormat(lg.format) : fmt;
+        box.append(el("span", "atr-legend-item", end(lg.lo ?? 0)), bar, el("span", "atr-legend-item", end(lg.hi ?? 1)));
       }
       this.legend.append(box);
     });
-    this.legend.style.display = legends.length ? "flex" : "none";
+    this.legend.style.display = legends.length && this.spec?.legend_position !== "none" ? "flex" : "none";
     this.updateLegend();
   }
 
@@ -1706,7 +1741,7 @@ export class TrellisView {
     const front: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts };
     drawFront(ctx, this.spec, this.lay, views, this.theme, front);
     ctx.restore();
-    if (this.spec.legends.length) paintHtml(ctx, this.legend, origin);
+    if (this.spec.legends.length && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);
     paintHtml(ctx, this.caption, origin);
   }
 

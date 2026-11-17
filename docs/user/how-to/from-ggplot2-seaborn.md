@@ -30,6 +30,9 @@ redo well-known figures of both.
 | `fct_reorder(f, x, median)` | `.order("f", by="median", of="x")` |
 | `labs(title =, subtitle =, caption =, x =, y =)` | `Trellis(..., title=, subtitle=, caption=, x_title=, y_title=)` |
 | `labs(dictionary =)` (4.0) | `Trellis(..., labels={"mpg": "Fuel use (mpg)"})` |
+| `scale_y_continuous(limits = c(0, NA))`, `coord_cartesian()` | `.limits(y=(0, None))` |
+| `scale_x_continuous(labels = scales::label_comma())`, `scale_x_date(date_labels =)` | `.format(x=",.0f")`, `.format(x="%b %Y")` |
+| `theme(legend.position = "right")`, `guides(colour = "none")` | `.legend("right")`, `.legend("none")` |
 
 ```r
 ggplot(penguins, aes(flipper_length_mm, body_mass_g, colour = sex)) +

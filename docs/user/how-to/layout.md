@@ -247,8 +247,15 @@ in the notebook, in a saved page and in `save_svg` / `save_png`.
 
 ## The legend's place
 
-`legend="auto"` (the default) puts it in a wrap's empty cells when it fits, and under the
-plot otherwise; `legend="bottom"` always puts it under the plot.
+```python
+plot.legend("right", title="Cylinders")
+```
+
+`"auto"` (the default) puts it in a wrap's empty cells when it fits, and under the plot
+otherwise; `"bottom"` always puts it under the plot; `"right"` in a column right of the
+plot, the panels narrowed to make room (under the plot when it is too tall for that);
+`"none"` leaves it out. `Trellis(legend=...)` takes the same. `title=` names it, by
+default the colour column's label; with several colour columns, give a dict by column.
 
 ## One panel at a time
 

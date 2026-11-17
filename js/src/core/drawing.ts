@@ -64,12 +64,12 @@ export function xTicks(spec: TrellisSpec, v: PanelView, mode: XLabels = "flat", 
     const room = mode === "wrap" ? 0 : mode === "angle" ? fs * 1.5 : longest * 7.2 + 10;
     count = Math.floor(shown / Math.max(1, Math.ceil(room / per)));
   }
-  return ticks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, Math.max(2, count), spec.x.levels);
+  return ticks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, Math.max(2, count), spec.x.levels, spec.x.format);
 }
 
 export function yTicks(spec: TrellisSpec, v: PanelView): Tick[] {
   const count = yTickCount(spec.y.kind, v.y[0], v.y[1], v.rect.h);
-  return ticks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, count, spec.y.levels);
+  return ticks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, count, spec.y.levels, spec.y.format);
 }
 
 /** Which axes draw grid lines (never a band's): as the look says; `auto`, y, and x too for
