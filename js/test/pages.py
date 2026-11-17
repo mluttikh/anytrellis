@@ -24,6 +24,17 @@ def main(out: Path) -> None:
     years.points(x="fertility", y="life_expect", color="region", size=6,
                  tooltip=["country", "pop"])  # fmt: skip
     years.save_html(out / "years.html")
+    labelled = Trellis(gapminder, wrap="year", cols=4, panel_height=150,
+                       title="Fertility and life expectancy, 1955-2005",
+                       subtitle="Each point is a country, five years apart. As families got "
+                       "smaller, people lived longer, in every region, and the regions drew "
+                       "closer together over the fifty years. Brush a panel to follow its "
+                       "countries through the others.",
+                       caption="Source: Gapminder",
+                       labels={"fertility": "Children per woman", "life_expect": "Life expectancy",
+                               "region": "Region"})  # fmt: skip
+    labelled.points(x="fertility", y="life_expect", color="region", size=6)
+    labelled.save_html(out / "labelled.html")
     linked = Trellis(gapminder, wrap="year", cols=4, panel_height=150, link="country",
                      title="Fertility and life expectancy, 1955-2005")  # fmt: skip
     linked.points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])

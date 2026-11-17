@@ -266,6 +266,20 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* the subtitle under the header, the caption under the plot (and its legend) */
+.atr-subtitle {
+  padding: 0 8px 4px;
+  color: var(--atr-muted);
+}
+.atr-caption {
+  padding: 2px 8px 6px;
+  color: var(--atr-muted);
+  font-size: 11px;
+}
+.atr-subtitle[hidden],
+.atr-caption[hidden] {
+  display: none;
+}
 .atr-crumb {
   display: inline-flex;
   align-items: center;

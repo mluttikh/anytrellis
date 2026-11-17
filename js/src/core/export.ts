@@ -451,17 +451,36 @@ export function paintHtml(ctx: CanvasRenderingContext2D, el: Element, origin: DO
     }
     const text = node.nodeType === Node.TEXT_NODE ? (node.textContent ?? "").trim() : "";
     if (!text) continue;
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    const r = range.getBoundingClientRect();
-    if (!r.width) continue;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.fillStyle = cs.color;
     ctx.font = `${cs.fontStyle === "normal" ? "" : `${cs.fontStyle} `}${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, r.left - origin.left, r.top - origin.top + r.height / 2);
+    for (const [line, r] of textLines(node as Text)) ctx.fillText(line, r.left - origin.left, r.top - origin.top + r.height / 2);
     ctx.restore();
   }
+}
+
+/** A text node's lines as the page wraps it, each with its box: the words on one line
+ * together (a subtitle or caption runs over several). */
+function textLines(node: Text): [string, DOMRect][] {
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const rects = range.getClientRects();
+  const whole = range.getBoundingClientRect();
+  if (!whole.width) return [];
+  if (rects.length <= 1) return [[(node.textContent ?? "").trim(), whole]];
+  const lines: [string, DOMRect][] = [];
+  const content = node.textContent ?? "";
+  for (const m of content.matchAll(/\S+/g)) {
+    range.setStart(node, m.index);
+    range.setEnd(node, m.index + m[0].length);
+    const r = range.getBoundingClientRect();
+    if (!r.width) continue;
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(last[1].top - r.top) < r.height / 2) last[0] += ` ${m[0]}`;
+    else lines.push([m[0], r]);
+  }
+  return lines;
 }

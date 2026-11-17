@@ -159,15 +159,38 @@ the trend instead, with the line still drawn around it. Segments that neither ri
 fall don't count, and the shape stays between 0.02 and 5 times as high as wide. `panel_height=` and `height=` take precedence. With
 `load="pages"`, the shape comes from the panels read first and stays as the pages turn.
 
-## Titles
+## Titles, a subtitle and a caption
 
 ```python
-Trellis(cars, wrap="origin", title="Fuel use", x_title="weight (lb)", y_title="miles per gallon")
+plot = Trellis(
+    cars, wrap="origin",
+    title="Fuel use falls with weight in every region",
+    subtitle="Miles per gallon by weight, 1970 to 1982 models",
+    caption="Source: UCI Machine Learning Repository",
+    labels={"mpg": "Fuel use (mpg)", "weight": "Weight (lb)", "cylinders": "Cylinders"},
+)
+plot.points(x="weight", y="mpg", color="cylinders")
 ```
 
-The axis titles default to the column names (a time axis has none: dates say what they
-are); `x_title=""` hides one. The y title sits level over the plot's top left, `↑ miles per
-gallon`, where it reads without tilting your head.
+A title can say what the plot shows; the subtitle under it, what is plotted, in what units,
+over what period; the caption under the plot, where the data come from. Readers remember
+annotated charts better, and the text is part of every image you export, from the page or
+with `save_svg` / `save_png`. A long subtitle or caption wraps.
+
+`labels=` names columns for readers, once for the plot: the axis titles, the legend's title,
+the tooltips, a page column's title and the sort and filter menus show the label in place of
+the name. Code goes on naming columns as they are: `select(color="Europe")`,
+`sort_panels("mean mpg")`. A pairs plot shows the labels on its strips too.
+
+`x_title=` and `y_title=` set an axis title outright, over its label:
+
+```python
+Trellis(cars, wrap="origin", x_title="weight (lb)", y_title="miles per gallon")
+```
+
+A time axis has no title (dates say what they are) unless you give one; `x_title=""` hides
+any. The y title sits level over the plot's top left, `↑ miles per gallon`, where it reads
+without tilting your head.
 
 ## The look
 

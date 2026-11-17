@@ -43,10 +43,26 @@ class Stat:
     """A float per panel (NaN: none) for numbers, a str ("": none) for text."""
     text: list[str]
     """Each value as shown (on the strips, while sorted by it)."""
+    label: str = ""
+    """Its name as shown in the menus (``labels=``; default: its name)."""
 
     def spec(self) -> dict[str, Any]:
         values = [None if isinstance(v, float) and v != v else v for v in self.values]
-        return {"name": self.name, "kind": self.kind, "values": values, "text": self.text}
+        return {"name": self.name, "label": self.label or self.name, "kind": self.kind,
+                "values": values, "text": self.text}  # fmt: skip
+
+
+STAT_KEYS = ("mean", "median", "min", "max", "sd", "trend")
+"""The built-in statistics of a column, named ``"<key> <column>"``."""
+
+
+def stat_label(name: str, label: Callable[[str], str]) -> str:
+    """A statistic's name as shown: a column's label in place of its name (``"mean mpg"``:
+    ``"mean Fuel use (mpg)"``)."""
+    if label(name) != name:
+        return label(name)
+    key, _, column = name.partition(" ")
+    return f"{key} {label(column)}" if key in STAT_KEYS and column else name
 
 
 def builtin_stats(npanels: int, panel_of: np.ndarray, values: np.ndarray, name: str,
@@ -132,7 +148,7 @@ def trends(npanels: int, panel_of: np.ndarray, values: np.ndarray,
 
 def _stat_list(rows: np.ndarray, out: dict[str, np.ndarray], name: str) -> list[Stat]:
     stats = [Stat("rows", "number", rows.tolist(), [str(int(r)) for r in rows])]
-    for key in ("mean", "median", "min", "max", "sd", "trend"):
+    for key in STAT_KEYS:
         if key not in out:
             continue
         vals = out[key].tolist()

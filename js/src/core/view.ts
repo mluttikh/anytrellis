@@ -170,6 +170,8 @@ export class TrellisView {
   /** The Export menu: copy, download or save an image of the plot (e). */
   private readonly exportMenu: HTMLDivElement;
   private readonly legend: HTMLDivElement;
+  private readonly subtitle: HTMLDivElement;
+  private readonly caption: HTMLDivElement;
   private readonly stage: HTMLDivElement;
   private readonly back: HTMLCanvasElement;
   private readonly front: HTMLCanvasElement;
@@ -279,6 +281,10 @@ export class TrellisView {
     this.pager = new Pager((paging) => this.setPaging(paging, true));
     this.pager.el.hidden = true;
     this.legend = el("div", "atr-legend");
+    this.subtitle = el("div", "atr-subtitle");
+    this.subtitle.hidden = true;
+    this.caption = el("div", "atr-caption");
+    this.caption.hidden = true;
     this.stage = el("div", "atr-stage");
     this.back = el("canvas", "atr-canvas");
     this.front = el("canvas", "atr-canvas atr-front");
@@ -290,7 +296,7 @@ export class TrellisView {
     this.empty = el("div", "atr-empty", "No panel matches the filters");
     this.empty.hidden = true;
     this.stage.append(this.back, this.front, this.tip, this.status, this.notice, this.empty);
-    this.root.append(this.header, this.pager.el, this.stage, this.legend, this.badge, this.exportMenu);
+    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.badge, this.exportMenu);
     host.append(this.root);
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
@@ -950,6 +956,10 @@ export class TrellisView {
     const spec = this.spec;
     this.heading.replaceChildren();
     if (spec?.title) this.heading.append(el("span", "atr-title", spec.title));
+    this.subtitle.textContent = spec?.subtitle ?? "";
+    this.subtitle.hidden = !spec?.subtitle;
+    this.caption.textContent = spec?.caption ?? "";
+    this.caption.hidden = !spec?.caption;
     const open = spec !== null && this.focused !== null;
     this.backButton.hidden = !open;
     const paged = !open && !!spec?.pages && this.order !== null;
@@ -994,7 +1004,8 @@ export class TrellisView {
     if (this.isFullscreen()) {
       const css = getComputedStyle(this.root);
       const pad = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
-      height = Math.max(200, this.root.clientHeight - pad - this.header.offsetHeight - 4);
+      const text = this.header.offsetHeight + this.subtitle.offsetHeight + this.caption.offsetHeight;
+      height = Math.max(200, this.root.clientHeight - pad - text - 4);
     }
     if (this.focused === null) {
       const page = this.pagePanels();
@@ -1588,7 +1599,7 @@ export class TrellisView {
     }
     lg.classList.remove("atr-inset", "atr-inset-rows");
     Object.assign(lg.style, { left: "", top: "", width: "", height: "" });
-    if (lg.parentElement !== this.root || lg.nextSibling !== this.badge) this.root.insertBefore(lg, this.badge);
+    if (lg.parentElement !== this.root || lg.nextSibling !== this.caption) this.root.insertBefore(lg, this.caption);
     return false;
   }
 
@@ -1682,6 +1693,7 @@ export class TrellisView {
     const origin = this.root.getBoundingClientRect();
     // the title; an opened panel's name is in its strip (the header's way back is left out)
     for (const e of Array.from(this.heading.querySelectorAll(".atr-title"))) paintHtml(ctx, e, origin);
+    paintHtml(ctx, this.subtitle, origin);
     const stage = this.stage.getBoundingClientRect();
     const views = this.panelViews();
     ctx.save();
@@ -1695,6 +1707,7 @@ export class TrellisView {
     drawFront(ctx, this.spec, this.lay, views, this.theme, front);
     ctx.restore();
     if (this.spec.legends.length) paintHtml(ctx, this.legend, origin);
+    paintHtml(ctx, this.caption, origin);
   }
 
   /** A PNG of the plot as shown, `scale` pixels per CSS pixel. */

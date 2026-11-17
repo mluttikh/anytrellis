@@ -62,6 +62,8 @@ MIN_PANEL = 24
 HEADER = 26
 """The header over the plot (its title), when there is a title."""
 TITLE_SIZE = FONT_SIZE * 1.15
+CAPTION_SIZE = 11
+"""The caption's font size (widget.css .atr-caption)."""
 FOCUS_MIN = 320
 FOCUS_MAX = 720
 """An opened panel's plot is about the grid's height, within these (px)."""
@@ -99,6 +101,23 @@ def text_width(text: str, size: float = FONT_SIZE, *, bold: bool = False) -> flo
         else:
             total += 1000 if o >= 0x2E80 else 556
     return total * size / 1000 * (1.06 if bold else 1.0)
+
+
+def wrap_text(text: str, width: float, size: float = FONT_SIZE) -> list[str]:
+    """``text`` in lines at most ``width`` px wide, broken between words (a longer word: a
+    line of its own, cut); its own line breaks kept."""
+    lines: list[str] = []
+    for para in text.splitlines() or [""]:
+        line = ""
+        for word in para.split():
+            wider = f"{line} {word}" if line else word
+            if line and text_width(wider, size) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = wider
+        lines.append(fit(line, width, size))
+    return lines
 
 
 def fit(text: str, width: float, size: float = FONT_SIZE, *, bold: bool = False) -> str:
@@ -1652,7 +1671,19 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     if width < 100:
         raise ValueError(f"width must be at least 100 px, got {width}")
     header = HEADER if spec["title"] else 0
-    stage_h = None if height is None else height - header
+    # the subtitle under the title, the caption under the plot (widget.css .atr-subtitle,
+    # .atr-caption): wrapped to the width less their padding
+    subtitle = wrap_text(spec.get("subtitle") or "", width - 16) if spec.get("subtitle") else []
+    caption = (
+        wrap_text(spec.get("caption") or "", width - 16, CAPTION_SIZE)
+        if spec.get("caption")
+        else []
+    )
+    sub_h = len(subtitle) * LINE + 4 if subtitle else 0
+    cap_line = CAPTION_SIZE * 1.35
+    cap_h = len(caption) * cap_line + 8 if caption else 0
+    top = header + sub_h
+    stage_h = None if height is None else height - top - cap_h
     if stage_h is not None and stage_h < 60:
         raise ValueError(f"height {height} leaves no room for the plot")
 
@@ -1685,13 +1716,15 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         lay = layout(spec, width, h, focused)
     inset_legend = bool(placed) and legend_h == 0
 
-    total = _round(header + lay.height + legend_h)  # as the page rounds the plot's box
+    total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box
     svg = _Svg(width, total if height is None else float(height))
     svg.add(f'<rect width="100%" height="100%" fill="{th["bg"]}"/>')
     if header:
         svg.text(8, 14, fit(spec["title"], width - 16, TITLE_SIZE), th["text"], size=TITLE_SIZE,
                  bold=True)  # fmt: skip
-    svg.open(f'transform="translate(0 {header})"' if header else 'class="plot"')
+    for k, line in enumerate(subtitle):
+        svg.text(8, header + (k + 0.5) * LINE, line, th["muted"])
+    svg.open(f'transform="translate(0 {_n(top)})"' if top else 'class="plot"')
 
     views = _views(spec, lay, shown)
     marks, texts = _scene(spec, buffers)
@@ -1732,7 +1765,10 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         _draw_legend(svg, placed, 0, th)
     svg.close()
     if placed and not inset_legend:
-        _draw_legend(svg, placed, header + lay.height, th)
+        _draw_legend(svg, placed, top + lay.height, th)
+    for k, line in enumerate(caption):
+        y = top + lay.height + legend_h + 2 + (k + 0.5) * cap_line
+        svg.text(8, y, line, th["muted"], size=CAPTION_SIZE)
     return str(svg)
 
 
