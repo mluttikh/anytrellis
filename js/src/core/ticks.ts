@@ -153,11 +153,38 @@ const FIXED = [
   DAY, 2 * DAY, 7 * DAY,
 ];
 
+/** A time step: fixed (ms), or calendar months or years. */
+type TimeStep = { fixed: number } | { months: number } | { years: number };
+
+/** The time steps from 1 ms to `most` ms, smallest first, each with its length (ms). */
+function timeSteps(most: number): [TimeStep, number][] {
+  const out: [TimeStep, number][] = FIXED.map((ms) => [{ fixed: ms }, ms]);
+  for (const months of [1, 2, 3, 6]) out.push([{ months }, months * 30 * DAY]);
+  for (let p = 1; ; p *= 10) {
+    for (const m of [1, 2, 5]) out.push([{ years: m * p }, m * p * 365.25 * DAY]);
+    if (p * 365.25 * DAY > most) return out;
+  }
+}
+
+/** Time ticks over [lo, hi]: the calendar step nearest the span over `count` (d3's way: a
+ * week of data in a small panel gets 2-day ticks, not one weekly one), smaller while it
+ * gives fewer than two ticks. */
 function timeTicks(lo: number, hi: number, count: number): Tick[] {
   const target = (hi - lo) / count;
+  const steps = timeSteps(target * 10);
+  let best = 0;
+  steps.forEach(([, ms], i) => {
+    if (Math.abs(Math.log(ms / target)) < Math.abs(Math.log(steps[best][1] / target))) best = i;
+  });
+  let out = timeTicksBy(lo, hi, steps[best][0]);
+  for (let i = best - 1; out.length < 2 && i >= 0; i--) out = timeTicksBy(lo, hi, steps[i][0]);
+  return out;
+}
+
+function timeTicksBy(lo: number, hi: number, step: TimeStep): Tick[] {
   const out: Tick[] = [];
-  const fixed = FIXED.find((s) => s >= target);
-  if (fixed !== undefined) {
+  if ("fixed" in step) {
+    const fixed = step.fixed;
     // weeks start on Mondays (1970-01-01 was a Thursday)
     const shift = fixed === 7 * DAY ? 4 * DAY : 0;
     for (let t = Math.ceil((lo - shift) / fixed) * fixed + shift; t <= hi && out.length < 1000; t += fixed) {
@@ -165,8 +192,7 @@ function timeTicks(lo: number, hi: number, count: number): Tick[] {
     }
     return out;
   }
-  const months = [1, 2, 3, 6].find((m) => m * 30 * DAY >= target);
-  if (months !== undefined) {
+  if ("months" in step) {
     const d = new Date(lo);
     for (let y = d.getUTCFullYear(), m = d.getUTCMonth(); out.length < 1000; m++) {
       if (m === 12) {
@@ -175,14 +201,12 @@ function timeTicks(lo: number, hi: number, count: number): Tick[] {
       }
       const t = Date.UTC(y, m, 1);
       if (t > hi) break;
-      if (t >= lo && m % months === 0) out.push({ value: t, label: m === 0 ? String(y) : MONTHS[m] });
+      if (t >= lo && m % step.months === 0) out.push({ value: t, label: m === 0 ? String(y) : MONTHS[m] });
     }
     return out;
   }
-  const years = niceStep(target / (365.25 * DAY), 1);
-  const step = Math.max(1, years);
-  const y0 = Math.ceil(new Date(lo).getUTCFullYear() / step) * step;
-  for (let y = y0; out.length < 1000; y += step) {
+  const y0 = Math.ceil(new Date(lo).getUTCFullYear() / step.years) * step.years;
+  for (let y = y0; out.length < 1000; y += step.years) {
     const t = Date.UTC(y, 0, 1);
     if (t > hi) break;
     if (t >= lo) out.push({ value: t, label: String(y) });

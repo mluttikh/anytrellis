@@ -5,7 +5,7 @@
 // runs (the text colour at low opacity: Bartram & Stone), which axes draw a line, strips
 // filled or as titles, and where the axis titles sit.
 
-import { type Layout, type PanelBox, type Rect, STRIP_PAD, type Strip } from "./layout";
+import { ANGLE_MAX, type Layout, type PanelBox, type Rect, STRIP_PAD, type Strip, type XLabels, wrapLabel } from "./layout";
 import { type Look, lookOf } from "./look";
 import type { PanelMap, TextData } from "./scene";
 import { type Tick, minorTicks, ticks, yTickCount } from "./ticks";
@@ -53,14 +53,16 @@ export function readTheme(el: HTMLElement): Theme {
   };
 }
 
-export function xTicks(spec: TrellisSpec, v: PanelView): Tick[] {
+/** A view's x ticks. Categories: as many as their labels fit side by side (estimated: ~0.6
+ * em per character), every one on two lines, or at 45 degrees as many as are a line apart. */
+export function xTicks(spec: TrellisSpec, v: PanelView, mode: XLabels = "flat", fs = 12): Tick[] {
   let count = Math.max(3, Math.floor(v.rect.w / 80));
   if (spec.x.kind === "band" && spec.x.levels?.length) {
-    // as many categories as their labels fit (estimated: ~0.6 em per character)
     const longest = Math.max(...spec.x.levels.map((l) => l.length));
     const shown = Math.max(1, v.x[1] - v.x[0]);
     const per = v.rect.w / shown;
-    count = Math.floor(shown / Math.max(1, Math.ceil((longest * 7.2 + 10) / per)));
+    const room = mode === "wrap" ? 0 : mode === "angle" ? fs * 1.5 : longest * 7.2 + 10;
+    count = Math.floor(shown / Math.max(1, Math.ceil(room / per)));
   }
   return ticks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, Math.max(2, count), spec.x.levels);
 }
@@ -216,11 +218,30 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
         ctx.lineTo(r.x + r.w, r.y + r.h + 0.5);
       }
       let lastRight = -Infinity;
-      for (const t of xTicks(spec, v)) {
+      const per = v.rect.w / Math.max(1, v.x[1] - v.x[0]); // a band's width
+      for (const t of xTicks(spec, v, layout.xLabels, fs)) {
         const x = v.map.ox + t.value * v.map.sx;
         if (x < r.x - 0.5 || x > r.x + r.w + 0.5) continue;
         ctx.moveTo(Math.round(x) + 0.5, r.y + r.h);
         ctx.lineTo(Math.round(x) + 0.5, r.y + r.h + 4);
+        if (layout.xLabels === "wrap") {
+          // centred in its band, on a second line when it needs one
+          const one = ctx.measureText(t.label).width + 4 <= per;
+          (one ? [t.label] : wrapLabel(t.label)).forEach((line, k) => {
+            ctx.fillText(fit(ctx, line, per - 4), x, r.y + r.h + 4 + fs * (0.75 + 1.2 * k));
+          });
+          continue;
+        }
+        if (layout.xLabels === "angle") {
+          // ending at its tick, running down to the left; cut not to leave the plot
+          ctx.save();
+          ctx.translate(x, r.y + r.h + 4 + fs * 0.5);
+          ctx.rotate(-Math.PI / 4);
+          ctx.textAlign = "right";
+          ctx.fillText(fit(ctx, t.label, Math.min(ANGLE_MAX, (x - 2) / Math.SQRT1_2)), 0, 0);
+          ctx.restore();
+          continue;
+        }
         const w = ctx.measureText(t.label).width;
         // next to a panel's axis: not up to its first label ("AprMar")
         if (x + w / 2 > end) continue;

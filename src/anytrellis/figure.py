@@ -298,20 +298,47 @@ def _utc(year: int, month: int) -> float:
     return (dt.datetime(year, month + 1, 1, tzinfo=dt.UTC) - _EPOCH) / dt.timedelta(milliseconds=1)
 
 
-def _time_ticks(lo: float, hi: float, count: int) -> list[Tick]:
-    target = (hi - lo) / count
-    out: list[Tick] = []
-    fixed = next((s for s in FIXED if s >= target), None)
-    try:
-        if fixed is not None:
-            shift = 4 * DAY if fixed == 7 * DAY else 0  # weeks start on Mondays
-            t = math.ceil((lo - shift) / fixed) * fixed + shift
-            while t <= hi and len(out) < 1000:
-                out.append((float(t), _time_label(t, fixed)))
-                t += fixed
+def _time_steps(most: float) -> list[tuple[str, float, float]]:
+    """The time steps from 1 ms to ``most`` ms, smallest first: (kind, size, length in ms),
+    kind "fixed" (size: ms), "months" or "years" (drawing.ts: timeSteps)."""
+    out = [("fixed", float(ms), float(ms)) for ms in FIXED]
+    out += [("months", float(m), m * 30 * DAY) for m in (1, 2, 3, 6)]
+    p = 1
+    while True:
+        out += [("years", float(m * p), m * p * 365.25 * DAY) for m in (1, 2, 5)]
+        if p * 365.25 * DAY > most:
             return out
-        months = next((m for m in (1, 2, 3, 6) if m * 30 * DAY >= target), None)
-        if months is not None:
+        p *= 10
+
+
+def _time_ticks(lo: float, hi: float, count: int) -> list[Tick]:
+    """The calendar step nearest the span over ``count``, smaller while it gives fewer than
+    two ticks (ticks.ts: timeTicks)."""
+    target = (hi - lo) / count
+    steps = _time_steps(target * 10)
+    best = 0
+    for i, (_, _, ms) in enumerate(steps):
+        if abs(math.log(ms / target)) < abs(math.log(steps[best][2] / target)):
+            best = i
+    out = _time_ticks_by(lo, hi, steps[best][0], steps[best][1])
+    i = best - 1
+    while len(out) < 2 and i >= 0:
+        out = _time_ticks_by(lo, hi, steps[i][0], steps[i][1])
+        i -= 1
+    return out
+
+
+def _time_ticks_by(lo: float, hi: float, kind: str, size: float) -> list[Tick]:
+    out: list[Tick] = []
+    try:
+        if kind == "fixed":
+            shift = 4 * DAY if size == 7 * DAY else 0  # weeks start on Mondays
+            t = math.ceil((lo - shift) / size) * size + shift
+            while t <= hi and len(out) < 1000:
+                out.append((float(t), _time_label(t, size)))
+                t += size
+            return out
+        if kind == "months":
             d = _date(lo)
             y, m = d.year, d.month - 1
             while len(out) < 1000:
@@ -320,19 +347,18 @@ def _time_ticks(lo: float, hi: float, count: int) -> list[Tick]:
                 t = _utc(y, m)
                 if t > hi:
                     break
-                if t >= lo and m % months == 0:
+                if t >= lo and m % size == 0:
                     out.append((t, str(y) if m == 0 else MONTHS[m]))
                 m += 1
             return out
-        step = max(1.0, nice_step(target / (365.25 * DAY), 1))
-        year = math.ceil(_date(lo).year / step) * step
+        year = math.ceil(_date(lo).year / size) * size
         while len(out) < 1000:
             t = _utc(int(year), 0)
             if t > hi:
                 break
             if t >= lo:
                 out.append((t, _js(year)))
-            year += step
+            year += size
     except (OverflowError, ValueError):  # beyond the years datetime knows
         pass
     return out
@@ -398,6 +424,8 @@ class Layout:
     y_title: tuple[float, float] | None
     spare: Rect | None
     x_axis_h: float = 0
+    x_labels: str = "flat"
+    """How a band x axis sets its labels: ``"flat"``, ``"wrap"`` or ``"angle"``."""
     """An x axis's height, its tick labels included."""
 
 
@@ -422,6 +450,44 @@ def look_of(spec: dict[str, Any]) -> dict[str, Any]:
     if isinstance(t, str):
         return PRESETS.get(t, PRESETS["minimal"])
     return {**PRESETS[t.get("base") or "minimal"], **t}
+
+
+ANGLE_MAX = 90
+"""The longest an angled x label gets (px); a longer one is cut."""
+SQRT1_2 = math.sqrt(0.5)
+
+
+def wrap_label(label: str) -> list[str]:
+    """A label on two lines, split at the space nearest its middle (one line: no space)."""
+    spaces = [i for i, c in enumerate(label) if c == " "]
+    if not spaces:
+        return [label]
+    best = spaces[0]
+    for i in spaces[1:]:
+        if abs(i - len(label) / 2) < abs(best - len(label) / 2):
+            best = i
+    return [label[:best], label[best + 1 :]]
+
+
+def x_label_mode(spec: dict[str, Any], panel_w: float, fs: float = FONT_SIZE) -> tuple[str, float]:
+    """How a band x axis ``panel_w`` px wide sets its labels, and the axis's height: side by
+    side when the longest fits its band (estimated, as the ticks thin them), else on two
+    lines when each fits, else at 45 degrees (layout.ts: xLabelMode)."""
+    flat = fs + TICK + 6
+    levels = spec["x"]["levels"] if spec["x"]["kind"] == "band" else None
+    if not levels:
+        return "flat", flat
+    per = panel_w / len(levels)
+    if max(len(lv) for lv in levels) * 7.2 + 10 <= per:
+        return "flat", flat
+
+    def fits(t: str) -> bool:
+        return text_width(t, fs) + 4 <= per
+
+    if all(fits(lv) or all(fits(t) for t in wrap_label(lv)) for lv in levels):
+        return "wrap", flat + _round(fs * 1.2)
+    widest = min(ANGLE_MAX, max(text_width(lv, fs) for lv in levels))
+    return "angle", math.ceil((widest + fs) * SQRT1_2) + TICK + 6
 
 
 def _y_title_room(spec: dict[str, Any], fs: float) -> tuple[float, float]:
@@ -498,6 +564,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
 
     gutters()
     x_axis_h = fs + TICK + 6
+    x_labels = "flat"
     row_has_x = [False] * rows
     for i, p in enumerate(panels):
         if show_x[i] and (p["row"] == rows - 1 or (p["row"] + 1, p["col"]) in at):
@@ -573,6 +640,11 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
             y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], ph))
     gutters()
     pw, ph = panel_size()
+    # categories that don't fit side by side: on two lines or angled, the axis that high
+    x_labels, x_axis_h = x_label_mode(spec, pw, fs)
+    if x_labels != "flat":
+        axis_rows = sum(x_axis_h for r in row_has_x if r)
+        pw, ph = panel_size()
     shift = max(0, math.floor((free_width() - cols * pw) / 2))  # narrowed panels: centred
 
     col_x: list[float] = []
@@ -663,6 +735,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         y_title=_y_title_at(spec, fs, (shift + 4 + fs, centre_y), left + shift),
         spare=spare,
         x_axis_h=x_axis_h,
+        x_labels=x_labels,
     )
 
 
@@ -685,11 +758,13 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
     fs = FONT_SIZE
     p = spec["panels"][index]
     strip_h = _round(fs * 1.5 + 4)
-    x_axis_h = fs + TICK + 6
     x_title_h = _round(fs * 1.4 + 4) if spec["x"]["title"] else 0
     y_title_w, y_title_h = _y_title_room(spec, fs)
     left, right, top, bottom = 4 + y_title_w, 10, 6 + y_title_h, 4 + x_title_h
     total = height if height is not None else 360
+    x_labels, x_axis_h = x_label_mode(
+        spec, width - left - right - _y_labels_width(spec, p["y"], None), fs
+    )
     most = max(MIN_PANEL, math.floor(total - top - strip_h - x_axis_h - bottom - 2))
     h = most
     yw = _y_labels_width(spec, p["y"], h)
@@ -724,6 +799,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
         y_title=_y_title_at(spec, fs, (shift + 4 + fs, rect.y + h / 2), left + shift),
         spare=None,
         x_axis_h=x_axis_h,
+        x_labels=x_labels,
     )
 
 
@@ -900,14 +976,15 @@ def _views(spec: dict[str, Any], lay: Layout, shown: dict[str, Any]) -> list[_Vi
     return out
 
 
-def _x_ticks(spec: dict[str, Any], v: _View) -> list[Tick]:
+def _x_ticks(spec: dict[str, Any], v: _View, mode: str = "flat") -> list[Tick]:
     ax = spec["x"]
     count = max(3, math.floor(v.rect.w / 80))
     if ax["kind"] == "band" and ax.get("levels"):
         longest = max(len(s) for s in ax["levels"])
         shown = max(1.0, v.x[1] - v.x[0])
         per = v.rect.w / shown
-        count = math.floor(shown / max(1, math.ceil((longest * 7.2 + 10) / per)))
+        room = 0 if mode == "wrap" else FONT_SIZE * 1.5 if mode == "angle" else longest * 7.2 + 10
+        count = math.floor(shown / max(1, math.ceil(room / per)))
     return ticks(ax["kind"], v.x[0], v.x[1], ax["origin"], max(2, count), ax["levels"])
 
 
@@ -1180,12 +1257,26 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
             if line_x:
                 d.append(f"M{_n(r.x)} {_n(r.y + r.h + 0.5)}H{_n(r.x + r.w)}")
             last_right = -math.inf
-            for value, label in _x_ticks(spec, v):
+            per = r.w / max(1.0, v.x[1] - v.x[0])  # a band's width
+            for value, label in _x_ticks(spec, v, lay.x_labels):
                 x = v.ox + value * v.sx
                 if x < r.x - 0.5 or x > r.x + r.w + 0.5:
                     continue
                 tx = _round(x) + 0.5
                 d.append(f"M{_n(tx)} {_n(r.y + r.h)}V{_n(r.y + r.h + 4)}")
+                if lay.x_labels == "wrap":  # centred in its band, on two lines when it needs
+                    lines = [label] if text_width(label) + 4 <= per else wrap_label(label)
+                    for k, line in enumerate(lines):
+                        svg.text(x, r.y + r.h + 4 + fs * (0.75 + 1.2 * k), fit(line, per - 4),
+                                 th["muted"], anchor="middle")  # fmt: skip
+                    continue
+                if lay.x_labels == "angle":  # ending at its tick, cut not to leave the plot
+                    svg.open(f'transform="translate({_n(x)} {_n(r.y + r.h + 4 + fs * 0.5)}) '
+                             'rotate(-45)"')  # fmt: skip
+                    svg.text(0, 0, fit(label, min(ANGLE_MAX, (x - 2) / SQRT1_2)), th["muted"],
+                             anchor="end")  # fmt: skip
+                    svg.close()
+                    continue
                 w = text_width(label)
                 if x + w / 2 > end:
                     continue  # next to a panel's axis: not up to its labels

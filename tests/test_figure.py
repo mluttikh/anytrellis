@@ -17,6 +17,7 @@ import pytest
 
 import anytrellis as at
 from anytrellis import Trellis
+from anytrellis.datasets import load
 from anytrellis.figure import (
     DAY,
     FADED,
@@ -24,8 +25,10 @@ from anytrellis.figure import (
     figure_svg,
     fit,
     format_number,
+    layout,
     text_width,
     ticks,
+    wrap_label,
 )
 from anytrellis.synthetic import sales, sensors
 
@@ -154,13 +157,14 @@ def test_categories_logs_bars_and_labels() -> None:
 
 
 def test_x_labels_of_neighbouring_panels_do_not_run_together() -> None:
-    # a month of hours: ticks at Mar 1 and Apr 1, each at a panel's edge
-    data = sensors(stations=3, hours=24 * 31)
+    # two months of hours: ticks at Mar 1, Apr 1 and May 1, the first and last at a panel's
+    # edge
+    data = sensors(stations=3, hours=24 * 61)
     t = Trellis(data, wrap="station", cols=3).line(x="time", y="temp")
     words = texts(figure_svg(t, width=700))
     # the first two panels leave out the label at their right edge (the next panel's
     # first is there); the last keeps it
-    assert words.count("Apr") == 1
+    assert words.count("May") == 1
     assert words.count("Mar") == 3
 
 
@@ -173,7 +177,9 @@ def test_ticks_as_the_browser_writes_them() -> None:
     week = [t[1] for t in ticks("time", 0, 30 * DAY, 0, 5)]
     assert week[0] == "Jan 5"  # 1970-01-05 was a Monday
     months = [t[1] for t in ticks("time", 0, 400 * DAY, 0, 6)]
-    assert months == ["1970", "Apr", "Jul", "Oct", "1971"]  # quarters
+    assert months == ["1970", "Mar", "May", "Jul", "Sep", "Nov", "1971"]  # the nearest step
+    # a week in a small panel: 2-day ticks, not one weekly one
+    assert len(ticks("time", 0, 7 * DAY, 0, 3)) == 4
     assert [t[1] for t in ticks("log", 0, 4, 0, 5)] == ["1", "10", "100", "1000", "10000"]
     assert [t[1] for t in ticks("band", -0.5, 2.5, 0, 10, ["a", "b", "c"])] == ["a", "b", "c"]
 
@@ -206,3 +212,33 @@ def test_a_png_without_resvg_says_how_to_get_it(
     monkeypatch.setitem(sys.modules, "resvg_py", None)
     with pytest.raises(ImportError, match=r"anytrellis\[png\]"):
         temps.save_png(tmp_path / "temps.png")
+
+
+def test_long_categories_wrap_then_angle_rather_than_thin_out() -> None:
+    barley = load("barley")
+    # sites: "University Farm" fits its band on two lines
+    sites = Trellis(barley, col="year").bars(x="site", y="yield")
+    spec, _ = sites._shown_scene()
+    lay = layout(spec, 1000)
+    assert lay.x_labels == "wrap"
+    words = texts(figure_svg(sites, width=1000))
+    # only the labels that need it take two lines
+    assert {"Grand Rapids", "University", "Farm", "Crookston"} <= set(words)
+    # varieties in narrower panels: at 45 degrees, every one shown, a long one cut
+    varieties = Trellis(barley, wrap="site").bars(x="variety", y="yield")
+    spec, _ = varieties._shown_scene()
+    angled = layout(spec, 1000)
+    assert angled.x_labels == "angle"
+    assert angled.x_axis_h > lay.x_axis_h  # the axis as high as the labels
+    svg = figure_svg(varieties, width=1000)
+    assert "rotate(-45)" in svg
+    assert {"Glabron", "Manchuria", "Trebi", "Velvet"} <= set(texts(svg))
+    # short categories: side by side, as before
+    penguins = Trellis(load("penguins"), wrap="island").box(x="species", y="body_mass_g")
+    assert layout(penguins._shown_scene()[0], 1000).x_labels == "flat"
+
+
+def test_a_label_wraps_at_the_space_nearest_its_middle() -> None:
+    assert wrap_label("University Farm") == ["University", "Farm"]
+    assert wrap_label("Wisconsin No. 38") == ["Wisconsin", "No. 38"]
+    assert wrap_label("Velvet") == ["Velvet"]

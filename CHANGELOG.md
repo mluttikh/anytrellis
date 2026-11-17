@@ -8,6 +8,14 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- **Time axes take the nearest calendar step**, as d3 does, not the next larger one, and
+  never fewer than two ticks: a week of data in a narrow panel is labelled every two days,
+  where it showed a single date; a year at six ticks is labelled every two months.
+- **Category labels too long to sit side by side wrap onto two lines, or failing that are
+  set at 45 degrees** (cut at 90 px), instead of being thinned out: every variety of the
+  barley data now shows under its bar, where two of ten did. The x axis grows to hold them,
+  in the browser and in `save_svg` / `save_png`.
+
 - **A new default look**, `theme="minimal"`: panels without a fill, the grid as the text
   colour at 10% opacity and only across y (across x too for points, or when y is a band),
   an x baseline and no y axis line, strips as left-aligned semibold titles with nothing

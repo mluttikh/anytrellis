@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight, gridAxes, labelEnd } from "../src/core/drawing";
-import { layout } from "../src/core/layout";
+import { layout, wrapLabel, xLabelMode } from "../src/core/layout";
 import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
@@ -41,7 +41,15 @@ describe("ticks", () => {
     const weeks = ticks("time", 0, 28 * DAY, origin, 4);
     for (const t of weeks) expect(new Date(t.value + origin).getUTCDay()).toBe(1);
     const months = ticks("time", 0, 365 * DAY, Date.UTC(2026, 0, 1), 6);
-    expect(months.map((t) => t.label)).toEqual(["2026", "Apr", "Jul", "Oct", "2027"]);
+    expect(months.map((t) => t.label)).toEqual(["2026", "Mar", "May", "Jul", "Sep", "Nov", "2027"]);
+  });
+
+  it("takes the nearest time step, and at least two ticks", () => {
+    // a week in a small panel: 2-day ticks, not the one weekly tick rounding up gave
+    const week = ticks("time", 0, 7 * DAY, Date.UTC(2026, 2, 1), 3);
+    expect(week.map((t) => t.label)).toEqual(["Mar 2", "Mar 4", "Mar 6", "Mar 8"]);
+    // two days asked for one tick: still two
+    expect(ticks("time", 0.3 * DAY, 1.9 * DAY, Date.UTC(2026, 2, 1), 1).length).toBeGreaterThanOrEqual(2);
   });
 
   it("thins band ticks to fit", () => {
@@ -836,5 +844,35 @@ describe("looks", () => {
       return b.rect.x - (a.rect.x + a.rect.w);
     };
     expect([gap("minimal"), gap("framed")]).toEqual([6, 10]);
+  });
+});
+
+describe("category labels", () => {
+  const measure = (t: string): number => t.length * 7;
+  const banded = (levels: string[]): TrellisSpec => {
+    const s = spec([panel(0, 0)], 1, 1);
+    return { ...s, x: { ...s.x, kind: "band", levels } };
+  };
+
+  it("sit side by side when they fit, else on two lines, else at 45 degrees", () => {
+    const short = banded(["a", "b", "c"]);
+    expect(xLabelMode(short, 300, { fontSize: 12, measure }).mode).toBe("flat");
+    const two = banded(["Grand Rapids", "University Farm", "Morris"]);
+    const wrap = xLabelMode(two, 300, { fontSize: 12, measure });
+    expect(wrap.mode).toBe("wrap");
+    const long = banded(["Wisconsin No. 38", "Manchuria", "Svansota", "Peatland", "Glabron", "Trebi"]);
+    const angle = xLabelMode(long, 300, { fontSize: 12, measure });
+    expect(angle.mode).toBe("angle");
+    expect(angle.height).toBeGreaterThan(wrap.height);
+    // the layout leaves the axis that much room
+    const l = layout({ ...long, panel_height: 100 }, opts);
+    const at = xLabelMode(long, l.panels[0].rect.w, { fontSize: 12, measure: opts.measure });
+    expect([l.xLabels, l.xAxisHeight]).toEqual([at.mode, at.height]);
+    expect(l.xLabels).not.toBe("flat");
+  });
+
+  it("wrap at the space nearest the middle", () => {
+    expect(wrapLabel("University Farm")).toEqual(["University", "Farm"]);
+    expect(wrapLabel("Velvet")).toEqual(["Velvet"]);
   });
 });
