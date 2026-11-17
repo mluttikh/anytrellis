@@ -25,7 +25,9 @@ Mark = Literal[
 ]  # fmt: skip
 SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar", "horizon")
 FacetMode = Literal["auto", "include", "all", "exclude"]
-Position = Literal["stack", "dodge", "identity"]
+Position = Literal["stack", "fill", "dodge", "identity"]
+STACKED = ("stack", "fill")
+"""Positions that pile a position's values on each other ("fill": then as shares of 1)."""
 
 FACET_MODES = ("auto", "include", "all", "exclude")
 
@@ -62,7 +64,9 @@ class Layer:
     stat: str | None = None
     # lines: steps instead of slopes ("pre", "post" or "mid"), or None
     step: str | None = None
-    # rules: constant positions
+    # points: a random offset within a category band, as a fraction of its width
+    jitter: float = 0.0
+    # rules: constant positions, or (with data) a column's, in each row's panel
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
     dash: list[float] = field(default_factory=list)
@@ -230,11 +234,11 @@ def _steps(pairs: np.ndarray, dots: np.ndarray, panel: np.ndarray, xs: np.ndarra
 
 def area_geometry(
     rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.ndarray, series: np.ndarray,
-    *, stack: bool,
+    *, stack: bool, fill: bool = False,
 ) -> Geometry:  # fmt: skip
     """Areas from each series' line down to 0, or (``stack``) stacked on the series before
-    it at the same x (positives up, negatives down): a trapezoid per segment, split where
-    the line crosses its base."""
+    it at the same x (positives up, negatives down; ``fill``: as shares of the total there):
+    a trapezoid per segment, split where the line crosses its base."""
     xs, ys, ss = x[rows], y[rows], series[rows]
     keep = np.isfinite(xs) & np.isfinite(ys)
     rows, panel, xs, ys, ss = rows[keep], panel[keep], xs[keep], ys[keep], ss[keep]
@@ -243,7 +247,7 @@ def area_geometry(
     if stack and len(ys):
         order = np.lexsort((ss, xs, panel))
         rows, panel, xs, ys, ss = rows[order], panel[order], xs[order], ys[order], ss[order]
-        base, top = _stack(panel, xs, ys)
+        base, top = _stack(panel, xs, ys, fill=fill)
     return _trapezoids(rows, panel, xs, ss, top, base)
 
 
@@ -341,9 +345,16 @@ def bar_geometry(
     codes: np.ndarray | None,
     ncodes: int,
     position: Position,
+    horizontal: bool = False,
 ) -> Geometry:
     """Bars from 0 to y at x, ``width`` of the step between x values wide; with a category
-    colour, stacked (positive up, negative down) or dodged side by side."""
+    colour, stacked (positive up, negative down; ``"fill"``: as shares of each stack's
+    total, so it reaches 1) or dodged side by side. ``horizontal``: x is the value and y the
+    position (from 0 to x at y), as given."""
+    if horizontal:
+        g = bar_geometry(rows, panel, y, x, step=step, width=width, codes=codes, ncodes=ncodes,
+                         position=position)  # fmt: skip
+        return Geometry(g.panel, g.y0, g.x0, g.y1, g.x1, g.rows)
     xs, ys = x[rows], y[rows]
     keep = np.isfinite(xs) & np.isfinite(ys)
     rows, panel, xs, ys = rows[keep], panel[keep], xs[keep], ys[keep]
@@ -355,18 +366,20 @@ def bar_geometry(
         slot = w / ncodes
         x0 = xs - w / 2 + code * slot
         x1 = x0 + slot
-    elif codes is not None and position == "stack":
+    elif position == "fill" or (codes is not None and position == "stack"):
         order = np.lexsort((code, xs, panel))
         rows, panel, xs, ys, code = rows[order], panel[order], xs[order], ys[order], code[order]
         x0, x1 = xs - w / 2, xs + w / 2
-        y0, y1 = _stack(panel, xs, ys)
+        y0, y1 = _stack(panel, xs, ys, fill=position == "fill")
     geom = Geometry(panel, x0, y0, x1, y1, rows)
     return geom.take(np.argsort(geom.panel, kind="stable"))
 
 
-def _stack(panel: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _stack(panel: np.ndarray, xs: np.ndarray, ys: np.ndarray,
+           fill: bool = False) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
     """Cumulative bases within each (panel, x), sorted by both: positives up, negatives
-    down."""
+    down; ``fill``: each side as shares of its total (positives up to 1, negatives down to
+    −1)."""
     n = len(ys)
     y0, y1 = np.zeros(n), np.zeros(n)
     if not n:
@@ -379,9 +392,26 @@ def _stack(panel: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarra
         base = np.r_[0.0, cum][start][group]
         top = cum - base
         pick = np.sign(ys) == sign
+        bottom = np.r_[0.0, cum][:-1] - base  # the sum before it: 0 exactly at a stack's start
+        if fill:
+            sums = np.r_[0.0, cum]
+            total = np.abs(sums[np.r_[start[1:], n]] - sums[start])[group]
+            total = np.where(total > 0, total, 1.0)
+            top, bottom = top / total, bottom / total
         y1[pick] = top[pick]
-        y0[pick] = (top - part)[pick]
+        y0[pick] = bottom[pick]
     return y0, y1
+
+
+def jittered(values: np.ndarray, rows: np.ndarray, amount: float, salt: int) -> np.ndarray:
+    """Values on a category axis moved within their band by up to ``amount`` of its width,
+    by each row's own fixed offset (from its index: the same each time it is drawn)."""
+    h = (rows.astype(np.uint64) + np.uint64(salt)) * np.uint64(0x9E3779B97F4A7C15)
+    h ^= h >> np.uint64(29)
+    h *= np.uint64(0xBF58476D1CE4E5B9)
+    h ^= h >> np.uint64(32)
+    u = (h >> np.uint64(11)).astype(np.float64) / float(1 << 53)
+    return values + (u - 0.5) * amount
 
 
 def step_of(values: list[np.ndarray]) -> float:

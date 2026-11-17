@@ -40,7 +40,7 @@ import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
 import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
 
 export type { Highlight } from "./selection";
-import { type Hit, type LayerData, type PanelMap, type Scene, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
+import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
 import { numberFormat } from "./format";
 import { formatValue } from "./ticks";
 import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type TrellisSpec, isMark } from "./types";
@@ -1516,7 +1516,7 @@ export class TrellisView {
       this.request();
       return;
     }
-    const pt = hitPoint(hit, v.map, x, y);
+    const pt = hitPoint(hit, v.map, x, y, barsAlongY(this.spec));
     const hx = v.map.ox + pt.x * v.map.sx;
     const hy = v.map.oy + pt.y * v.map.sy;
     const c = hit.layer.set.colors;
@@ -1535,7 +1535,7 @@ export class TrellisView {
     this.request();
   }
 
-  private showTip(hit: Hit, p: number, pt: { x: number; y: number; y0: number }, px: number, py: number, v: PanelView): void {
+  private showTip(hit: Hit, p: number, pt: HitPoint, px: number, py: number, v: PanelView): void {
     const spec = this.spec!;
     const layer = hit.layer;
     const rows: [string, string][] = [];
@@ -1543,7 +1543,7 @@ export class TrellisView {
     // a bar's or a stacked area's own value: from its base
     const isBar = layer.spec.type === "bars" || layer.spec.type === "area";
     const hide = layer.spec.hide ?? [];
-    if (!hide.includes("x")) rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format)]);
+    if (!hide.includes("x")) rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x - (pt.x0 ?? 0), spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format)]);
     if (!hide.includes("y")) rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format)]);
     const legend = layer.spec.color.legend;
     if (layer.codes && legend !== null) {

@@ -127,6 +127,8 @@ export interface RuleLayerSpec {
   axis: "x" | "y";
   /** Positions relative to the axis origin. */
   values: number[];
+  /** From data: each value's panel (−1: every panel). Absent or null: every panel. */
+  panels?: number[] | null;
   color: [number, number, number, number];
   width: number;
   dash: number[];

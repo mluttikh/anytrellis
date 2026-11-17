@@ -235,12 +235,27 @@ export function pick(scene: Scene, p: number, map: PanelMap, px: number, py: num
   return best;
 }
 
+/** A hit's data point; ``y0`` (``x0``): a bar's or stacked area's base, its value from it. */
+export interface HitPoint {
+  x: number;
+  y: number;
+  y0: number;
+  x0?: number;
+}
+
+/** Bars along y: categories on y and not on x (as Python decides). */
+export function barsAlongY(spec: { x: { kind: string }; y: { kind: string } }): boolean {
+  return spec.y.kind === "band" && spec.x.kind !== "band";
+}
+
 /** The data point of a hit: for a line, the segment end nearer the pointer. */
-export function hitPoint(hit: Hit, map: PanelMap, px: number, py: number): { x: number; y: number; y0: number } {
+export function hitPoint(hit: Hit, map: PanelMap, px: number, py: number, horizontal = false): HitPoint {
   const c = hit.layer.coords;
   const i = hit.instance;
   const type = hit.layer.spec.type;
   if (type === "rect") return { x: (c[i * 4] + c[i * 4 + 2]) / 2, y: (c[i * 4 + 1] + c[i * 4 + 3]) / 2, y0: 0 };
+  // a bar along y: its end, and its base on x
+  if (type === "bars" && horizontal) return { x: c[i * 4 + 2], x0: c[i * 4], y: (c[i * 4 + 1] + c[i * 4 + 3]) / 2, y0: 0 };
   if (hit.layer.kind === KIND_RECT) return { x: (c[i * 4] + c[i * 4 + 2]) / 2, y: c[i * 4 + 3], y0: c[i * 4 + 1] };
   // y0: an area's base there (its value is y - y0); 0 otherwise
   const base = hit.layer.base;

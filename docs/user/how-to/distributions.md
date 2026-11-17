@@ -23,7 +23,7 @@ print(plot._embed_html())  # markdown-exec: hide
 | `bins=30` | the number of bins over the values' range, or a list of edges |
 | `binwidth=2` | a bin width instead, the edges at its multiples (times: `"7D"`, `"6h"`) |
 | `stat="count"` | `"percent"` of each panel's rows, or `"density"` (an area of 1 per panel) |
-| `position="stack"` | with a colour: stacked, or `"identity"` (overlapping) |
+| `position="stack"` | with a colour: stacked; `"fill"`, as shares of each bin (up to 100%); or `"identity"` (overlapping) |
 
 `stat="percent"` compares the shape of panels with very different numbers of rows. A
 category column as `x` counts its categories.
@@ -62,6 +62,20 @@ print(plot._embed_html())  # markdown-exec: hide
 
 Hover a box for its quartiles, its count and its whiskers' reach; hover an outlier for its
 row (and its `tooltip=` columns). `outliers=False` leaves the points out.
+
+### The values themselves
+
+A box hides how many values it summarises and how they lie. Points over it show them;
+`jitter=` spreads them across their category's band (a fraction of its width) so equal
+values don't hide each other. Each point keeps its place from draw to draw:
+
+```python exec="on" source="above" session="dist" html="true"
+plot = Trellis(cars, wrap="origin", cols=3, panel_height=150, title="Fuel use")
+plot.box(x="cyl", y="mpg", outliers=False)
+plot.points(x="cyl", y="mpg", jitter=0.4, size=4, opacity=0.6, tooltip=["name"])
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
 
 ## Violins
 

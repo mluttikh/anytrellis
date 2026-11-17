@@ -34,6 +34,14 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **Bars along y**: `bars(x="units", y="product")`, with a category y and x not, draws
+  the bars from zero along x, stacked or dodged as upright ones are.
+- **`position="fill"`** on `bars()`, `area()` and `hist()`: each stack as shares of its
+  total, up to 1, on an axis written in percent.
+- **`points(jitter=)`**: points spread across their category's band, up to that fraction
+  of its width, each row in the same place every time it is drawn.
+- **Rules from data**: `rule(targets, y="target")` draws a line per row of a table, in the
+  panel of its facet columns' values (or every panel, without them).
 - **`colormap()`** for number colour columns: `"viridis"` (the default), `"cividis"`,
   `"magma"`, `"Blues"`, `"RdBu"` and `"PuOr"`, each reversed with `"_r"`, or a list of
   colours; and how the values take it, `scale=`: `"linear"`, `"diverging"` (as deep on

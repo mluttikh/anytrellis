@@ -3,7 +3,8 @@
 ## Areas
 
 `area()` fills under a line, down to zero. With a category `color=`, areas stack, so the
-top edge is the total; `position="identity"` overlaps them instead:
+top edge is the total; `position="fill"` stacks them as shares of the total at each x (up
+to 100%), and `position="identity"` overlaps them instead:
 
 ```python exec="on" source="above" session="more" html="true"
 import polars as pl
@@ -79,6 +80,20 @@ of values, across every panel:
 ```python
 plot.rule(y=70, color="#888888", dash=(4, 3))
 plot.rule(x=[1960, 1980, 2000])
+```
+
+A target, a mean or a limit that differs from panel to panel comes from a table: give it
+as the rule's data and name its column. Each row's line goes in the panel of its facet
+columns' values; a table without them puts its lines in every panel:
+
+```python exec="on" source="above" session="more" html="true"
+barley = load("barley")
+targets = barley.group_by("site").agg(target=pl.col("yield").mean())
+plot = Trellis(barley, wrap="site", cols=3, panel_height=170)
+plot.points(x="yield", y="variety", color="year")
+plot.rule(targets, x="target", dash=(4, 3))
+plot
+print(plot._embed_html())  # markdown-exec: hide
 ```
 
 Rules are not selected, and neither are text labels.

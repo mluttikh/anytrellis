@@ -1211,7 +1211,10 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
 def _draw_rule(svg: _Svg, lr: dict[str, Any], v: _View) -> None:
     r = v.rect
     d = []
-    for value in lr["values"]:
+    panels = lr.get("panels") or [-1] * len(lr["values"])
+    for value, at in zip(lr["values"], panels, strict=True):
+        if at >= 0 and at != v.panel:  # from data: its panel's (−1: every panel's)
+            continue
         if lr["axis"] == "x":
             x = _round(v.ox + value * v.sx) + 0.5
             d.append(f"M{_n(x)} {_n(r.y)}V{_n(r.y + r.h)}")

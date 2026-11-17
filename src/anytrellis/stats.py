@@ -249,10 +249,11 @@ def hist_parts(layer: Layer, col: Column, color: Column | None, edges: np.ndarra
             half = (edges[bi + 1] - edges[bi]) * width / 2
             x0, x1 = mid - half, mid + half
         y0, y1 = np.zeros(len(value)), value.copy()
-        if color is not None and layer.position == "stack" and len(value):
+        if color is not None and layer.position in ("stack", "fill") and len(value):
             code = axis_values(out.column(color.name), color_levels[color.name])
             order = np.lexsort((code, bi, p))
-            s0, s1 = _stack(p[order], bi[order].astype(np.float64), value[order])
+            s0, s1 = _stack(p[order], bi[order].astype(np.float64), value[order],
+                            fill=layer.position == "fill")  # fmt: skip
             y0[order], y1[order] = s0, s1
         return _sorted(Geometry(p, x0, y0, x1, y1, np.arange(len(value))))
 
