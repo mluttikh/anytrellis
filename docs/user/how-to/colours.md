@@ -63,12 +63,78 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
-`palette=` also takes a name: `"petroff10"` (the default), `"petroff8"`, `"petroff6"`, or
-`"tab10"` (Tableau's ten colours, the default before, and the classic theme's). Petroff's
-palettes were chosen to stay apart for readers with colour-vision deficiency and ranked by
-a survey of what people prefer; the first colours are the farthest apart, so a plot with
-few categories gets the most distinct ones. Rows whose category is missing get a
-`(missing)` colour of their own.
+`palette=` also takes a name:
+
+| Name | Colours |
+| --- | --- |
+| `"petroff10"` (the default), `"petroff8"`, `"petroff6"` | Petroff's, chosen to stay apart for readers with colour-vision deficiency and ranked by a survey of what people prefer; the first are the farthest apart, so a plot with few categories gets the most distinct ones |
+| `"okabe-ito"` | Okabe and Ito's eight, made for colour-vision deficiency (black last) |
+| `"observable10"` | Observable Plot's, the framed theme's |
+| `"tab10"` | Tableau's ten, the default before and the classic theme's |
+
+Rows whose category is missing get a `(missing)` colour of their own.
+
+### Keep a category's colour
+
+The palette's colours go to the categories in order, so a category's colour depends on
+which others are in the plot. A dict gives categories their own, the same in every plot
+that has them; the other categories take the palette's colours that are left:
+
+```python exec="on" source="above" session="colours" html="true"
+plot = Trellis(cars, wrap="cylinders", cols=5, panel_height=150,
+               palette={"USA": "#d62728", "Europe": "#1f77b4"})
+plot.points(x="weight", y="mpg", color="origin", size=5)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+## Number colours: `colormap()`
+
+A number colour column runs along viridis, lowest to highest. `colormap()` picks another
+colormap and how the values take it:
+
+```python
+plot.colormap("cividis")                         # another colormap
+plot.colormap(["#ffffff", "#d62728"])            # your own, low to high
+plot.colormap(scale="diverging", midpoint=0)     # change from zero
+plot.colormap("Blues", scale="binned", bins=6)   # steps of round width
+plot.colormap(scale="quantile", bins=4)          # four steps, a quarter of the values each
+```
+
+The colormaps are `"viridis"`, `"cividis"` (also for colour-vision deficiency) and
+`"magma"`, dark to light; `"Blues"`, one hue; and `"RdBu"` and `"PuOr"`, which diverge from
+a light middle. `"_r"` reverses any of them (`"viridis_r"`).
+
+A **diverging** scale puts the colormap's middle at `midpoint=` and goes as deep on both
+sides, so equal distances above and below look equally strong; the side with less range
+doesn't reach its end. Its default is `"RdBu_r"`, red above the midpoint:
+
+```python exec="on" source="above" session="colours" html="true"
+gap = load("gapminder")
+change = gap.with_columns(gap=pl.col("life_expect") - pl.col("life_expect").mean())
+plot = Trellis(change, wrap="year", cols=4, panel_height=120,
+               subtitle="Life expectancy above and below the average of all years")
+plot.points(x="fertility", y="life_expect", color="gap", size=5, tooltip=["country"])
+plot.colormap(scale="diverging", midpoint=0)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+A gradient is hard to read a value back from. A **binned** scale gives about `bins=`
+steps of round width (`10–20`, `20–30`, ...), a colour each, and its legend lists them; a
+**quantile** scale gives exactly `bins=` steps with as many values in each, for skewed
+columns such as population. `format(color=)` writes the ranges:
+
+```python exec="on" source="above" session="colours" html="true"
+plot = Trellis(gap, wrap="year", cols=4, panel_height=120)
+plot.points(x="fertility", y="life_expect", color="pop", size=5, tooltip=["country"])
+plot.colormap("cividis", scale="quantile", bins=4).format(color=".2s")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+With a database (`load="pages"`), only a binned scale works: a quantile one needs every
+row's value.
 
 ## Order categories
 
@@ -106,7 +172,7 @@ that colour's marks; Shift+click adds or removes more (see
 [Select data](../tutorials/select.md)).
 
 In a wrap whose last row is not full, the legend goes in the empty cells when it fits;
-`Trellis(..., legend="bottom")` always puts it under the plot.
+`legend()` puts it elsewhere or renames it (see [Layout](layout.md#the-legends-place)).
 
 ## Light and dark
 

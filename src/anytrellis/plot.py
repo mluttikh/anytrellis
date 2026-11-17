@@ -86,9 +86,8 @@ from anytrellis.stats import parts as summary_parts
 from anytrellis.styling import (
     CONTEXT_COLOR,
     MISSING_COLOR,
-    colormap_rgba,
+    NumberScale,
     is_color,
-    palette_colors,
     rgba,
 )
 from anytrellis.summaries import counts as counts_of_rows
@@ -169,9 +168,11 @@ class Trellis:
             (code still names columns as they are: ``pages(sort="mean mpg")``).
         x_title: The x axis title (default: the x column's label or name).
         y_title: The y axis title (default: the y column's label or name).
-        palette: Colours for category colour columns: a list of colours, or a name
-            (``"petroff10"``, ``"petroff8"``, ``"petroff6"``, ``"observable10"``,
-            ``"tab10"``; default: the theme's).
+        palette: Colours for category colour columns: a list of colours, a name
+            (``"petroff10"``, ``"okabe-ito"``, ``"observable10"``, ``"tab10"``, ...; default:
+            the theme's), or a dict giving categories their colours, ``{"Europe":
+            "#1f77b4"}``, so they keep them across plots (the others: the theme's colours
+            that are left, in order). Number colour columns: ``colormap()``.
         legend: ``"auto"``: in a wrap's empty cells after its last panel when it fits there,
             under the plot otherwise; ``"bottom"``: always under the plot; ``"right"``: in
             a column right of the plot (under it when too tall); ``"none"``: no legend. Also
@@ -241,7 +242,7 @@ class Trellis:
         labels: Mapping[str, str] | None = None,
         x_title: str | None = None,
         y_title: str | None = None,
-        palette: str | Sequence[str] | None = None,
+        palette: str | Sequence[str] | Mapping[str, str] | None = None,
         legend: str = "auto",
         strips: str = "nested",
         strip_label: str | None = None,
@@ -254,7 +255,10 @@ class Trellis:
         renderer: str = "auto",
     ) -> None:
         self.theme: Theme = theme_of(theme)
-        if palette is not None:
+        named = _named_colors(palette)  # a dict: a colour per category
+        if isinstance(palette, Mapping):
+            palette = None
+        elif palette is not None:
             Theme(palette=palette)  # an unknown name or colour raises here
         self._data = None if data is None else Table(data)
         if load not in LOADS:
@@ -318,6 +322,8 @@ class Trellis:
         self.palette: str | list[str] | None = (
             palette if isinstance(palette, str) else list(palette) if palette else None
         )
+        self._named_colors: dict[str, str] = named or {}
+        self._number_scale = NumberScale()
         if legend not in LEGENDS:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
         self._legend: dict[str, Any] = {"position": legend, "title": None}
@@ -1215,6 +1221,10 @@ class Trellis:
                 raise TypeError(f"legend(title=...) is a string or a dict, got {title!r}")
             self._legend["title"] = title if isinstance(title, str) else dict(title)
         return self._changed()
+
+    def _color_format(self) -> Callable[[float], str] | None:
+        spec = self._formats.get("color")
+        return number_format(spec) if spec else None
 
     def _legend_title(self, index: int, name: str) -> str:
         """A legend's title: given with ``legend(title=)``, else its column's label."""
@@ -2303,6 +2313,40 @@ class Trellis:
         """The grid's spec as its strips show it (a pairs plot: its columns' labels)."""
         return grid
 
+    def colormap(self, colormap: str | Sequence[str] | None = None, *, scale: str | None = None,
+                 midpoint: float | None = None, bins: int | None = None) -> Self:  # fmt: skip
+        """How number colour columns take their colours.
+
+        ```python
+        t.colormap("cividis")                              # another colormap
+        t.colormap(scale="diverging", midpoint=0)          # change from zero: RdBu, red high
+        t.colormap("Blues", scale="binned", bins=6)        # about six steps of round width
+        t.colormap(scale="quantile", bins=4)               # four steps, as many values each
+        ```
+
+        Args:
+            colormap: ``"viridis"`` (the default), ``"cividis"``, ``"magma"``, ``"Blues"``,
+                ``"RdBu"``, ``"PuOr"``, each reversed with ``"_r"``, or a list of colours,
+                low to high.
+            scale: ``"linear"`` (the default): lowest to highest along the colormap;
+                ``"diverging"``: both sides of ``midpoint`` equally deep, the colormap's
+                middle at it (default colormap: ``"RdBu_r"``); ``"binned"``: steps of
+                round width, a colour each, read back from the legend's ranges;
+                ``"quantile"``: steps holding as many values each.
+            midpoint: The value a diverging scale centres on (default 0).
+            bins: About how many steps a binned scale has, and how many a quantile one
+                has (2 to 20, default 5).
+        """
+        old = self._number_scale
+        self._number_scale = NumberScale(
+            colormap=old.colormap if colormap is None else
+            (colormap if isinstance(colormap, str) else tuple(colormap)),
+            scale=old.scale if scale is None else scale,
+            midpoint=old.midpoint if midpoint is None else float(midpoint),
+            bins=old.bins if bins is None else bins,
+        )  # fmt: skip
+        return self._changed()
+
     def _label(self, name: str) -> str:
         """A column's name as shown: its label (``labels=``), else the name."""
         return self.labels.get(name, name)
@@ -2522,8 +2566,8 @@ class Trellis:
             x_kind = "log"
         if "y" in logs:
             y_kind = "log"
-        colors = _ColorScales(shown, lambda lr: table_of(id(lr)),
-                              self._palette(), given)  # fmt: skip
+        colors = _ColorScales(shown, lambda lr: table_of(id(lr)), self._palette(), given,
+                              self._named_colors, self._number_scale)  # fmt: skip
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
         plain = [lr for lr in marks if lr.mark not in SUMMARIES]
         bars_step = step_of([axis_values(table_of(id(lr)).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
@@ -2689,7 +2733,7 @@ class Trellis:
                     "title": self._legend_title(i, lg["title"]),
                     **({"format": self._formats.get("color")} if lg["kind"] == "number" else {}),
                 }
-                for i, lg in enumerate(colors.legends())
+                for i, lg in enumerate(colors.legends(self._color_format()))
             ],
             "height": self.height,
             "panel_height": self.panel_height,
@@ -2839,9 +2883,8 @@ class Trellis:
                     out = np.full((n, 4), 255, dtype=np.uint8)
                     out[:, :3] = np.round(rgb).astype(np.uint8)
                     return out
-                lo, hi = colors.ranges.get(name, (0.0, 1.0))
                 assert means is not None
-                return colormap_rgba(means, "viridis", lo, hi)
+                return colors.paint(name, means)
             solid = name if name is not None else colors.default(layer, self._plain[id(layer)])
             return np.tile(np.array(rgba(solid), dtype=np.uint8), (n, 1))
 
@@ -3239,6 +3282,19 @@ def _limited(doms: list[tuple[float, float]], limits: tuple[Any, Any] | None, ki
     return out
 
 
+def _named_colors(palette: Any) -> dict[str, str] | None:
+    """``palette={category: colour}``: the categories' colours (each checked); else None."""
+    if not isinstance(palette, Mapping):
+        return None
+    out = {}
+    for level, color in palette.items():
+        if not isinstance(color, str):
+            raise TypeError(f"palette: {level!r} needs a colour string, got {color!r}")
+        rgba(color)
+        out[str(level)] = color
+    return out
+
+
 def _number_format_error(spec: str) -> bool:
     try:
         number_format(spec)
@@ -3293,8 +3349,14 @@ class _ColorScales:
         table_of: Any,
         palette: list[str],
         given: dict[str, tuple[str, ...]],
+        named: dict[str, str] | None = None,
+        numbers: NumberScale | None = None,
     ) -> None:
         self.palette = palette
+        self.named = named or {}
+        """Colours given to categories (``palette={...}``), in every column that has them."""
+        self.numbers = numbers or NumberScale()
+        values: dict[str, list[np.ndarray]] = {}
         self.levels: dict[str, list[str]] = {}
         self.ranges: dict[str, tuple[float, float]] = {}
         self.order: list[str] = []
@@ -3318,6 +3380,9 @@ class _ColorScales:
                     v for v in _reorder(list(column.levels), given.get(name)) if v not in seen
                 )
             elif (whole := table.span(name)) is not None:  # load="pages": of every row
+                if self.numbers.scale == "quantile":
+                    raise ValueError("colormap(scale='quantile') needs every row's value; with "
+                                     "load='pages' use scale='binned'")  # fmt: skip
                 lo, hi = self.ranges.get(name, (np.inf, -np.inf))
                 self.ranges[name] = (min(lo, whole[0]), max(hi, whole[1]))
             else:
@@ -3325,23 +3390,50 @@ class _ColorScales:
                 if len(finite):
                     lo, hi = self.ranges.get(name, (np.inf, -np.inf))
                     self.ranges[name] = (min(lo, finite.min()), max(hi, finite.max()))
+                    values.setdefault(name, []).append(finite)
         # a legend each: numbers with no values have none
         self.order = [n for n in self.order if n in self.levels or n in self.ranges]
         self.colored = bool(self.order)
+        self.breaks: dict[str, list[float] | None] = {
+            name: self.numbers.breaks(lo, hi, np.concatenate(values[name]) if name in values
+                                      else None)
+            for name, (lo, hi) in self.ranges.items()
+        }  # fmt: skip
+
+    def paint(self, name: str, values: np.ndarray) -> np.ndarray:
+        """A number column's values as RGBA bytes on its colour scale."""
+        lo, hi = self.ranges.get(name, (0.0, 1.0))
+        return self.numbers.rgba(values, lo, hi, self.breaks.get(name))
 
     def key(self) -> tuple[Any, ...]:
         """What the colours are made from: the same key, the same colours."""
         return (tuple(self.palette), tuple((k, tuple(v)) for k, v in self.levels.items()),
                 tuple(self.ranges.items()), tuple(self.order),
-                tuple((k, tuple(v.items())) for k, v in self.fixed.items()))  # fmt: skip
+                tuple((k, tuple(v.items())) for k, v in self.fixed.items()),
+                tuple(self.named.items()), self.numbers,
+                tuple((k, tuple(v or ())) for k, v in self.breaks.items()))  # fmt: skip
 
     def colors(self, name: str) -> list[str]:
+        """A category column's colours, a level each: a layer's own (a horizon's bands),
+        the one ``palette={...}`` gives it, or the palette's next, cycling (without the
+        colours given to categories)."""
         levels = self.levels[name]
-        palette = palette_colors(self.palette, len(levels))
         fixed = self.fixed.get(name, {})
-        return [fixed.get(level, c) for level, c in zip(levels, palette, strict=True)]
+        given = set(self.named.values())
+        palette = [c for c in self.palette if c not in given] or self.palette
+        out, k = [], 0
+        for level in levels:
+            if level in fixed:
+                out.append(fixed[level])
+            elif level in self.named:
+                out.append(self.named[level])
+            else:
+                out.append(palette[k % len(palette)])
+                k += 1
+        return out
 
-    def legends(self) -> list[dict[str, Any]]:
+    def legends(self, fmt: Callable[[float], str] | None = None) -> list[dict[str, Any]]:
+        """A legend per colour column; ``fmt``: a stepped scale's ranges (``format(color=)``)."""
         out: list[dict[str, Any]] = []
         for name in self.order:
             if name in self.levels:
@@ -3349,10 +3441,8 @@ class _ColorScales:
                             "colors": self.colors(name)})  # fmt: skip
             elif name in self.ranges:
                 lo, hi = self.ranges[name]
-                from anytrellis.styling import COLORMAPS
-
-                out.append({"title": name, "kind": "number", "colors": COLORMAPS["viridis"],
-                            "lo": float(lo), "hi": float(hi)})  # fmt: skip
+                look = self.numbers.legend(lo, hi, self.breaks.get(name), fmt)
+                out.append({"title": name, **look, "lo": float(lo), "hi": float(hi)})
         return out
 
     def default(self, layer: Layer, index: int) -> str:
@@ -3572,8 +3662,7 @@ def _paint(layer: Layer, table: Table, geom: Geometry, colors: _ColorScales) -> 
         geom.codes = codes[geom.rows]
         geom.rgba = palette[geom.codes]
     else:
-        lo, hi = colors.ranges.get(column.name, (0.0, 1.0))
-        geom.rgba = colormap_rgba(column.values[geom.rows], "viridis", lo, hi)
+        geom.rgba = colors.paint(column.name, column.values[geom.rows])
 
 
 def _layer_spec(

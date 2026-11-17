@@ -34,6 +34,15 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **`colormap()`** for number colour columns: `"viridis"` (the default), `"cividis"`,
+  `"magma"`, `"Blues"`, `"RdBu"` and `"PuOr"`, each reversed with `"_r"`, or a list of
+  colours; and how the values take it, `scale=`: `"linear"`, `"diverging"` (as deep on
+  both sides of `midpoint=`, RdBu with red high by default), `"binned"` (about `bins=`
+  steps of round width) or `"quantile"` (`bins=` steps of as many values each). A stepped
+  scale's legend lists its ranges (`"10–20"`), written by `format(color=)` when given.
+- **`palette="okabe-ito"`** (Okabe and Ito's eight colours), and `palette=` as a dict,
+  `{"USA": "#d62728"}`: those categories keep their colours in every plot, the others take
+  the palette's colours that are left.
 - **`limits(x=, y=)`**: an axis's range, either end `None` for the data's own
   (`limits(y=(0, None))`); times as dates, log axes in their values. Zooming starts there
   and Reset returns there.
