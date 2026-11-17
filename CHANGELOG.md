@@ -6,25 +6,9 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-17
+
 ### Changed
-
-- **The toolbar explains itself.** What a drag does is one control of three, pan, box zoom
-  and select, with the one on filled; they were two toggles that left pan implied. The
-  icons are in the muted colour at full opacity (over 3:1 on the background), the text
-  colour on hover and focus, where they were faded to 45% and looked disabled. Chips beside
-  the toolbar say what differs from the start, "Zoomed in x", "267 of 693 marks selected",
-  "2 filters: 12 of 40 panels", each with its Reset or Clear (the count of a brush released
-  is no longer a passing notice). `?` or the new **?** button shows the keys and mouse,
-  the renderer and the anytrellis version; the renderer's name no longer appears in the
-  plot's corner on hover.
-
-- **Time axes take the nearest calendar step**, as d3 does, not the next larger one, and
-  never fewer than two ticks: a week of data in a narrow panel is labelled every two days,
-  where it showed a single date; a year at six ticks is labelled every two months.
-- **Category labels too long to sit side by side wrap onto two lines, or failing that are
-  set at 45 degrees** (cut at 90 px), instead of being thinned out: every variety of the
-  barley data now shows under its bar, where two of ten did. The x axis grows to hold them,
-  in the browser and in `save_svg` / `save_png`.
 
 - **A new default look**, `theme="minimal"`: panels without a fill, the grid as the text
   colour at 10% opacity and only across y (across x too for points, or when y is a band),
@@ -35,7 +19,22 @@ All notable changes to anytrellis. The format follows
   the panel's name whole and shows the sorted value in lighter type. `theme="classic"`
   keeps the look before ([Upgrading](docs/user/reference/upgrading.md)); images saved from
   Python (`save_svg`, `save_png`) draw both looks the same as the browser.
-
+- **The toolbar explains itself.** What a drag does is one control of three, pan, box zoom
+  and select, with the one on filled; they were two toggles that left pan implied. The
+  icons are in the muted colour at full opacity (over 3:1 on the background), the text
+  colour on hover and focus, where they were faded to 45% and looked disabled. Chips beside
+  the toolbar say what differs from the start, "Zoomed in x", "267 of 693 marks selected",
+  "2 filters: 12 of 40 panels", each with its Reset or Clear (the count of a brush released
+  is no longer a passing notice). `?` or the new **?** button shows the keys and mouse,
+  the renderer and the anytrellis version; the renderer's name no longer appears in the
+  plot's corner on hover.
+- **Time axes take the nearest calendar step**, as d3 does, not the next larger one, and
+  never fewer than two ticks: a week of data in a narrow panel is labelled every two days,
+  where it showed a single date; a year at six ticks is labelled every two months.
+- **Category labels too long to sit side by side wrap onto two lines, or failing that are
+  set at 45 degrees** (cut at 90 px), instead of being thinned out: every variety of the
+  barley data now shows under its bar, where two of ten did. The x axis grows to hold them,
+  in the browser and in `save_svg` / `save_png`.
 - Panels with an `aspect` (banked or a number) keep their shape in full screen, in an
   opened panel and in an image of a given `height`: as large as fits, narrower and centred
   when the height is too low for the whole width. An opened panel is then at most 85% of
@@ -91,15 +90,6 @@ All notable changes to anytrellis. The format follows
   the `smooth()` fits' (a trend, not the noise around it), or without them the `line()`
   layers'. Between 0.02 and 5 times as
   high as wide; with `load="pages"`, kept from the panels read first.
-
-### Fixed
-
-- Lines, areas and bands drawn in other panels than their own (a margin's, or with
-  `facet="all"` or `"exclude"`) no longer join the rows of several panels into one line
-  zigzagging between them: each panel's rows stay a line of their own.
-
-### Added
-
 - `horizon(x, y, bands=3, origin=0, step=None)`: a horizon chart in each panel. A series'
   distance from `origin` is cut into bands of one height, laid over each other and darker
   the farther, blues above the origin and reds below it, so a series shows its highs and
@@ -107,24 +97,24 @@ All notable changes to anytrellis. The format follows
   number reaching the farthest value of any panel); the legend names each band's range,
   and clicking it selects the times a series reaches it. Works with `load="pages"`;
   margins are left empty.
-
-### Added
-
 - `Trellis(margins=)`: a grid's "(all)" panels, as ggplot2's `facet_grid(margins = TRUE)`.
   `True` adds an (all) row under the rows (each panel the rows of its column) and an (all)
   column right of the columns (each panel the rows of its row), with a corner of every
   row; `"row"` or `"col"` adds one. Every layer draws them, summaries computed from their
   rows; a row selected in a margin is selected once. With `empty="blank"` and `page=`;
   not with `load="pages"` or a wrap.
-
-### Added
-
 - `share_x="sliced"` / `share_y="sliced"` (also in `share()`): each panel its own range,
   about its own data, every one as wide as the widest, so a change of 5 looks the same size
   in every panel (lattice's `relation="sliced"`). Zooming one panel zooms all to its width,
   each about its own centre; panning moves one; fitting y keeps them as wide. Bars keep
   their base at 0. With `load="pages"`, the widths come from every panel's range in the
   database. Not on an axis of categories.
+
+### Fixed
+
+- Lines, areas and bands drawn in other panels than their own (a margin's, or with
+  `facet="all"` or `"exclude"`) no longer join the rows of several panels into one line
+  zigzagging between them: each panel's rows stay a line of their own.
 
 ## [0.5.0] - 2026-11-09
 
@@ -340,7 +330,8 @@ The first release.
 - `anytrellis.datasets.load`: six small example datasets, with their sources and licences
   in `datasets/SOURCES.md`; example notebooks for Jupyter and marimo.
 
-[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/mluttikh/anytrellis/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mluttikh/anytrellis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mluttikh/anytrellis/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mluttikh/anytrellis/compare/v0.2.0...v0.3.0

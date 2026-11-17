@@ -4,7 +4,7 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
-## Unreleased
+## 0.6.0
 
 No code stops working; the default look changes.
 
