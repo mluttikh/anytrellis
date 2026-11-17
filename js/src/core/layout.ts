@@ -11,9 +11,11 @@
 // share its level and those outside it. With strip_label, every panel (a grid's too) has a
 // strip of its own naming it, and there are no others.
 //
-// The minimal theme (the default) sets the y title over the plot, at its left, and a grid's
-// row labels level, as wide as they need; the classic theme turns both on their side.
+// The look (look.ts) sets the gap between panels, whether the y title sits over the plot at
+// its left or on its side, where the x title goes, and whether a grid's row labels are level
+// (as wide as they need) or on their side.
 
+import { lookOf } from "./look";
 import { pageList } from "./pages";
 import { ticks, yTickCount } from "./ticks";
 import type { TrellisSpec } from "./types";
@@ -91,7 +93,6 @@ export function panelName(spec: TrellisSpec, index: number): string {
   return p.keys.join(" · ") || p.label || `panel ${index + 1}`;
 }
 
-const GAP = 6;
 const TICK = 4;
 const MIN_PANEL = 24;
 /** A strip's room at either end, and between a name and its value. */
@@ -101,16 +102,11 @@ const ROW_LABEL_MAX = 120;
 /** Strip text is semibold: about this much wider than measured. */
 export const BOLD = 1.06;
 
-/** The classic theme: filled panels and strips, a full grid, titles on their side. */
-export function isClassic(spec: TrellisSpec): boolean {
-  return spec.theme === "classic";
-}
-
-/** The height of the line over the plot holding the y title (minimal theme), or the width of
- * the column left of it (classic). */
+/** The width of the column left of the plot holding the y title on its side, or the height
+ * of the line over the plot holding it level. */
 function yTitleRoom(spec: TrellisSpec, fs: number): { w: number; h: number } {
   if (!spec.y.title) return { w: 0, h: 0 };
-  return isClassic(spec) ? { w: Math.round(fs * 1.4 + 4), h: 0 } : { w: 0, h: Math.round(fs * 1.4 + 2) };
+  return lookOf(spec).y_title === "side" ? { w: Math.round(fs * 1.4 + 4), h: 0 } : { w: 0, h: Math.round(fs * 1.4 + 2) };
 }
 
 /** The panels' shape, height over width, that full screen and an opened panel keep: the
@@ -131,6 +127,8 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     ? shown.map((index, k) => (pages!.grid ? spec.panels[index] : { ...spec.panels[index], row: Math.floor(k / pages!.cols), col: k % pages!.cols }))
     : spec.panels;
   const fs = opts.fontSize;
+  const look = lookOf(spec);
+  const GAP = look.panel_gap;
   const rows = Math.max(1, pages ? pages.rows : grid.rows);
   const cols = Math.max(1, pages ? pages.cols : grid.cols);
   const at = new Map<string, number>();
@@ -179,11 +177,11 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   // as wide as their longest label
   const rowW: number[] = [];
   for (let k = 0; k < rowDepth; k++) {
-    if (isClassic(spec)) rowW.push(stripH);
+    if (look.row_labels === "side") rowW.push(stripH);
     else {
       const labels = rowDepth === 1 ? grid.row_labels : (grid.row_keys ?? []).map((keys) => keys[k]);
       const widest = Math.max(0, ...labels.map((l) => opts.measure(l)));
-      rowW.push(Math.min(ROW_LABEL_MAX, Math.ceil(widest * BOLD) + 2 * STRIP_PAD + 4));
+      rowW.push(Math.min(ROW_LABEL_MAX, Math.ceil(widest * (look.strip_bold ? BOLD : 1)) + 2 * STRIP_PAD + 4));
     }
   }
   const rightStrip = rowW.reduce((a, b) => a + b, 0);
@@ -271,7 +269,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
       strips.push({ rect: { x: x0, y: top + k * stripH, w: colX[b] + pw - x0, h: stripH - 1 }, label: grid.col_keys![a][k], vertical: false, side: "top", span: b > a });
     }
   }
-  const vertical = isClassic(spec);
+  const vertical = look.row_labels === "side";
   // a row level's strips: right of the inner levels' (the first column's outermost)
   const rowX = (k: number): number => plotRight + GAP + rowW.slice(k + 1).reduce((a, b) => a + b, 0);
   if (rowDepth === 1) {
@@ -325,7 +323,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     panels: boxes,
     strips,
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
-    xTitle: xTitleH ? { x: centreX, y: plotBottom + xTitleH - 2 } : null,
+    xTitle: xTitleH ? { x: look.x_title === "end" ? plotRight : centreX, y: plotBottom + xTitleH - 2 } : null,
     yTitle: yTitle.w ? { x: shift + 4 + fs, y: centreY } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
     spare,
     xAxisHeight,
@@ -408,7 +406,7 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
     ],
     strips: [],
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
-    xTitle: xTitleH ? { x: rect.x + w / 2, y: plotBottom + xTitleH - 2 } : null,
+    xTitle: xTitleH ? { x: lookOf(spec).x_title === "end" ? rect.x + w : rect.x + w / 2, y: plotBottom + xTitleH - 2 } : null,
     yTitle: yTitle.w ? { x: shift + 4 + fs, y: rect.y + h / 2 } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
     spare: null,
     xAxisHeight,

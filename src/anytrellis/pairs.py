@@ -20,7 +20,7 @@ import numpy as np
 from anytrellis.data import Column, Table
 from anytrellis.plot import Trellis, _text
 from anytrellis.stats import _kde
-from anytrellis.styling import palette_of
+from anytrellis.theme import Theme
 
 Diag = Literal["auto", "density", "hist"]
 
@@ -52,7 +52,7 @@ def pairs(
     panel_height: int | None = None,
     title: str = "",
     legend: str = "auto",
-    theme: str = "minimal",
+    theme: str | Theme | None = None,
     renderer: str = "auto",
 ) -> Pairs:
     """A scatterplot matrix: each pair of ``columns`` plotted against each other, x by
@@ -115,7 +115,7 @@ class Pairs(Trellis):
         panel_height: int | None = None,
         title: str = "",
         legend: str = "auto",
-        theme: str = "minimal",
+        theme: str | Theme | None = None,
         renderer: str = "auto",
     ) -> None:
         if diag not in ("auto", "density", "hist", None):
@@ -144,7 +144,7 @@ class Pairs(Trellis):
         self._tips = [n for n in (*names, color_column, *tooltip) if n is not None]
         self._keep_empty = not corner
         cat = color_column is not None and source.column(color_column).kind == "category"
-        one = palette_of(palette, theme)[0] if color is None else color
+        one = self._palette()[0] if color is None else color
         self._data = _melt(source, names, color_column, corner)
         self.points(x=X, y=Y, color=color_column or one, size=size, opacity=opacity,
                     name="points")  # fmt: skip

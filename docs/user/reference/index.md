@@ -8,6 +8,7 @@ explain how to use them; this section says what is there.
 | [Trellis](trellis.md) | The plot: facets, scales, marks, order, selection, panels, sharing |
 | [pairs and Pairs](pairs.md) | A scatterplot matrix: every pair of number columns |
 | [link and Link](link.md) | One selection across separate plots |
+| [Theme and set_theme](theme.md) | How a plot looks: the named themes and their settings |
 | [anytrellis.datasets](datasets.md) | The bundled example datasets, their sources and licences |
 | [anytrellis.synthetic](synthetic.md) | Made-up data for examples and tests |
 | [Mouse and keys](mouse-and-keys.md) | Everything the plot does with a mouse, a trackpad and keys |

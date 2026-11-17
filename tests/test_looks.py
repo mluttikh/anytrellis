@@ -1,5 +1,6 @@
-"""The look (``Trellis(theme=)``): minimal by default, classic as before 0.6; the same in the
-browser (drawing.ts, layout.ts) and in images drawn in Python (figure.py)."""
+"""The look (``Trellis(theme=)``, ``anytrellis.Theme``): minimal by default, framed, classic
+as before 0.6, or any of their settings changed; the same in the browser (look.ts,
+drawing.ts, layout.ts) and in images drawn in Python (figure.py)."""
 
 from __future__ import annotations
 
@@ -10,9 +11,10 @@ import pytest
 import anytrellis as at
 from anytrellis import Trellis
 from anytrellis.datasets import load
-from anytrellis.figure import GRID_ALPHA, THEMES, figure_svg, grid_axes, layout
-from anytrellis.styling import PETROFF10, TAB10
+from anytrellis.figure import THEMES, figure_svg, grid_axes, layout
+from anytrellis.styling import PALETTES, PETROFF10, TAB10
 from anytrellis.synthetic import sensors
+from anytrellis.theme import Theme, get_theme, set_theme
 
 LIGHT = THEMES["light"]
 
@@ -22,7 +24,7 @@ def cars():
     return load("cars")
 
 
-def lines(theme: str = "minimal", **kw) -> Trellis:
+def lines(theme: str | Theme = "minimal", **kw) -> Trellis:
     return Trellis(sensors(stations=3, hours=48), wrap="station", theme=theme, **kw).line(
         x="time", y="temp", color="sensor"
     )
@@ -30,14 +32,23 @@ def lines(theme: str = "minimal", **kw) -> Trellis:
 
 def test_minimal_is_the_default() -> None:
     plot = Trellis(sensors(stations=2, hours=24), wrap="station").line(x="time", y="temp")
-    assert plot.theme == "minimal"
+    assert plot.theme == Theme("minimal")
     spec, _ = plot._shown_scene()
-    assert spec["theme"] == "minimal"
+    assert spec["theme"]["base"] == "minimal"
+    assert spec["theme"]["panel_gap"] == 6
 
 
 def test_an_unknown_theme_or_palette_is_refused() -> None:
     with pytest.raises(ValueError, match="theme must be one of"):
         Trellis(theme="dark")
+    with pytest.raises(ValueError, match="grid must be one of"):
+        Theme(grid="diagonal")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="panel_gap"):
+        Theme(panel_gap=-1)
+    with pytest.raises(ValueError, match="grid_opacity"):
+        Theme(grid_opacity=2)
+    with pytest.raises(ValueError, match="frame must be True or False"):
+        Theme(frame="yes")  # ty: ignore[invalid-argument-type]
     with pytest.raises(ValueError, match="unknown palette"):
         Trellis(palette="rainbow")
     with pytest.raises(ValueError, match="unknown colour"):
@@ -57,7 +68,7 @@ def test_minimal_panels_have_no_fill_and_a_faint_grid() -> None:
     svg = figure_svg(lines())
     assert f'fill="{LIGHT["panel"]}"' not in svg
     assert f'fill="{LIGHT["strip"]}"' not in svg
-    assert f'stroke="{LIGHT["text"]}" stroke-opacity="{GRID_ALPHA}"' in svg
+    assert f'stroke="{LIGHT["text"]}" stroke-opacity="0.1"' in svg
     classic = figure_svg(lines("classic"))
     assert f'fill="{LIGHT["panel"]}"' in classic
     assert f'fill="{LIGHT["strip"]}"' in classic
@@ -120,5 +131,62 @@ def test_nested_strips_spanning_panels_are_marked() -> None:
 def test_pairs_take_a_theme() -> None:
     penguins = load("penguins")
     p = at.pairs(penguins, ["bill_length_mm", "bill_depth_mm"], theme="classic")
-    assert p._shown_scene()[0]["theme"] == "classic"
-    assert at.pairs(penguins, ["bill_length_mm", "bill_depth_mm"]).theme == "minimal"
+    assert p._shown_scene()[0]["theme"]["base"] == "classic"
+    assert at.pairs(penguins, ["bill_length_mm", "bill_depth_mm"]).theme.base == "minimal"
+
+
+def test_a_theme_is_a_preset_with_settings_changed() -> None:
+    t = Theme("minimal", frame=True, panel_gap=12)
+    assert t.frame
+    assert t.panel_gap == 12
+    assert t.strip_align == "left"  # the rest: minimal's
+    framed = Theme("framed")
+    assert framed.frame
+    assert framed.strip_align == "center"
+    assert framed.colors() == PALETTES["observable10"]
+    assert framed.replace(palette="tab10").colors() == TAB10
+    assert Theme("classic", palette=[]).palette == "tab10"  # empty: the preset's
+
+
+def test_framed_draws_a_frame_and_no_axis_lines() -> None:
+    svg = figure_svg(lines("framed", x_title="hour"))
+    frames = re.findall(r'<path d="([^"]*Z)" fill="none" stroke="#a3abb5"', svg)
+    assert len(frames) == 1
+    assert frames[0].count("Z") == 3  # a panel each
+    assert "hour →" in svg  # the x title at its axis' end
+    spec, _ = lines("framed")._shown_scene()
+    tight, roomy = (layout(sp, 800) for sp in (lines()._shown_scene()[0], spec))
+    gap = lambda lay: lay.panels[1].rect.x - lay.panels[0].rect.x - lay.panels[0].rect.w  # noqa: E731
+    assert (gap(tight), gap(roomy)) == (6, 10)
+
+
+def test_settings_change_what_is_drawn() -> None:
+    plain = Theme("minimal", grid="none", axis_lines="none", strip_bold=False)
+    svg = figure_svg(lines(plain))
+    assert 'stroke-opacity="0.1"' not in svg  # no grid
+    strip = re.search(r"<text [^>]*>station 1</text>", svg)
+    assert strip is not None
+    assert "font-weight" not in strip.group(0)  # strips not bold
+    filled = figure_svg(lines(Theme("minimal", panel_fill=True, strip_fill=True)))
+    assert f'fill="{LIGHT["panel"]}"' in filled
+    assert f'fill="{LIGHT["strip"]}"' in filled
+    side = lines(Theme("minimal", y_title="side"))._shown_scene()[0]
+    assert layout(side, 800).y_title[1] > 60  # ty: ignore[not-subscriptable]
+
+
+def test_set_theme_is_the_default_of_plots_made_after() -> None:
+    try:
+        set_theme("framed", panel_gap=14)
+        assert get_theme() == Theme("framed", panel_gap=14)
+        plot = Trellis(sensors(stations=2, hours=24), wrap="station")
+        assert plot.theme.base == "framed"
+        assert plot.theme.panel_gap == 14
+        assert Trellis(theme="classic").theme.base == "classic"  # given: as given
+    finally:
+        set_theme()
+    assert Trellis().theme == Theme()
+
+
+def test_palette_overrides_the_themes() -> None:
+    legend = lines(Theme("framed", palette="tab10"), palette="petroff6")
+    assert legend._shown_scene()[0]["legends"][0]["colors"] == PALETTES["petroff6"][:3]
