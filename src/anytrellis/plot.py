@@ -83,18 +83,17 @@ from anytrellis.stats import PANEL, Members, Part
 from anytrellis.stats import parts as summary_parts
 from anytrellis.styling import (
     CONTEXT_COLOR,
-    LOOKS,
     MISSING_COLOR,
     colormap_rgba,
     is_color,
     palette_colors,
-    palette_of,
     rgba,
 )
 from anytrellis.summaries import counts as counts_of_rows
 from anytrellis.summaries import linked_counts
 from anytrellis.summaries import parts as queried_parts
 from anytrellis.summaries import selected as summaries_selected
+from anytrellis.theme import Theme, theme_of
 
 if TYPE_CHECKING:
     from anytrellis.widget import TrellisWidget
@@ -163,8 +162,8 @@ class Trellis:
         x_title: The x axis title (default: the x column's name).
         y_title: The y axis title (default: the y column's name).
         palette: Colours for category colour columns: a list of colours, or a name
-            (``"petroff10"``, ``"petroff8"``, ``"petroff6"``, ``"tab10"``; default: the
-            theme's, ``"petroff10"`` in the minimal one and ``"tab10"`` in the classic one).
+            (``"petroff10"``, ``"petroff8"``, ``"petroff6"``, ``"observable10"``,
+            ``"tab10"``; default: the theme's).
         legend: ``"auto"``: in a wrap's empty cells after its last panel when it fits there,
             under the plot otherwise; ``"bottom"``: always under the plot.
         strips: With several facet columns, ``"nested"``: a strip per column, each spanning
@@ -196,11 +195,16 @@ class Trellis:
             the axes' ranges and the colours' levels come from the database). For a table
             in a database: lines, points and text drawn from the plot's data (other layers
             bring their own); not with ``link``. ``save_html`` still reads every row.
-        theme: How the plot looks. ``"minimal"`` (the default): no panel fill, strips as
-            left-aligned titles, a faint grid across y (and x for points), the y title
-            over the axis (``"↑ temp"``), a grid's row labels level, no x title for times,
-            Petroff's colour-vision-tested palette. ``"classic"``: the look before 0.6, with
-            filled panels and strips, a full grid, titles on their side and tab10.
+        theme: How the plot looks: ``"minimal"``, ``"framed"``, ``"classic"``, or an
+            ``anytrellis.Theme`` changing any of their settings (default: ``"minimal"``, or
+            what ``anytrellis.set_theme`` set). minimal: nothing behind the data but a faint
+            grid (across y, and x for points), strips as titles at the left, the y title
+            level over the plot (``"↑ temp"``), Petroff's colour-vision-tested palette.
+            framed (after Observable Plot): a thin frame around each panel and more room
+            between them, strips centred, the x title at its axis' end, d3's observable10.
+            classic (the look before 0.6): grey panels and strips, a full grid, titles on
+            their side, tab10. Every theme but classic leaves a time axis untitled unless
+            ``x_title`` is given.
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
     """
 
@@ -233,13 +237,12 @@ class Trellis:
         fit_y: bool = False,
         link: str | Sequence[str] | None = None,
         load: str = "all",
-        theme: str = "minimal",
+        theme: str | Theme | None = None,
         renderer: str = "auto",
     ) -> None:
-        if theme not in LOOKS:
-            raise ValueError(f"theme must be one of {LOOKS}, got {theme!r}")
-        self.theme = theme
-        palette_of(palette, theme)  # an unknown name or colour raises here
+        self.theme: Theme = theme_of(theme)
+        if palette is not None:
+            Theme(palette=palette)  # an unknown name or colour raises here
         self._data = None if data is None else Table(data)
         if load not in LOADS:
             raise ValueError(f"load must be one of {LOADS}, got {load!r}")
@@ -2181,6 +2184,12 @@ class Trellis:
                 names += _layer_columns(layer)
         return tuple(n for n in dict.fromkeys(names) if n is not None and n in whole)
 
+    def _palette(self) -> list[str]:
+        """The category colours: ``palette=``'s, else the theme's."""
+        if self.palette is None:
+            return self.theme.colors()
+        return Theme(palette=self.palette).colors()
+
     def _aspect(self, drawn: list[_Drawn], grid: Grid, xd: list[tuple[float, float]],
                 yd: list[tuple[float, float]], x_levels: list[str] | None,
                 y_levels: list[str] | None) -> float | None:  # fmt: skip
@@ -2391,7 +2400,7 @@ class Trellis:
         if "y" in logs:
             y_kind = "log"
         colors = _ColorScales(shown, lambda lr: table_of(id(lr)),
-                              palette_of(self.palette, self.theme), given)  # fmt: skip
+                              self._palette(), given)  # fmt: skip
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
         plain = [lr for lr in marks if lr.mark not in SUMMARIES]
         bars_step = step_of([axis_values(table_of(id(lr)).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
@@ -2505,7 +2514,7 @@ class Trellis:
             self._keys = {id(lr): k for (lr, _), k in zip(mark_entries, keys, strict=True)}
         first = shown[0] if shown else None
         x_title = self.x_title if self.x_title is not None else (first.x or "" if first else "")
-        if self.x_title is None and x_kind == "time" and self.theme == "minimal":
+        if self.x_title is None and x_kind == "time" and self.theme.base != "classic":
             x_title = ""  # dates say what they are
         y_title = self.y_title if self.y_title is not None else (first.y or "" if first else "")
         spec = {
@@ -2536,7 +2545,7 @@ class Trellis:
             "legend_position": self.legend,
             "fit_y": self.fit_y,
             "pages": pages,
-            "theme": self.theme,
+            "theme": self.theme.spec(),
         }
         # dense points' cells: over each panel's domain, sized for the panel's pixels
         cell_details = [(i, dt) for i, dt in details if isinstance(dt, PointDetail)]

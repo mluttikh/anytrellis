@@ -26,8 +26,16 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
-- `Trellis(theme=)` (`"minimal"` or `"classic"`), and on `pairs()`.
-- `palette=` takes a name: `"petroff10"`, `"petroff8"`, `"petroff6"` or `"tab10"`.
+- `Trellis(theme=)`: `"minimal"`, `"framed"` or `"classic"`, also on `pairs()`. `framed`,
+  after Observable Plot, draws a thin frame around each panel, 10 px between them, strips
+  centred, the x title at its axis' end (`weight →`) and d3's observable10 palette.
+- `anytrellis.Theme("minimal", frame=True, panel_gap=12, ...)`: a named theme with any of
+  its settings changed (panel fill, frame, grid direction and opacity, axis lines, strip
+  fill, alignment and weight, where the axis titles go, row labels level or on their side,
+  the gap between panels, the palette). `anytrellis.set_theme()` sets the session's
+  default; `get_theme()` reads it.
+- `palette=` takes a name: `"petroff10"`, `"petroff8"`, `"petroff6"`, `"observable10"` or
+  `"tab10"`.
 - `Trellis(aspect="bank")`: the panels' shape that shows the median slope of the lines'
   segments at 45 degrees, each measured in its own panel's ranges (Cleveland's banking):
   the `smooth()` fits' (a trend, not the noise around it), or without them the `line()`

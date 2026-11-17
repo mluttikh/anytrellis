@@ -54,6 +54,7 @@ nav = [
     { "Trellis" = "reference/trellis.md" },
     { "pairs and Pairs" = "reference/pairs.md" },
     { "link and Link" = "reference/link.md" },
+    { "Theme and set_theme" = "reference/theme.md" },
     { "anytrellis.datasets" = "reference/datasets.md" },
     { "anytrellis.synthetic" = "reference/synthetic.md" },
     { "Mouse and keys" = "reference/mouse-and-keys.md" },

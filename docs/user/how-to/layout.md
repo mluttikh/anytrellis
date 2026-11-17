@@ -171,14 +171,56 @@ gallon`, where it reads without tilting your head.
 
 ## The look
 
-`theme="minimal"` (the default) draws as little behind the data as reads well: no panel
-fill, strips as titles at each panel's left, a faint grid across y (and across x for
-points), and a grid's row labels level at the right. `theme="classic"` draws the look of
-anytrellis before 0.6: grey panels and strips, a full grid, and titles on their side.
+Three themes come with anytrellis:
+
+| `theme=` | What it draws |
+| --- | --- |
+| `"minimal"` (the default) | Nothing behind the data but a faint grid (across y, and across x for points); strips as semibold titles at each panel's left; the y title level over the plot; Petroff's colour-vision-tested palette |
+| `"framed"` | After Observable Plot: a thin frame around each panel and more room between them, so each facet reads as one; strips centred over the panels; the x title at the end of its axis (`weight →`); d3's observable10 palette |
+| `"classic"` | anytrellis before 0.6: grey panels and strips, a full grid, titles on their side, tab10 |
 
 ```python
-Trellis(cars, row="origin", col="cylinders", theme="classic")
+Trellis(cars, row="origin", col="cylinders", theme="framed")
 ```
+
+### Change the look
+
+A theme is a dozen settings, and `anytrellis.Theme` starts from a named one and changes
+any of them:
+
+```python
+import anytrellis as at
+
+roomy = at.Theme("minimal", frame=True, panel_gap=14, strip_align="center")
+Trellis(cars, wrap="origin", theme=roomy)
+```
+
+| Setting | Values |
+| --- | --- |
+| `panel_fill` | `True`: each panel filled light grey |
+| `frame` | `True`: a thin line around each panel |
+| `grid` | `"auto"` (across y, and across x for points), `"x"`, `"y"`, `"both"`, `"none"` |
+| `grid_opacity` | the grid's opacity, 0 to 1 (it is the text colour, so it suits light and dark) |
+| `axis_lines` | which axes draw a line along the panels' edge: `"x"`, `"y"`, `"both"`, `"none"` |
+| `strip_fill` | `True`: strips filled grey; `False`: the label alone, as a title |
+| `strip_align` | `"left"` or `"center"` |
+| `strip_bold` | semibold strip labels |
+| `y_title` | `"top"`: level over the plot (`↑ mpg`); `"side"`: on its side at the left |
+| `x_title` | `"center"` under the plot, or `"end"` of the axis (`weight →`) |
+| `row_labels` | a grid's row labels `"level"` at the right, or on their `"side"` |
+| `panel_gap` | pixels between panels |
+| `palette` | category colours: a name (`"petroff10"`, `"observable10"`, `"tab10"`, ...) or a list |
+
+`set_theme` makes a theme the default of every plot made after it in the session, so a
+notebook sets it once at the top:
+
+```python
+at.set_theme("framed", palette="tab10")
+at.set_theme()                            # back to minimal
+```
+
+A plot's `theme=` and `palette=` still win over the session's. The theme is drawn the same
+in the notebook, in a saved page and in `save_svg` / `save_png`.
 
 ## The legend's place
 

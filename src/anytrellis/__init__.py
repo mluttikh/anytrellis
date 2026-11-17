@@ -6,8 +6,9 @@ from importlib.metadata import version as _version
 from anytrellis.linking import Link, link
 from anytrellis.pairs import Pairs, pairs
 from anytrellis.plot import Trellis
+from anytrellis.theme import Theme, get_theme, set_theme
 
-__all__ = ["Link", "Pairs", "Trellis", "link", "pairs"]
+__all__ = ["Link", "Pairs", "Theme", "Trellis", "get_theme", "link", "pairs", "set_theme"]
 try:
     __version__ = _version("anytrellis")
 except PackageNotFoundError:  # run from a source tree that is not installed

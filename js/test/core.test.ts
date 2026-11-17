@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight, gridAxes, labelEnd } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
+import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
@@ -786,7 +787,7 @@ describe("pages", () => {
 });
 
 describe("looks", () => {
-  const titled = (theme: "minimal" | "classic" | undefined): TrellisSpec => {
+  const titled = (theme: "minimal" | "framed" | "classic" | undefined): TrellisSpec => {
     const s = spec([panel(0, 0), panel(0, 1)], 1, 2);
     return { ...s, theme, y: { ...s.y, title: "temp" } };
   };
@@ -819,5 +820,21 @@ describe("looks", () => {
     const classic = layout({ ...s, theme: "classic" }, opts).strips.filter((t) => t.side === "right");
     expect(classic.map((t) => t.vertical)).toEqual([true, true]);
     expect(classic[0].rect.w).toBeLessThan(rows[0].rect.w);
+  });
+
+  it("reads a preset, a partial look over a preset, or the whole look Python sends", () => {
+    const s = titled(undefined);
+    expect(lookOf(s)).toEqual(LOOKS.minimal);
+    expect(lookOf({ ...s, theme: "framed" }).frame).toBe(true);
+    const mixed = lookOf({ ...s, theme: { base: "classic", panel_gap: 14 } });
+    expect([mixed.panel_fill, mixed.panel_gap]).toEqual([true, 14]);
+  });
+
+  it("spaces the panels by the look's gap", () => {
+    const gap = (theme: "minimal" | "framed"): number => {
+      const [a, b] = layout({ ...titled(theme) }, opts).panels;
+      return b.rect.x - (a.rect.x + a.rect.w);
+    };
+    expect([gap("minimal"), gap("framed")]).toEqual([6, 10]);
   });
 });

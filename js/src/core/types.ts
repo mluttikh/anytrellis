@@ -1,6 +1,8 @@
 // The spec Python sends (plot.py: Trellis._build). Bulk data travels as buffers, referred to
 // by content id.
 
+import type { Look, LookName } from "./look";
+
 export type Dtype = "float64" | "float32" | "int32" | "uint32" | "uint16" | "uint8";
 
 export interface BufferRef {
@@ -180,10 +182,8 @@ export interface TrellisSpec {
   legend_position?: "auto" | "bottom";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
-  /** The look. `minimal` (the default): no panel fill, strips as left-aligned titles, a
-   * faint grid only where it helps, the y title over the axis. `classic`: filled panels
-   * and strips and a full grid. */
-  theme?: "minimal" | "classic";
+  /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */
+  theme?: LookName | (Partial<Look> & { base?: LookName });
   /** A wrap shown a page at a time (null: all its panels at once). */
   pages?: PagesSpec | null;
 }

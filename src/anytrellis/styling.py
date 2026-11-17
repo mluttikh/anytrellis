@@ -19,7 +19,7 @@ PETROFF10 = [
     "#a96b59", "#e76300", "#b9ac70", "#717581", "#92dadd",
 ]  # fmt: skip
 """Petroff's ten colours (arXiv 2107.02270), chosen for colour-vision deficiency and ranked
-by a survey of preference; matplotlib's ``petroff10``. The minimal look's palette."""
+by a survey of preference; matplotlib's ``petroff10``. The minimal theme's palette."""
 
 PALETTES: dict[str, list[str]] = {
     "petroff10": PETROFF10,
@@ -28,22 +28,17 @@ PALETTES: dict[str, list[str]] = {
     ],
     "petroff6": ["#5790fc", "#f89c20", "#e42536", "#964a8b", "#9c9ca1", "#7a21dd"],
     "tab10": TAB10,
+    "observable10": [
+        "#4269d0", "#efb118", "#ff725c", "#6cc5b0", "#3ca951",
+        "#ff8ab7", "#a463f2", "#97bbf5", "#9c6b4e", "#9498a0",
+    ],
 }  # fmt: skip
-"""Named category palettes (``palette="tab10"``)."""
-
-LOOKS = ("minimal", "classic")
-"""How a plot looks (``Trellis(theme=)``): ``"minimal"``, the default (no panel fill, strips
-as titles, a faint grid where it helps, the y title over the axis, Petroff's colours), or
-``"classic"`` (filled panels and strips, a full grid, titles on their side, tab10)."""
-
-LOOK_PALETTES = {"minimal": "petroff10", "classic": "tab10"}
-"""Each look's category palette."""
+"""Named category palettes (``palette="tab10"``). observable10 is d3's ``schemeObservable10``,
+Observable Plot's default (the framed theme's)."""
 
 
-def palette_of(palette: str | Sequence[str] | None, look: str = "minimal") -> list[str]:
-    """A palette's colours: a name in ``PALETTES``, a list of colours, or None (the look's)."""
-    if palette is None or (not isinstance(palette, str) and not list(palette)):
-        palette = LOOK_PALETTES[look]
+def palette_of(palette: str | Sequence[str]) -> list[str]:
+    """A palette's colours: a name in ``PALETTES``, or a list of colours (each checked)."""
     if isinstance(palette, str):
         if palette not in PALETTES:
             raise ValueError(f"unknown palette {palette!r}; built in: {sorted(PALETTES)}, "
