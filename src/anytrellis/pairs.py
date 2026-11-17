@@ -12,7 +12,7 @@ data, faceted by the y variable (rows) and the x variable (columns).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 import numpy as np
@@ -51,6 +51,9 @@ def pairs(
     height: int | None = None,
     panel_height: int | None = None,
     title: str = "",
+    subtitle: str = "",
+    caption: str = "",
+    labels: Mapping[str, str] | None = None,
     legend: str = "auto",
     theme: str | Theme | None = None,
     renderer: str = "auto",
@@ -84,14 +87,19 @@ def pairs(
         height: The plot's height in CSS pixels (default: square panels).
         panel_height: Each panel's height in CSS pixels (default: square panels).
         title: A title over the plot.
+        subtitle: A line or two under the title.
+        caption: A note under the plot (the source, a footnote).
+        labels: Names to show for columns, ``{"bill_length_mm": "Bill length (mm)"}``: on
+            the strips, in the legend and the tooltips. Panels keep the columns' names
+            (``open("bill_depth_mm · bill_length_mm")``).
         legend: As for ``Trellis``.
         theme: As for ``Trellis``.
         renderer: As for ``Trellis``.
     """
     return Pairs(data, columns, color=color, diag=diag, corner=corner, bins=bins, size=size,
                  opacity=opacity, tooltip=tooltip, palette=palette, height=height,
-                 panel_height=panel_height, title=title, legend=legend, theme=theme,
-                 renderer=renderer)  # fmt: skip
+                 panel_height=panel_height, title=title, subtitle=subtitle, caption=caption,
+                 labels=labels, legend=legend, theme=theme, renderer=renderer)  # fmt: skip
 
 
 class Pairs(Trellis):
@@ -114,6 +122,9 @@ class Pairs(Trellis):
         height: int | None = None,
         panel_height: int | None = None,
         title: str = "",
+        subtitle: str = "",
+        caption: str = "",
+        labels: Mapping[str, str] | None = None,
         legend: str = "auto",
         theme: str | Theme | None = None,
         renderer: str = "auto",
@@ -135,8 +146,9 @@ class Pairs(Trellis):
         super().__init__(
             None, row=ROW, col=COL, share_x="col", share_y="row", x_title="", y_title="",
             height=height, panel_height=panel_height,
-            aspect=None if height or panel_height else 1.0, title=title, palette=palette,
-            legend=legend, link=KEY, theme=theme, renderer=renderer,
+            aspect=None if height or panel_height else 1.0, title=title, subtitle=subtitle,
+            caption=caption, labels=labels, palette=palette, legend=legend, link=KEY,
+            theme=theme, renderer=renderer,
         )  # fmt: skip
         self._source = source
         self._columns = names
@@ -163,6 +175,11 @@ class Pairs(Trellis):
             bars = _histograms(source, names, by, bins)
             self.rect(bars, x=X, x2=X2, y=LO, y2=Y, color=shade, opacity=0.8, name="hist")
         self._frozen = True
+
+    def _strip_names(self, grid: dict[str, Any]) -> dict[str, Any]:
+        """The strips name each row's and column's variable by its label."""
+        return {**grid, "row_labels": [self._label(n) for n in grid["row_labels"]],
+                "col_labels": [self._label(n) for n in grid["col_labels"]]}  # fmt: skip
 
     def _add(self, layer: Any) -> Any:
         if getattr(self, "_frozen", False):
@@ -195,18 +212,20 @@ class Pairs(Trellis):
         row = int(geom.rows[instance])
         if KEY in table:  # a point: its row of the data
             at = int(table.column(KEY).values[row])
-            return [[n, _text(self._source.raw(n)[at])] for n in self._tips]
+            return [[self._label(n), _text(self._source.raw(n)[at])] for n in self._tips]
         if COL not in table:  # cells of dense points
             return super()._tooltip(layer_index, instance, of)
         var = str(table.column(COL).values[row])
         x = table.column(X).values[row]
         if X2 in table:
-            tips = [[var, f"{_text(x)} – {_text(table.column(X2).values[row])}"],
+            tips = [[self._label(var), f"{_text(x)} – {_text(table.column(X2).values[row])}"],
                     ["count", _text(table.raw("count")[row])]]  # fmt: skip
         else:
-            tips = [[var, _text(x)], ["density", f"{table.column('density').values[row]:.4g}"]]
+            tips = [[self._label(var), _text(x)],
+                    ["density", f"{table.column('density').values[row]:.4g}"]]  # fmt: skip
         if self._color_column is not None and self._color_column in table:
-            tips.append([self._color_column, _text(table.raw(self._color_column)[row])])
+            tips.append([self._label(self._color_column),
+                         _text(table.raw(self._color_column)[row])])  # fmt: skip
         return tips
 
 

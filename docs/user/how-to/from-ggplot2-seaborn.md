@@ -28,7 +28,8 @@ redo well-known figures of both.
 | `position = "dodge"` | `.bars(position="dodge")` |
 | `gghighlight()` | a layer with `facet="exclude"` |
 | `fct_reorder(f, x, median)` | `.order("f", by="median", of="x")` |
-| `labs(title =, x =, y =)` | `Trellis(..., title=, x_title=, y_title=)` |
+| `labs(title =, subtitle =, caption =, x =, y =)` | `Trellis(..., title=, subtitle=, caption=, x_title=, y_title=)` |
+| `labs(dictionary =)` (4.0) | `Trellis(..., labels={"mpg": "Fuel use (mpg)"})` |
 
 ```r
 ggplot(penguins, aes(flipper_length_mm, body_mass_g, colour = sex)) +

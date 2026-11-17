@@ -1,6 +1,7 @@
 // Exporting images on a save_html page: the Export menu (e) and its items, a PNG download at
 // twice the plot's size, an SVG download that is valid and holds the plot's text and marks,
 // copying a PNG and an SVG to the clipboard, the selection and an opened panel in the image,
+// a subtitle (on as many lines as it is shown) and a caption,
 // and the dark theme; with ?renderer= each backend.
 //   node test/export.mjs <page.html> [dir for the images] [renderer]
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
@@ -110,6 +111,11 @@ const svgFacts = (page, text) =>
   check(facts.valid, "the SVG is valid XML");
   check(facts.width === size[0] && facts.height === size[1], `the SVG has the plot's size (${facts.width} × ${facts.height})`);
   check(!title || facts.texts.includes(title), "the title is in it as text");
+  // a subtitle and a caption: their words, in their lines as the page wraps them
+  const [subtitle, caption] = await page.$$eval(".atr-subtitle, .atr-caption", (es) => es.map((e) => (e.hidden ? "" : e.textContent)));
+  const words = facts.texts.join(" ");
+  check(!subtitle || words.includes(subtitle), `the subtitle is in it (${subtitle ? "given" : "none"})`);
+  check(!caption || facts.texts.includes(caption), `the caption is in it (${caption ? "given" : "none"})`);
   check(legend.every((l) => facts.texts.includes(l)), `the legend's entries are in it (${legend.length})`);
   const panels = await page.$$eval(".anytrellis-embed", () => window.anytrellisViews[0].lay.panels.length);
   check(facts.paths > panels * 2, `marks, axes and strips are paths (${facts.paths})`);

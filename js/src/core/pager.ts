@@ -104,7 +104,7 @@ export class Pager {
     this.next.disabled = page >= pageCount - 1;
     this.count.textContent = shown === total ? `${total} panels` : `${shown} of ${total} panels`;
     if (statsChanged) {
-      this.sort.replaceChildren(option("", "as given"), ...spec.stats.map((s) => option(s.name, s.name)));
+      this.sort.replaceChildren(option("", "as given"), ...spec.stats.map((s) => option(s.name, s.label ?? s.name)));
     }
     this.sort.value = paging.sort && spec.stats.some((s) => s.name === paging.sort) ? paging.sort : "";
     const desc = paging.descending === true;
@@ -157,7 +157,7 @@ export class Pager {
     const table = el("div", "atr-filter-rows");
     for (const s of spec.stats) {
       const row = el("label", "atr-filter-row");
-      row.append(el("span", "atr-filter-name", s.name));
+      row.append(el("span", "atr-filter-name", s.label ?? s.name));
       const cond = this.paging.where?.[s.name];
       if (s.kind === "number") {
         let lo: number | null = null;
@@ -168,8 +168,8 @@ export class Pager {
           if (hi === null || v > hi) hi = v;
         }
         const range = Array.isArray(cond) ? cond : [null, null];
-        const low = numberInput(range[0], lo, `${s.name}: at least`);
-        const high = numberInput(range[1], hi, `${s.name}: at most`);
+        const low = numberInput(range[0], lo, `${s.label ?? s.name}: at least`);
+        const high = numberInput(range[1], hi, `${s.label ?? s.name}: at most`);
         const apply = (): void => this.setWhere(s.name, [num(low.value), num(high.value)]);
         low.addEventListener("input", apply);
         high.addEventListener("input", apply);
@@ -178,7 +178,7 @@ export class Pager {
         const text = el("input", "atr-search");
         text.type = "search";
         text.placeholder = "has";
-        text.setAttribute("aria-label", `${s.name}: has`);
+        text.setAttribute("aria-label", `${s.label ?? s.name}: has`);
         text.value = typeof cond === "string" ? cond : "";
         text.addEventListener("input", () => this.setWhere(s.name, text.value));
         row.append(text);

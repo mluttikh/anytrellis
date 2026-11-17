@@ -12,7 +12,7 @@ import base64
 import copy
 import html
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
@@ -62,6 +62,7 @@ from anytrellis.pages import (
     page_labels,
     page_list,
     queried_stats,
+    stat_label,
     trends,
 )
 from anytrellis.pages import order as panel_order
@@ -158,9 +159,15 @@ class Trellis:
             without them the ``line()`` layers'), unless
             ``height`` or ``panel_height`` is given (default: about 0.62, between 90 and
             300 px).
-        title: A title over the plot.
-        x_title: The x axis title (default: the x column's name).
-        y_title: The y axis title (default: the y column's name).
+        title: A title over the plot: what it shows, or better what it says.
+        subtitle: A line or two under the title (what is plotted, the units, the period).
+        caption: A note under the plot (the source, a footnote). Like the title and
+            subtitle it is part of exported images.
+        labels: Names to show for columns, ``{"mpg": "Fuel use (mpg)"}``: in the axis and
+            legend titles, the tooltips, a page's title and the sort and filter menus
+            (code still names columns as they are: ``pages(sort="mean mpg")``).
+        x_title: The x axis title (default: the x column's label or name).
+        y_title: The y axis title (default: the y column's label or name).
         palette: Colours for category colour columns: a list of colours, or a name
             (``"petroff10"``, ``"petroff8"``, ``"petroff6"``, ``"observable10"``,
             ``"tab10"``; default: the theme's).
@@ -226,6 +233,9 @@ class Trellis:
         panel_height: int | None = None,
         aspect: float | str | None = None,
         title: str = "",
+        subtitle: str = "",
+        caption: str = "",
+        labels: Mapping[str, str] | None = None,
         x_title: str | None = None,
         y_title: str | None = None,
         palette: str | Sequence[str] | None = None,
@@ -297,6 +307,9 @@ class Trellis:
         """``aspect="bank"`` with ``load="pages"``: the aspect banked from the rows read
         first, kept so that turning the pages doesn't change the panels' shape."""
         self.title = title
+        self.subtitle = subtitle
+        self.caption = caption
+        self.labels: dict[str, str] = _labels(labels)
         self.x_title = x_title
         self.y_title = y_title
         self.palette: str | list[str] | None = (
@@ -1398,7 +1411,7 @@ class Trellis:
         pages for a level with more panels)."""
         assert grid.page_of is not None
         levels = {"groups": grid.page_of.tolist(), "levels": grid.pages,
-                  "title": " · ".join(self._page)}  # fmt: skip
+                  "title": " · ".join(self._label(c) for c in self._page)}  # fmt: skip
         if grid.kind == "grid":
             return {"rows": grid.rows, "cols": grid.cols, "stats": [], "grid": True, **levels}
         most = int(np.bincount(grid.page_of).max(initial=1))
@@ -1461,7 +1474,7 @@ class Trellis:
             given = given_stats(self._given_stats, where, n, grid.columns)
             names = {s.name for s in given}
             stats = [s for s in stats if s.name not in names] + given
-        return stats
+        return [replace(s, label=stat_label(s.name, self._label)) for s in stats]
 
     def _page_stats(self, whole: Table, grid: Grid, layer: Layer) -> list[Stat] | None:
         """``load="pages"``: the built-in statistics of a layer, from the database (None:
@@ -1816,7 +1829,8 @@ class Trellis:
             labels = lg.get("labels") or []
             if lg["kind"] == "category" and all(w in labels for w in wanted):
                 return {"index": index, "levels": sorted({labels.index(w) for w in wanted})}
-        known = {lg["title"]: lg.get("labels") for lg in legends if lg["kind"] == "category"}
+        known = {lg.get("name", lg["title"]): lg.get("labels") for lg in legends
+                 if lg["kind"] == "category"}  # fmt: skip
         if not known:
             raise ValueError("select(color=...) needs a category colour column (a legend)")
         raise ValueError(f"no colour legend has all of {wanted}; the legends are {known}")
@@ -1832,7 +1846,7 @@ class Trellis:
             return None
         labels = legends[index]["labels"]
         chosen = [labels[i] for i in legend["levels"] if 0 <= i < len(labels)]
-        return legends[index]["title"], chosen
+        return legends[index].get("name", legends[index]["title"]), chosen
 
     def _range_in(self, axis: str, value: Any) -> list[float] | None:
         kind, levels, origin = self._axes[axis]
@@ -2184,6 +2198,14 @@ class Trellis:
                 names += _layer_columns(layer)
         return tuple(n for n in dict.fromkeys(names) if n is not None and n in whole)
 
+    def _strip_names(self, grid: dict[str, Any]) -> dict[str, Any]:
+        """The grid's spec as its strips show it (a pairs plot: its columns' labels)."""
+        return grid
+
+    def _label(self, name: str) -> str:
+        """A column's name as shown: its label (``labels=``), else the name."""
+        return self.labels.get(name, name)
+
     def _palette(self) -> list[str]:
         """The category colours: ``palette=``'s, else the theme's."""
         if self.palette is None:
@@ -2513,14 +2535,26 @@ class Trellis:
                 raise ValueError(f"link={list(self._link)}: no layer's data has these columns")
             self._keys = {id(lr): k for (lr, _), k in zip(mark_entries, keys, strict=True)}
         first = shown[0] if shown else None
-        x_title = self.x_title if self.x_title is not None else (first.x or "" if first else "")
+        x_title = (
+            self.x_title
+            if self.x_title is not None
+            else self._label(first.x or "" if first else "")
+        )
         if self.x_title is None and x_kind == "time" and self.theme.base != "classic":
             x_title = ""  # dates say what they are
-        y_title = self.y_title if self.y_title is not None else (first.y or "" if first else "")
+        y_title = (
+            self.y_title
+            if self.y_title is not None
+            else self._label(first.y or "" if first else "")
+        )
         spec = {
             "version": SPEC_VERSION,
             "title": self.title,
-            "grid": {**grid.spec(), "strips": self.strips, "strip_label": texts is not None},
+            "subtitle": self.subtitle,
+            "caption": self.caption,
+            "grid": self._strip_names(
+                {**grid.spec(), "strips": self.strips, "strip_label": texts is not None}
+            ),
             "panels": [
                 {
                     "row": p.row,
@@ -2538,7 +2572,11 @@ class Trellis:
             "x": _axis_spec(x_kind, x_levels, x_origin, self._share["x"], x_title),
             "y": _axis_spec(y_kind, y_levels, y_origin, self._share["y"], y_title),
             "layers": [],
-            "legends": colors.legends(),
+            # each with its column's name (select(color=...)) and its title as shown
+            "legends": [
+                {**lg, "name": lg["title"], "title": self._label(lg["title"])}
+                for lg in colors.legends()
+            ],
             "height": self.height,
             "panel_height": self.panel_height,
             "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
@@ -2671,7 +2709,7 @@ class Trellis:
             buffers.add(geom.rows.astype(np.uint32), "uint32") if family else None
         )
         if part is not None:
-            spec_layer.update(_inline_tips(layer, table, geom, buffers))
+            spec_layer.update(_inline_tips(layer, table, geom, buffers, self._label))
         return spec_layer
 
     def _cell_colors(self, layer: Layer, table: Table) -> Any:
@@ -2873,7 +2911,7 @@ class Trellis:
         if geom is None or not names:
             return []
         row = int(geom.rows[instance])
-        return [[name, _text(table.raw(name)[row])] for name in names]
+        return [[self._label(name), _text(table.raw(name)[row])] for name in names]
 
 
 # ---- helpers ------------------------------------------------------------------------------
@@ -3071,6 +3109,22 @@ def _origin(doms: list[tuple[float, float]], kind: AxisKind) -> float:
     if kind != "time" or not doms:
         return 0.0
     return float(np.floor(min(d[0] for d in doms)))
+
+
+def _labels(labels: Mapping[str, str] | None) -> dict[str, str]:
+    """``labels=``: column names to the names shown, each a string."""
+    if labels is None:
+        return {}
+    if not isinstance(labels, Mapping):
+        raise TypeError(
+            f"labels must be a dict of column names to labels, got {type(labels).__name__}"
+        )
+    out = {}
+    for name, label in labels.items():
+        if not isinstance(name, str) or not isinstance(label, str):
+            raise TypeError(f"labels: column names and labels are strings, got {name!r}: {label!r}")
+        out[name] = label
+    return out
 
 
 def _axis_spec(
@@ -3423,15 +3477,17 @@ TIP_CELLS = 50_000
 when its table has at most this many cells of them."""
 
 
-def _inline_tips(layer: Layer, table: Table, geom: Geometry, buffers: Buffers) -> dict[str, Any]:
-    """A summary part's tooltip text, per row of its table, and each instance's row."""
+def _inline_tips(layer: Layer, table: Table, geom: Geometry, buffers: Buffers,
+                 label: Callable[[str], str] = str) -> dict[str, Any]:  # fmt: skip
+    """A summary part's tooltip text, per row of its table, and each instance's row (the
+    columns named by ``label``)."""
     names = _tooltip_columns(layer, table)
     if not names or table.n * len(names) > TIP_CELLS:
         return {}
     columns = [table.raw(name) for name in names]
     values = [[_text(col[r]) for col in columns] for r in range(table.n)]
     rows = buffers.add(geom.rows.astype(np.uint32), "uint32")
-    return {"tips": {"names": names, "values": values}, "tip_rows": rows}
+    return {"tips": {"names": [label(n) for n in names], "values": values}, "tip_rows": rows}
 
 
 def _tooltip_columns(layer: Layer, table: Table) -> list[str]:

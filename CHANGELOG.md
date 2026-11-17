@@ -34,6 +34,12 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **`subtitle=` and `caption=`** on `Trellis` and `pairs`: a line or two under the title,
+  and a note under the plot (a source, a footnote). Both wrap, and both are in exported
+  images, from the page and from `save_svg` / `save_png`.
+- **`labels=`**, one dictionary naming columns for readers (`{"mpg": "Fuel use (mpg)"}`):
+  used for axis titles, the legend's title, tooltips, a page column's title, the sort and
+  filter menus, and a pairs plot's strips. Code still names columns as they are.
 - `Trellis(theme=)`: `"minimal"`, `"framed"` or `"classic"`, also on `pairs()`. `framed`,
   after Observable Plot, draws a thin frame around each panel, 10 px between them, strips
   centred, the x title at its axis' end (`weight →`) and d3's observable10 palette.

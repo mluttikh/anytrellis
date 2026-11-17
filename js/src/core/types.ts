@@ -157,7 +157,10 @@ export interface TextLayerSpec {
 export type LayerSpec = MarkLayerSpec | RuleLayerSpec | TextLayerSpec;
 
 export interface LegendSpec {
+  /** As shown (a column's label). */
   title: string;
+  /** The colour column's name. */
+  name?: string;
   kind: "category" | "number";
   labels?: string[];
   colors: string[];
@@ -168,6 +171,10 @@ export interface LegendSpec {
 export interface TrellisSpec {
   version: 1;
   title: string;
+  /** A line or two under the title. */
+  subtitle?: string;
+  /** A note under the plot (a source, a footnote). */
+  caption?: string;
   grid: GridSpec;
   panels: PanelSpec[];
   x: AxisSpec;
@@ -206,6 +213,8 @@ export interface PagesSpec {
 
 export interface PanelStat {
   name: string;
+  /** Its name as shown (its column's label; default: its name). */
+  label?: string;
   kind: "number" | "text";
   /** A value per panel (null: none; "" for text). */
   values: (number | string | null)[];
