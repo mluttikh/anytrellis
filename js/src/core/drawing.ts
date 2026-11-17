@@ -1,7 +1,12 @@
 // The 2D canvases around the GPU marks: behind them, panel backgrounds and gridlines; in
 // front, axes, strips, titles, rules, the crosshair and the hovered mark.
+//
+// Two looks (spec.theme). Minimal, the default: no panel fill, a grid of ink at low opacity
+// (Bartram & Stone) only across y unless points are drawn, an x baseline and no y axis line,
+// strips as left-aligned semibold titles, the y title level over the axis ("↑ temp").
+// Classic: filled panels and strips, a full grey grid, both axis lines, titles on their side.
 
-import type { Layout, PanelBox, Rect } from "./layout";
+import { type Layout, type PanelBox, type Rect, STRIP_PAD, type Strip, isClassic } from "./layout";
 import type { PanelMap, TextData } from "./scene";
 import { type Tick, minorTicks, ticks, yTickCount } from "./ticks";
 import type { RuleLayerSpec, TrellisSpec } from "./types";
@@ -65,26 +70,44 @@ export function yTicks(spec: TrellisSpec, v: PanelView): Tick[] {
   return ticks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, count, spec.y.levels);
 }
 
+/** The minimal theme's grid: the text colour at this opacity. */
+export const GRID_ALPHA = 0.1;
+
+/** Which axes draw grid lines: both in the classic theme; in the minimal one, y always, and
+ * x for points (a scatter reads off both) or when y is a band (bars along x). */
+export function gridAxes(spec: TrellisSpec): { x: boolean; y: boolean } {
+  const x = spec.x.kind !== "band";
+  const y = spec.y.kind !== "band";
+  if (isClassic(spec)) return { x, y };
+  return { x: x && (!y || spec.layers.some((l) => l.type === "points")), y };
+}
+
 export function drawBack(ctx: CanvasRenderingContext2D, spec: TrellisSpec, views: PanelView[], theme: Theme): void {
+  const classic = isClassic(spec);
+  const grid = gridAxes(spec);
+  const alpha = classic ? 1 : GRID_ALPHA;
   for (const v of views) {
     const r = v.rect;
-    ctx.fillStyle = theme.panel;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    if (classic) {
+      ctx.fillStyle = theme.panel;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
     ctx.save();
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
-    ctx.strokeStyle = theme.grid;
+    ctx.strokeStyle = classic ? theme.grid : theme.text;
+    ctx.globalAlpha = alpha;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    if (spec.x.kind !== "band") {
+    if (grid.x) {
       for (const t of xTicks(spec, v)) {
         const x = Math.round(v.map.ox + t.value * v.map.sx) + 0.5;
         ctx.moveTo(x, r.y);
         ctx.lineTo(x, r.y + r.h);
       }
     }
-    if (spec.y.kind !== "band") {
+    if (grid.y) {
       for (const t of yTicks(spec, v)) {
         const y = Math.round(v.map.oy + t.value * v.map.sy) + 0.5;
         ctx.moveTo(r.x, y);
@@ -93,10 +116,10 @@ export function drawBack(ctx: CanvasRenderingContext2D, spec: TrellisSpec, views
     }
     ctx.stroke();
     // a log axis: fainter lines between its ticks
-    const minorX = minorTicks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, spec.x.kind === "log" ? xTicks(spec, v) : [], r.w);
-    const minorY = minorTicks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, spec.y.kind === "log" ? yTicks(spec, v) : [], r.h);
+    const minorX = grid.x ? minorTicks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, spec.x.kind === "log" ? xTicks(spec, v) : [], r.w) : [];
+    const minorY = grid.y ? minorTicks(spec.y.kind, v.y[0], v.y[1], spec.y.origin, spec.y.kind === "log" ? yTicks(spec, v) : [], r.h) : [];
     if (minorX.length || minorY.length) {
-      ctx.globalAlpha = 0.45;
+      ctx.globalAlpha = 0.45 * alpha;
       ctx.beginPath();
       for (const value of minorX) {
         const x = Math.round(v.map.ox + value * v.map.sx) + 0.5;
@@ -133,6 +156,7 @@ export interface FrontState {
 
 export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layout: Layout, views: PanelView[], theme: Theme, state: FrontState): void {
   const fs = theme.fontSize;
+  const classic = isClassic(spec);
   ctx.font = `${fs}px ${theme.font}`;
   ctx.textBaseline = "middle";
 
@@ -202,8 +226,10 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     if (box.showY) {
       ctx.textAlign = "right";
       ctx.beginPath();
-      ctx.moveTo(r.x - 0.5, r.y);
-      ctx.lineTo(r.x - 0.5, r.y + r.h);
+      if (classic) {
+        ctx.moveTo(r.x - 0.5, r.y);
+        ctx.lineTo(r.x - 0.5, r.y + r.h);
+      }
       let lastTop = Infinity;
       for (const t of yTicks(spec, v)) {
         const y = v.map.oy + t.value * v.map.sy;
@@ -220,35 +246,10 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
   });
 
   // strips
-  const strip = (rect: Rect, label: string, vertical: boolean, note = ""): void => {
-    ctx.fillStyle = theme.strip;
-    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-    ctx.fillStyle = theme.stripText;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(rect.x, rect.y, rect.w, rect.h);
-    ctx.clip();
-    if (vertical) {
-      ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
-      ctx.rotate(Math.PI / 2);
-      ctx.textAlign = "center";
-      ctx.fillText(fit(ctx, label, rect.h - 6), 0, 0);
-    } else if (note) {
-      // the name at the left, cut to leave the value whole at the right
-      const y = rect.y + rect.h / 2 + 0.5;
-      const w = ctx.measureText(note).width;
-      ctx.textAlign = "right";
-      ctx.fillText(note, rect.x + rect.w - STRIP_PAD, y);
-      ctx.textAlign = "left";
-      ctx.fillText(fit(ctx, label, rect.w - 3 * STRIP_PAD - w), rect.x + STRIP_PAD, y);
-    } else {
-      ctx.textAlign = "center";
-      ctx.fillText(fit(ctx, label, rect.w - 6), rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
-    }
-    ctx.restore();
-  };
-  for (const box of layout.panels) if (box.strip) strip(box.strip, box.label, false, box.note);
-  for (const s of layout.strips) strip(s.rect, s.label, s.vertical);
+  const strip = classic ? classicStrip : minimalStrip;
+  for (const box of layout.panels) if (box.strip) strip(ctx, theme, { rect: box.strip, label: box.label, vertical: false, side: "top", span: false }, box.note);
+  for (const s of layout.strips) strip(ctx, theme, s);
+  ctx.font = `${fs}px ${theme.font}`;
 
   // titles
   ctx.fillStyle = theme.text;
@@ -263,13 +264,16 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.textAlign = "center";
     ctx.fillText(spec.x.title, layout.xTitle.x, layout.xTitle.y);
   }
-  if (layout.yTitle) {
+  if (layout.yTitle && classic) {
     ctx.save();
     ctx.translate(layout.yTitle.x, layout.yTitle.y);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = "center";
     ctx.fillText(spec.y.title, 0, 0);
     ctx.restore();
+  } else if (layout.yTitle) {
+    ctx.textAlign = "left";
+    ctx.fillText(`↑ ${spec.y.title}`, layout.yTitle.x, layout.yTitle.y);
   }
 
   for (const b of state.brushes) {
@@ -391,10 +395,77 @@ function drawRule(ctx: CanvasRenderingContext2D, l: RuleLayerSpec, v: PanelView)
   ctx.lineWidth = 1;
 }
 
-/** `text` cut with an ellipsis to fit `width` px. */
-/** A strip's room at either end, and between a name and its value. */
-const STRIP_PAD = 4;
+/** A classic strip: filled, its label centred (a row's on its side), a paged wrap's sorted
+ * value at the right. */
+function classicStrip(ctx: CanvasRenderingContext2D, theme: Theme, s: Strip, note = ""): void {
+  const { rect, label } = s;
+  ctx.fillStyle = theme.strip;
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.fillStyle = theme.stripText;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  if (s.vertical) {
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText(fit(ctx, label, rect.h - 6), 0, 0);
+  } else if (note) {
+    // the name at the left, cut to leave the value whole at the right
+    const y = rect.y + rect.h / 2 + 0.5;
+    const w = ctx.measureText(note).width;
+    ctx.textAlign = "right";
+    ctx.fillText(note, rect.x + rect.w - STRIP_PAD, y);
+    ctx.textAlign = "left";
+    ctx.fillText(fit(ctx, label, rect.w - 3 * STRIP_PAD - w), rect.x + STRIP_PAD, y);
+  } else {
+    ctx.textAlign = "center";
+    ctx.fillText(fit(ctx, label, rect.w - 6), rect.x + rect.w / 2, rect.y + rect.h / 2 + 0.5);
+  }
+  ctx.restore();
+}
 
+/** A minimal strip: the label as a semibold title at the left, nothing behind it; one spanning
+ * several panels underlined (a row's: a line at its left) to show which; a paged wrap's sorted
+ * value at the right in the muted colour, the name keeping at least half the room. */
+function minimalStrip(ctx: CanvasRenderingContext2D, theme: Theme, s: Strip, note = ""): void {
+  const { rect, label } = s;
+  const right = s.side === "right";
+  const x = rect.x + (right ? STRIP_PAD : 1);
+  const y = rect.y + rect.h / 2 + 0.5;
+  ctx.save();
+  if (s.span) {
+    ctx.strokeStyle = theme.axis;
+    ctx.beginPath();
+    if (right) {
+      ctx.moveTo(rect.x + 0.5, rect.y);
+      ctx.lineTo(rect.x + 0.5, rect.y + rect.h);
+    } else {
+      ctx.moveTo(rect.x, rect.y + rect.h - 0.5);
+      ctx.lineTo(rect.x + rect.w, rect.y + rect.h - 0.5);
+    }
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  let room = rect.x + rect.w - x - 2;
+  if (note) {
+    const shown = fit(ctx, note, Math.max(0, room / 2));
+    ctx.fillStyle = theme.muted;
+    ctx.textAlign = "right";
+    ctx.fillText(shown, rect.x + rect.w - 1, y);
+    room -= ctx.measureText(shown).width + 2 * STRIP_PAD;
+  }
+  ctx.font = `600 ${theme.fontSize}px ${theme.font}`;
+  ctx.fillStyle = theme.text;
+  ctx.textAlign = "left";
+  ctx.fillText(fit(ctx, label, room), x, y);
+  ctx.restore();
+}
+
+/** `text` cut with an ellipsis to fit `width` px. */
 export function fit(ctx: CanvasRenderingContext2D, text: string, width: number): string {
   if (ctx.measureText(text).width <= width) return text;
   let lo = 0;

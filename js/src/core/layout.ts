@@ -10,6 +10,9 @@
 // the first outermost, each spanning the panels (rows, columns) next to each other that
 // share its level and those outside it. With strip_label, every panel (a grid's too) has a
 // strip of its own naming it, and there are no others.
+//
+// The minimal theme (the default) sets the y title over the plot, at its left, and a grid's
+// row labels level, as wide as they need; the classic theme turns both on their side.
 
 import { pageList } from "./pages";
 import { ticks, yTickCount } from "./ticks";
@@ -42,7 +45,12 @@ export interface PanelBox {
 export interface Strip {
   rect: Rect;
   label: string;
+  /** Its text turned on its side (the classic theme's row strips). */
   vertical: boolean;
+  /** Over the columns (`top`: a grid's columns, a wrap's outer levels) or right of the rows. */
+  side: "top" | "right";
+  /** It spans several panels (a nested strip's outer level). */
+  span: boolean;
 }
 
 export interface Layout {
@@ -86,6 +94,24 @@ export function panelName(spec: TrellisSpec, index: number): string {
 const GAP = 6;
 const TICK = 4;
 const MIN_PANEL = 24;
+/** A strip's room at either end, and between a name and its value. */
+export const STRIP_PAD = 4;
+/** The widest a minimal theme's row label gets (px); a longer one is cut. */
+const ROW_LABEL_MAX = 120;
+/** Strip text is semibold: about this much wider than measured. */
+export const BOLD = 1.06;
+
+/** The classic theme: filled panels and strips, a full grid, titles on their side. */
+export function isClassic(spec: TrellisSpec): boolean {
+  return spec.theme === "classic";
+}
+
+/** The height of the line over the plot holding the y title (minimal theme), or the width of
+ * the column left of it (classic). */
+function yTitleRoom(spec: TrellisSpec, fs: number): { w: number; h: number } {
+  if (!spec.y.title) return { w: 0, h: 0 };
+  return isClassic(spec) ? { w: Math.round(fs * 1.4 + 4), h: 0 } : { w: 0, h: Math.round(fs * 1.4 + 2) };
+}
 
 /** The panels' shape, height over width, that full screen and an opened panel keep: the
  * spec's aspect, unless its height or panel_height sets their height instead. */
@@ -149,13 +175,24 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   const rowDepth = !own && grid.kind === "grid" && grid.row_labels.length ? depth(grid.row_keys) : 0;
   const wrapStrip = wrapDepth * stripH;
   const topStrip = colDepth * stripH;
-  const rightStrip = rowDepth * stripH;
+  // the row strips' widths, outermost level first: on their side, a strip's height; level,
+  // as wide as their longest label
+  const rowW: number[] = [];
+  for (let k = 0; k < rowDepth; k++) {
+    if (isClassic(spec)) rowW.push(stripH);
+    else {
+      const labels = rowDepth === 1 ? grid.row_labels : (grid.row_keys ?? []).map((keys) => keys[k]);
+      const widest = Math.max(0, ...labels.map((l) => opts.measure(l)));
+      rowW.push(Math.min(ROW_LABEL_MAX, Math.ceil(widest * BOLD) + 2 * STRIP_PAD + 4));
+    }
+  }
+  const rightStrip = rowW.reduce((a, b) => a + b, 0);
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
   const xTitleH = spec.x.title ? Math.round(fs * 1.4 + 4) : 0;
-  const yTitleW = spec.y.title ? Math.round(fs * 1.4 + 4) : 0;
-  const left = 4 + yTitleW;
+  const yTitle = yTitleRoom(spec, fs);
+  const left = 4 + yTitle.w;
   const right = 10;
-  const top = 6 + titleH;
+  const top = 6 + titleH + yTitle.h;
   const bottom = 4 + xTitleH;
 
   const axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
@@ -226,22 +263,24 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   const strips: Strip[] = [];
   if (colDepth === 1) {
     grid.col_labels.forEach((label, c) => {
-      strips.push({ rect: { x: colX[c], y: top, w: pw, h: stripH - 1 }, label, vertical: false });
+      strips.push({ rect: { x: colX[c], y: top, w: pw, h: stripH - 1 }, label, vertical: false, side: "top", span: false });
     });
   } else if (colDepth > 1) {
     for (const [k, a, b] of nest(grid.col_keys ?? [], colDepth)) {
       const x0 = colX[a];
-      strips.push({ rect: { x: x0, y: top + k * stripH, w: colX[b] + pw - x0, h: stripH - 1 }, label: grid.col_keys![a][k], vertical: false });
+      strips.push({ rect: { x: x0, y: top + k * stripH, w: colX[b] + pw - x0, h: stripH - 1 }, label: grid.col_keys![a][k], vertical: false, side: "top", span: b > a });
     }
   }
+  const vertical = isClassic(spec);
+  // a row level's strips: right of the inner levels' (the first column's outermost)
+  const rowX = (k: number): number => plotRight + GAP + rowW.slice(k + 1).reduce((a, b) => a + b, 0);
   if (rowDepth === 1) {
     grid.row_labels.forEach((label, r) => {
-      strips.push({ rect: { x: plotRight + GAP, y: rowY[r], w: stripH - 1, h: ph }, label, vertical: true });
+      strips.push({ rect: { x: rowX(0), y: rowY[r], w: rowW[0] - 1, h: ph }, label, vertical, side: "right", span: false });
     });
   } else if (rowDepth > 1) {
     for (const [k, a, b] of nest(grid.row_keys ?? [], rowDepth)) {
-      const x0 = plotRight + GAP + (rowDepth - 1 - k) * stripH; // the first column's outermost
-      strips.push({ rect: { x: x0, y: rowY[a], w: stripH - 1, h: rowY[b] + ph - rowY[a] }, label: grid.row_keys![a][k], vertical: true });
+      strips.push({ rect: { x: rowX(k), y: rowY[a], w: rowW[k] - 1, h: rowY[b] + ph - rowY[a] }, label: grid.row_keys![a][k], vertical, side: "right", span: b > a });
     }
   }
   if (wrapDepth > 1) {
@@ -258,7 +297,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
         for (const [k, a, b] of nest(keys, wrapDepth - 1)) {
           const x0 = colX[inRow[run[a]].col];
           const x1 = colX[inRow[run[b]].col] + pw;
-          strips.push({ rect: { x: x0, y: rowY[r] - wrapStrip + k * stripH, w: x1 - x0, h: stripH - 1 }, label: keys[a][k], vertical: false });
+          strips.push({ rect: { x: x0, y: rowY[r] - wrapStrip + k * stripH, w: x1 - x0, h: stripH - 1 }, label: keys[a][k], vertical: false, side: "top", span: b > a });
         }
       }
     }
@@ -287,7 +326,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     strips,
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
     xTitle: xTitleH ? { x: centreX, y: plotBottom + xTitleH - 2 } : null,
-    yTitle: yTitleW ? { x: shift + 4 + fs, y: centreY } : null,
+    yTitle: yTitle.w ? { x: shift + 4 + fs, y: centreY } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
     spare,
     xAxisHeight,
     yAxisWidth,
@@ -326,10 +365,10 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
   const xAxisHeight = fs + TICK + 6;
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
   const xTitleH = spec.x.title ? Math.round(fs * 1.4 + 4) : 0;
-  const yTitleW = spec.y.title ? Math.round(fs * 1.4 + 4) : 0;
-  const left = 4 + yTitleW;
+  const yTitle = yTitleRoom(spec, fs);
+  const left = 4 + yTitle.w;
   const right = 10;
-  const top = 6 + titleH;
+  const top = 6 + titleH + yTitle.h;
   const bottom = 4 + xTitleH;
   const total = opts.height ?? 360;
   const most = Math.max(MIN_PANEL, Math.floor(total - top - stripH - xAxisHeight - bottom - 2));
@@ -370,7 +409,7 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
     strips: [],
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
     xTitle: xTitleH ? { x: rect.x + w / 2, y: plotBottom + xTitleH - 2 } : null,
-    yTitle: yTitleW ? { x: shift + 4 + fs, y: rect.y + h / 2 } : null,
+    yTitle: yTitle.w ? { x: shift + 4 + fs, y: rect.y + h / 2 } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
     spare: null,
     xAxisHeight,
     yAxisWidth: [yW],

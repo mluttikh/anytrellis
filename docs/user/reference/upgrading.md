@@ -4,6 +4,27 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
+## Unreleased
+
+No code stops working; the default look changes.
+
+**Plots are drawn in the minimal theme.** Panels have no fill, strips read as titles, the
+grid is fainter and runs across y only (across x too for points), the y title sits level
+over the plot, a grid's row labels are level, a time axis has no title unless you give one,
+and category colours come from Petroff's palette instead of tab10. To keep the old look, or
+only its colours:
+
+```python
+# 0.5: filled panels and strips, a full grid, tab10
+Trellis(cars, wrap="origin")
+
+# now: the same
+Trellis(cars, wrap="origin", theme="classic")
+
+# the new look with the old colours
+Trellis(cars, wrap="origin", palette="tab10")
+```
+
 ## 0.5.0
 
 No code stops working, and plots show what they did. New: `as_category()` reads a number

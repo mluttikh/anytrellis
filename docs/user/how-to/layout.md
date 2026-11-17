@@ -165,7 +165,20 @@ fall don't count, and the shape stays between 0.02 and 5 times as high as wide. 
 Trellis(cars, wrap="origin", title="Fuel use", x_title="weight (lb)", y_title="miles per gallon")
 ```
 
-The axis titles default to the column names; `x_title=""` hides one.
+The axis titles default to the column names (a time axis has none: dates say what they
+are); `x_title=""` hides one. The y title sits level over the plot's top left, `↑ miles per
+gallon`, where it reads without tilting your head.
+
+## The look
+
+`theme="minimal"` (the default) draws as little behind the data as reads well: no panel
+fill, strips as titles at each panel's left, a faint grid across y (and across x for
+points), and a grid's row labels level at the right. `theme="classic"` draws the look of
+anytrellis before 0.6: grey panels and strips, a full grid, and titles on their side.
+
+```python
+Trellis(cars, row="origin", col="cylinders", theme="classic")
+```
 
 ## The legend's place
 

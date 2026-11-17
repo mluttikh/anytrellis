@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
-import { crowdedRight, labelEnd } from "../src/core/drawing";
+import { crowdedRight, gridAxes, labelEnd } from "../src/core/drawing";
 import { layout } from "../src/core/layout";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
@@ -102,14 +102,14 @@ describe("nested strips", () => {
     const s = spec([0, 1, 2].flatMap((c) => [panel(0, c), panel(1, c)]), 2, 3, "grid");
     s.grid = { ...s.grid, col_labels: ["A · x", "A · y", "B · x"], col_keys: [["A", "x"], ["A", "y"], ["B", "x"]], row_labels: ["n · 1", "n · 2"], row_keys: [["n", "1"], ["n", "2"]] };
     const l = layout(s, opts);
-    const top = l.strips.filter((t) => !t.vertical);
+    const top = l.strips.filter((t) => t.side === "top");
     const [a, b] = top.filter((t) => t.rect.y === top[0].rect.y);
     expect([a.label, b.label]).toEqual(["A", "B"]);
     const cols = l.panels.filter((p) => p.rect.y === l.panels[0].rect.y).map((p) => p.rect);
     expect(a.rect.x).toBe(cols[0].x);
     expect(a.rect.x + a.rect.w).toBe(cols[1].x + cols[1].w); // A over its two columns
     expect(top.filter((t) => t.rect.y > a.rect.y).map((t) => t.label)).toEqual(["x", "y", "x"]);
-    const right = l.strips.filter((t) => t.vertical);
+    const right = l.strips.filter((t) => t.side === "right");
     const outer = right.filter((t) => t.label === "n");
     expect(outer).toHaveLength(1); // n over both rows, outermost on the right
     expect(Math.min(...right.map((t) => t.rect.x))).toBeLessThan(outer[0].rect.x);
@@ -241,7 +241,7 @@ describe("layout", () => {
     expect(a.h).toBe(100);
     expect(b.x).toBeGreaterThanOrEqual(a.x + a.w);
     expect(c.y).toBeGreaterThanOrEqual(a.y + a.h);
-    expect(l.strips.filter((s) => s.vertical)).toHaveLength(2);
+    expect(l.strips.filter((s) => s.side === "right")).toHaveLength(2);
     const right = Math.max(...l.strips.map((s) => s.rect.x + s.rect.w));
     expect(right).toBeLessThanOrEqual(600);
     expect(l.height).toBeGreaterThan(c.y + c.h);
@@ -782,5 +782,42 @@ describe("pages", () => {
     const none = layout(paged, { ...opts, page: [] });
     expect(none.panels).toEqual([]);
     expect(none.height).toBe(first.height);
+  });
+});
+
+describe("looks", () => {
+  const titled = (theme: "minimal" | "classic" | undefined): TrellisSpec => {
+    const s = spec([panel(0, 0), panel(0, 1)], 1, 2);
+    return { ...s, theme, y: { ...s.y, title: "temp" } };
+  };
+
+  it("minimal (the default) sets the y title over the plot, classic on its side", () => {
+    for (const theme of [undefined, "minimal"] as const) {
+      const l = layout(titled(theme), opts);
+      expect(l.yTitle!.y).toBeLessThan(l.panels[0].strip!.y);
+      expect(l.yTitle!.x).toBeLessThan(l.panels[0].rect.x);
+    }
+    const c = layout(titled("classic"), opts);
+    expect(c.yTitle!.y).toBeGreaterThan(c.panels[0].rect.y); // halfway down the panels
+  });
+
+  it("draws the grid across y, and across x too for points", () => {
+    const s = titled(undefined);
+    expect(gridAxes(s)).toEqual({ x: false, y: true });
+    const points = { ...s, layers: [{ type: "points" } as MarkLayerSpec] };
+    expect(gridAxes(points)).toEqual({ x: true, y: true });
+    expect(gridAxes({ ...s, y: { ...s.y, kind: "band" } })).toEqual({ x: true, y: false });
+    expect(gridAxes({ ...s, theme: "classic" })).toEqual({ x: true, y: true });
+  });
+
+  it("sets a grid's row labels level, as wide as the longest", () => {
+    const s = spec([panel(0, 0), panel(1, 0)], 2, 1, "grid");
+    s.grid = { ...s.grid, row_labels: ["short", "a much longer one"] };
+    const rows = layout(s, opts).strips.filter((t) => t.side === "right");
+    expect(rows.map((t) => t.vertical)).toEqual([false, false]);
+    expect(rows[0].rect.w).toBeGreaterThanOrEqual("a much longer one".length * 7);
+    const classic = layout({ ...s, theme: "classic" }, opts).strips.filter((t) => t.side === "right");
+    expect(classic.map((t) => t.vertical)).toEqual([true, true]);
+    expect(classic[0].rect.w).toBeLessThan(rows[0].rect.w);
   });
 });

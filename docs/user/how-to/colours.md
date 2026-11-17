@@ -63,7 +63,11 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
-The default palette is Tableau's ten colours. Rows whose category is missing get a
+`palette=` also takes a name: `"petroff10"` (the default), `"petroff8"`, `"petroff6"`, or
+`"tab10"` (Tableau's ten colours, the default before, and the classic theme's). Petroff's
+palettes were chosen to stay apart for readers with colour-vision deficiency and ranked by
+a survey of what people prefer; the first colours are the farthest apart, so a plot with
+few categories gets the most distinct ones. Rows whose category is missing get a
 `(missing)` colour of their own.
 
 ## Order categories
