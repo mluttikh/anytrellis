@@ -126,7 +126,7 @@ as a hundred.
 
 ## Which renderer draws
 
-The plot picks the fastest one the browser has; hover over it, and its bottom-right corner
+The plot picks the fastest one the browser has; its help (++question++, or the **?** button)
 says which:
 
 | Renderer | Where | Good for |

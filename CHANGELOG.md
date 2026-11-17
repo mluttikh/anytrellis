@@ -8,6 +8,16 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- **The toolbar explains itself.** What a drag does is one control of three, pan, box zoom
+  and select, with the one on filled; they were two toggles that left pan implied. The
+  icons are in the muted colour at full opacity (over 3:1 on the background), the text
+  colour on hover and focus, where they were faded to 45% and looked disabled. Chips beside
+  the toolbar say what differs from the start, "Zoomed in x", "267 of 693 marks selected",
+  "2 filters: 12 of 40 panels", each with its Reset or Clear (the count of a brush released
+  is no longer a passing notice). `?` or the new **?** button shows the keys and mouse,
+  the renderer and the anytrellis version; the renderer's name no longer appears in the
+  plot's corner on hover.
+
 - **Time axes take the nearest calendar step**, as d3 does, not the next larger one, and
   never fewer than two ticks: a week of data in a narrow panel is labelled every two days,
   where it showed a single date; a year at six ticks is labelled every two months.

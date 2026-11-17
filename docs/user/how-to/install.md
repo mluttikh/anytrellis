@@ -57,6 +57,6 @@ from anytrellis.synthetic import sensors
 Trellis(sensors(stations=3), wrap="station").line(x="time", y="temp", color="sensor")
 ```
 
-Hover over the plot: its bottom-right corner shows which renderer draws it, WebGPU, WebGL2
-or Canvas 2D.
+Press ++question++ over the plot (or its **?** button): the help says which renderer draws
+it, WebGPU, WebGL2 or Canvas 2D.
 If no plot appears, see [Fix a plot that doesn't show](troubleshooting.md).

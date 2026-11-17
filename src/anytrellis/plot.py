@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import functools
 import html
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -2767,6 +2768,7 @@ class Trellis:
         )
         spec = {
             "version": SPEC_VERSION,
+            "package_version": _package_version(),
             "title": self.title,
             "subtitle": self.subtitle,
             "caption": self.caption,
@@ -3859,6 +3861,17 @@ def _text_spec(
         "opacity": layer.opacity,
         "context": layer.facet == "exclude",
     }
+
+
+@functools.cache
+def _package_version() -> str:
+    """This anytrellis's version (shown in the plot's help, ?)."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("anytrellis")
+    except PackageNotFoundError:  # a source tree that is not installed
+        return "0.0.0"
 
 
 def _rules_of(layer: Layer, table: Table, grid: Grid, kind: AxisKind, levels: list[str] | None,
