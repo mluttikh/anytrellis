@@ -91,6 +91,34 @@ Panels that share a scale zoom and pan together, whatever you share. Fit y to th
 view with **y** (or `Trellis(..., fit_y=True)`): a shared y fits all its panels together,
 so they stay comparable.
 
+## Set an axis's range: `limits()`
+
+```python
+plot.limits(y=(0, None))                    # y from 0; its top from the data
+plot.limits(x=("2026-03-01", "2026-04-01"))  # a time axis: dates or datetimes
+plot.limits(y=(None, None))                 # the data's range again
+```
+
+Either end can be `None`: that end comes from the data, panel by panel when the scale is
+free. Zooming starts from the limits, and Reset returns to them. A log axis takes its
+values (`limits(x=(1, 1000))`), a category axis takes none: choose its categories with
+`order()` or by filtering the data.
+
+## Write the values: `format()`
+
+```python
+plot.format(x="$,.0f", y=".1%")    # $3,000 and 12.3%
+plot.format(x="%b %Y")              # a time axis: Mar 2026
+plot.format(color=".0f")            # a colour legend's ends
+```
+
+Numbers take [d3-format](https://d3js.org/d3-format) strings: `",.0f"` groups thousands,
+`".2s"` writes 1.2k and 3.4M, `".1%"` multiplies by 100, `"+.1f"` always shows the sign,
+`".3~g"` cuts trailing zeros. Times take strftime strings, in UTC as the axis is: `%Y`,
+`%b`, `%B`, `%d`, `%-d` (not padded), `%H:%M`, `%a`, `%j` and the rest that d3 knows.
+The format is used for the tick labels, the tooltips and images saved from Python alike;
+`format(x="")` brings back the automatic labels.
+
 ## Shared, free, or log?
 
 When the panels' values differ by orders of magnitude, a [log scale](log.md) is often

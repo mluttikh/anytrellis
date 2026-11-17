@@ -34,6 +34,15 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **`limits(x=, y=)`**: an axis's range, either end `None` for the data's own
+  (`limits(y=(0, None))`); times as dates, log axes in their values. Zooming starts there
+  and Reset returns there.
+- **`format(x=, y=, color=)`**: d3-format strings for numbers (`",.0f"`, `".1%"`, `".2s"`,
+  `"$,.2f"`) and strftime strings for times (`"%b %Y"`), for tick labels, tooltips and a
+  colour legend's ends, in the page and in `save_svg` / `save_png` alike. Both sides are
+  checked against d3's own output.
+- **`legend(position, title=)`**: `"right"` (a column right of the plot) and `"none"`
+  join `"auto"` and `"bottom"`, also as `Trellis(legend=)`; `title=` renames the legend.
 - **`subtitle=` and `caption=`** on `Trellis` and `pairs`: a line or two under the title,
   and a note under the plot (a source, a footnote). Both wrap, and both are in exported
   images, from the page and from `save_svg` / `save_png`.

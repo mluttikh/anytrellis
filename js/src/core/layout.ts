@@ -395,7 +395,7 @@ export function nest(keys: string[][], depth: number): [number, number, number][
  * draws (null: about 5); bands: every label measured. */
 function yLabelsWidth(spec: TrellisSpec, domain: [number, number], opts: LayoutOptions, h: number | null): number {
   const count = spec.y.kind === "band" ? 1000 : h === null ? 5 : yTickCount(spec.y.kind, domain[0], domain[1], h);
-  const labels = ticks(spec.y.kind, domain[0], domain[1], spec.y.origin, count, spec.y.levels);
+  const labels = ticks(spec.y.kind, domain[0], domain[1], spec.y.origin, count, spec.y.levels, spec.y.format);
   return Math.ceil(Math.max(0, ...labels.map((t) => opts.measure(t.label)))) + TICK + 4;
 }
 

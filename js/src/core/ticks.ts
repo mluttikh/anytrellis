@@ -2,6 +2,7 @@
 // wall-clock time Python sent), bands (one tick per category, thinned to fit), and log
 // scales (decades, with 2 and 5 between when there is room; within a decade, round values).
 
+import { axisFormat } from "./format";
 import type { AxisKind } from "./types";
 
 export interface Tick {
@@ -18,8 +19,16 @@ export function yTickCount(kind: AxisKind, lo: number, hi: number, h: number): n
   return Math.max(2, Math.floor(shown / Math.max(1, Math.ceil(15 / (h / shown)))));
 }
 
-/** Ticks for [lo, hi] (axis units relative to `origin`), about `count` of them. */
-export function ticks(kind: AxisKind, lo: number, hi: number, origin: number, count: number, levels: string[] | null = null): Tick[] {
+/** Ticks for [lo, hi] (axis units relative to `origin`), about `count` of them, labelled
+ * by `format` when one is given (format.ts: a d3-format or strftime string). */
+export function ticks(kind: AxisKind, lo: number, hi: number, origin: number, count: number, levels: string[] | null = null, format: string | null = null): Tick[] {
+  const out = placedTicks(kind, lo, hi, origin, count, levels);
+  const f = axisFormat(kind, format);
+  if (!f) return out;
+  return out.map((t) => ({ value: t.value, label: f(kind === "log" ? Math.pow(10, t.value + origin) : t.value + origin) }));
+}
+
+function placedTicks(kind: AxisKind, lo: number, hi: number, origin: number, count: number, levels: string[] | null): Tick[] {
   if (!(hi > lo) || !Number.isFinite(lo) || !Number.isFinite(hi)) return [];
   count = Math.max(1, count);
   if (kind === "band") return bandTicks(lo, hi, levels ?? [], count);
@@ -57,8 +66,11 @@ export function formatNumber(v: number, step: number, decimals: number): string 
   return v.toFixed(Math.min(decimals, 12)).replace("-", "−");
 }
 
-/** A value at the precision of its axis (tooltips): `span` the visible range. */
-export function formatValue(kind: AxisKind, v: number, origin: number, span: number, levels: string[] | null = null): string {
+/** A value at the precision of its axis (tooltips): `span` the visible range; as `format`
+ * says when one is given. */
+export function formatValue(kind: AxisKind, v: number, origin: number, span: number, levels: string[] | null = null, format: string | null = null): string {
+  const f = axisFormat(kind, format);
+  if (f) return f(kind === "log" ? Math.pow(10, v + origin) : v + origin);
   if (kind === "band") return levels?.[Math.round(v)] ?? "";
   if (kind === "time") return formatTime(v + origin, span / 200);
   if (kind === "log") {

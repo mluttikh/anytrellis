@@ -28,6 +28,8 @@ export interface AxisSpec {
   origin: number;
   share: Share;
   title: string;
+  /** How its values are written (`Trellis.format`): a d3-format string, or strftime for times. */
+  format?: string | null;
 }
 
 export interface PanelSpec {
@@ -166,6 +168,8 @@ export interface LegendSpec {
   colors: string[];
   lo?: number;
   hi?: number;
+  /** A number legend's ends: a d3-format string. */
+  format?: string | null;
 }
 
 export interface TrellisSpec {
@@ -185,8 +189,9 @@ export interface TrellisSpec {
   panel_height: number | null;
   /** Each panel's height as a multiple of its width (unless height or panel_height). */
   aspect?: number | null;
-  /** auto: in a wrap's empty cells when it fits, else under the plot; bottom: under it. */
-  legend_position?: "auto" | "bottom";
+  /** auto: in a wrap's empty cells when it fits, else under the plot; bottom: under it;
+   * right: a column right of the plot (under it when too tall); none: no legend. */
+  legend_position?: "auto" | "bottom" | "right" | "none";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
   /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */

@@ -31,6 +31,7 @@ from anytrellis.detail import (
     Shown,
 )
 from anytrellis.facets import Grid, Order, Panel, Summary, build_grid, ordered_levels, strip_texts
+from anytrellis.formats import number_format, time_format
 from anytrellis.layers import (
     FACET_MODES,
     STEPS,
@@ -101,7 +102,7 @@ if TYPE_CHECKING:
 
 SPEC_VERSION = 1
 RENDERERS = ("auto", "webgpu", "webgl2", "canvas2d")
-LEGENDS = ("auto", "bottom")
+LEGENDS = ("auto", "bottom", "right", "none")
 STRIPS = ("nested", "joined")
 EMPTY = ("draw", "blank")
 MARGINS = (False, True, "row", "col")
@@ -172,7 +173,9 @@ class Trellis:
             (``"petroff10"``, ``"petroff8"``, ``"petroff6"``, ``"observable10"``,
             ``"tab10"``; default: the theme's).
         legend: ``"auto"``: in a wrap's empty cells after its last panel when it fits there,
-            under the plot otherwise; ``"bottom"``: always under the plot.
+            under the plot otherwise; ``"bottom"``: always under the plot; ``"right"``: in
+            a column right of the plot (under it when too tall); ``"none"``: no legend. Also
+            ``legend()``.
         strips: With several facet columns, ``"nested"``: a strip per column, each spanning
             the panels of its level (the first column's outermost); ``"joined"``: one strip
             per panel, row or column naming its levels together (``"north · A"``).
@@ -317,7 +320,9 @@ class Trellis:
         )
         if legend not in LEGENDS:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
-        self.legend = legend
+        self._legend: dict[str, Any] = {"position": legend, "title": None}
+        self._limits: dict[str, tuple[Any, Any]] = {}
+        self._formats: dict[str, str] = {}
         if strips not in STRIPS:
             raise ValueError(f"strips must be one of {STRIPS}, got {strips!r}")
         self.strips = strips
@@ -1139,6 +1144,102 @@ class Trellis:
         if y is not None:
             self._scales["y"] = _scale(y)
         return self._changed()
+
+    def limits(self, x: tuple[Any, Any] | None = None, y: tuple[Any, Any] | None = None) -> Self:
+        """The axes' ranges, ``(low, high)``, either end ``None`` for the data's own:
+        ``t.limits(y=(0, None))`` starts y at 0. Times as dates or datetimes (``("2026-03-01",
+        None)``), a log axis's in its values. Zooming starts there and Reset comes back there.
+        ``(None, None)``: the data's range again."""
+        for axis, value in (("x", x), ("y", y)):
+            if value is None:
+                continue
+            if isinstance(value, str) or not isinstance(value, Sequence) or len(value) != 2:
+                raise ValueError(
+                    f"limits({axis}=...) is (low, high), either end None; got {value!r}"
+                )
+            lo, hi = value
+            numbers = all(isinstance(v, int | float) for v in (lo, hi))
+            if numbers and not lo < hi:
+                raise ValueError(f"limits({axis}=...): low must be under high, got {value!r}")
+            if lo is None and hi is None:
+                self._limits.pop(axis, None)
+            else:
+                self._limits[axis] = (lo, hi)
+        return self._changed()
+
+    def format(self, x: str | None = None, y: str | None = None, *,
+               color: str | None = None) -> Self:  # fmt: skip
+        """How values are written on the axes, in tooltips and at a colour legend's ends:
+        d3-format strings for numbers (``",.0f"``: 1,235; ``".1%"``: 12.3%; ``".2s"``: 1.2k;
+        ``"$,.2f"``), strftime strings for times (``"%b %Y"``: Mar 2026; ``"%-d %b"``: 2 Mar;
+        ``"%H:%M"``), in UTC as the axis is. ``""``: the automatic labels again.
+
+        ```python
+        t.format(x="%b %Y", y=".0%")
+        ```
+        """
+        for name, spec in (("x", x), ("y", y), ("color", color)):
+            if spec is None:
+                continue
+            if spec == "":
+                self._formats.pop(name, None)
+                continue
+            if not isinstance(spec, str):
+                raise TypeError(f"format({name}=...) is a string, got {type(spec).__name__}")
+            if _number_format_error(spec) and _time_format_error(spec):
+                raise ValueError(f"format({name}={spec!r}): neither a d3-format string (',.0f', "
+                                 "'.1%', '.2s') nor a strftime one ('%b %Y')")  # fmt: skip
+            if name == "color" and _number_format_error(spec):
+                raise ValueError(f"format(color={spec!r}): a colour legend's ends are numbers; "
+                                 "give a d3-format string")  # fmt: skip
+            self._formats[name] = spec
+        return self._changed()
+
+    def legend(self, position: str | None = None, *,
+               title: str | Mapping[str, str] | None = None) -> Self:  # fmt: skip
+        """Where the legend goes, and its title.
+
+        Args:
+            position: ``"auto"`` (in a wrap's empty cells when it fits, else under the
+                plot), ``"bottom"``, ``"right"`` (a column right of the plot; under it
+                when too tall) or ``"none"``.
+            title: The colour legend's title (default: the colour column's label or name);
+                with several colour columns, a dict by column.
+        """
+        if position is not None:
+            if position not in LEGENDS:
+                raise ValueError(f"legend must be one of {LEGENDS}, got {position!r}")
+            self._legend["position"] = position
+        if title is not None:
+            if not isinstance(title, str | Mapping):
+                raise TypeError(f"legend(title=...) is a string or a dict, got {title!r}")
+            self._legend["title"] = title if isinstance(title, str) else dict(title)
+        return self._changed()
+
+    def _legend_title(self, index: int, name: str) -> str:
+        """A legend's title: given with ``legend(title=)``, else its column's label."""
+        given = self._legend["title"]
+        if isinstance(given, str) and index == 0:
+            return given
+        if isinstance(given, dict) and name in given:
+            return given[name]
+        return self._label(name)
+
+    def _axis_format(self, axis: str, kind: AxisKind) -> str | None:
+        """An axis's format (``format()``), checked against what the axis holds."""
+        spec = self._formats.get(axis)
+        if spec is None:
+            return None
+        if kind == "band":
+            raise ValueError(f"format({axis}={spec!r}): the {axis} axis holds categories, "
+                             "which are written as they are")  # fmt: skip
+        if kind == "time" and ("%" not in spec or _time_format_error(spec)):
+            raise ValueError(f"format({axis}={spec!r}): the {axis} axis holds times; give a "
+                             "strftime string such as '%b %Y'")  # fmt: skip
+        if kind != "time" and _number_format_error(spec):
+            raise ValueError(f"format({axis}={spec!r}): the {axis} axis holds numbers; give a "
+                             "d3-format string such as ',.0f'")  # fmt: skip
+        return spec
 
     def as_category(self, *columns: str) -> Self:
         """Read number columns as categories: their distinct values are the levels, in
@@ -2524,6 +2625,8 @@ class Trellis:
         if shown and all(lr.stat == "horizon" for lr in shown):  # the bands' height, unpadded
             top = float(np.nanmax(extents["y"].hi, initial=0.0)) or 1.0
             yd = [(0.0, top)] * len(yd)
+        xd = _limited(xd, self._limits.get("x"), x_kind, x_levels, "x")
+        yd = _limited(yd, self._limits.get("y"), y_kind, y_levels, "y")
         x_origin = _origin(xd, x_kind)
         y_origin = _origin(yd, y_kind)
         self._axes = {"x": (x_kind, x_levels, x_origin), "y": (y_kind, y_levels, y_origin)}
@@ -2569,18 +2672,29 @@ class Trellis:
                 }
                 for i, p in enumerate(grid.panels)
             ],
-            "x": _axis_spec(x_kind, x_levels, x_origin, self._share["x"], x_title),
-            "y": _axis_spec(y_kind, y_levels, y_origin, self._share["y"], y_title),
+            "x": {
+                **_axis_spec(x_kind, x_levels, x_origin, self._share["x"], x_title),
+                "format": self._axis_format("x", x_kind),
+            },
+            "y": {
+                **_axis_spec(y_kind, y_levels, y_origin, self._share["y"], y_title),
+                "format": self._axis_format("y", y_kind),
+            },
             "layers": [],
             # each with its column's name (select(color=...)) and its title as shown
             "legends": [
-                {**lg, "name": lg["title"], "title": self._label(lg["title"])}
-                for lg in colors.legends()
+                {
+                    **lg,
+                    "name": lg["title"],
+                    "title": self._legend_title(i, lg["title"]),
+                    **({"format": self._formats.get("color")} if lg["kind"] == "number" else {}),
+                }
+                for i, lg in enumerate(colors.legends())
             ],
             "height": self.height,
             "panel_height": self.panel_height,
             "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
-            "legend_position": self.legend,
+            "legend_position": self._legend["position"],
             "fit_y": self.fit_y,
             "pages": pages,
             "theme": self.theme.spec(),
@@ -3102,6 +3216,43 @@ def _scalar(value: Any, kind: AxisKind, levels: list[str] | None) -> float:
     if kind == "time" and not isinstance(value, int | float):
         return float(np.datetime64(value, "ms").astype(np.int64))
     return float(value)
+
+
+def _limited(doms: list[tuple[float, float]], limits: tuple[Any, Any] | None, kind: AxisKind,
+             levels: list[str] | None, axis: str) -> list[tuple[float, float]]:  # fmt: skip
+    """Each panel's range with the ends ``limits()`` gives in place of the data's."""
+    if limits is None:
+        return doms
+    if kind == "band":
+        raise ValueError(f"limits({axis}=...): the {axis} axis holds categories; choose them "
+                         "with order() or by filtering the data")  # fmt: skip
+    lo, hi = (None if v is None else _scalar(v, kind, levels) for v in limits)
+    if lo is not None and hi is not None and not lo < hi:
+        raise ValueError(f"limits({axis}={limits!r}): low must be under high")
+    out = []
+    for d0, d1 in doms:
+        a = d0 if lo is None else lo
+        b = d1 if hi is None else hi
+        if not a < b:  # the data all past the given end: a unit's room from it
+            a, b = (a, a + 1.0) if lo is not None else (b - 1.0, b)
+        out.append((a, b))
+    return out
+
+
+def _number_format_error(spec: str) -> bool:
+    try:
+        number_format(spec)
+    except ValueError:
+        return True
+    return False
+
+
+def _time_format_error(spec: str) -> bool:
+    try:
+        time_format(spec)
+    except ValueError:
+        return True
+    return False
 
 
 def _origin(doms: list[tuple[float, float]], kind: AxisKind) -> float:

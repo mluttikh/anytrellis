@@ -35,6 +35,11 @@ def main(out: Path) -> None:
                                "region": "Region"})  # fmt: skip
     labelled.points(x="fertility", y="life_expect", color="region", size=6)
     labelled.save_html(out / "labelled.html")
+    right = Trellis(gapminder, wrap="year", cols=4, panel_height=150,
+                    title="Fertility and life expectancy, 1955-2005")  # fmt: skip
+    right.points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])
+    right.legend("right").format(y=".0f").limits(y=(20, 90))
+    right.save_html(out / "legend-right.html")
     linked = Trellis(gapminder, wrap="year", cols=4, panel_height=150, link="country",
                      title="Fertility and life expectancy, 1955-2005")  # fmt: skip
     linked.points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])
