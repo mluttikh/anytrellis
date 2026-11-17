@@ -1643,16 +1643,17 @@ export class TrellisView {
     // a category's entries select its marks: alone, or added with Shift, Cmd or Ctrl
     const selectable = this.scene?.layers.some((l) => l.codes && !l.spec.context) ?? false;
     legends.forEach((lg, index) => {
-      const box = el("div", lg.kind === "category" ? "atr-legend-group atr-legend-cat" : "atr-legend-group");
+      // categories and a stepped scale's bins: an entry each (only categories select)
+      const box = el("div", lg.kind === "number" ? "atr-legend-group" : "atr-legend-group atr-legend-cat");
       box.append(el("span", "atr-legend-title", lg.title));
-      if (lg.kind === "category") {
+      if (lg.kind !== "number") {
         (lg.labels ?? []).forEach((label, i) => {
           const item = el("span", "atr-legend-item");
           const sw = el("span", "atr-swatch");
           sw.style.background = lg.colors[i];
           item.append(sw, document.createTextNode(label));
           box.append(item);
-          if (!selectable) return;
+          if (!selectable || lg.kind !== "category") return;
           item.classList.add("atr-legend-pick");
           item.tabIndex = 0;
           item.setAttribute("role", "button");

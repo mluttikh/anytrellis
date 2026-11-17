@@ -1522,7 +1522,7 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
     groups = []
     for index, lg in enumerate(spec["legends"]):
         entries = [_Entry("title", lg["title"])]
-        if lg["kind"] == "category":
+        if lg["kind"] in ("category", "bins"):  # an entry each (a stepped scale's ranges)
             for i, (label, color) in enumerate(zip(lg["labels"], lg["colors"], strict=False)):
                 state = ""
                 if chosen and chosen.get("index") == index and chosen.get("levels"):

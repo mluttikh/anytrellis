@@ -33,6 +33,10 @@ redo well-known figures of both.
 | `scale_y_continuous(limits = c(0, NA))`, `coord_cartesian()` | `.limits(y=(0, None))` |
 | `scale_x_continuous(labels = scales::label_comma())`, `scale_x_date(date_labels =)` | `.format(x=",.0f")`, `.format(x="%b %Y")` |
 | `theme(legend.position = "right")`, `guides(colour = "none")` | `.legend("right")`, `.legend("none")` |
+| `scale_colour_viridis_c(option = "cividis")`, `scale_colour_distiller(palette = "Blues")` | `.colormap("cividis")`, `.colormap("Blues")` |
+| `scale_colour_gradient2(midpoint = 0)` | `.colormap(scale="diverging", midpoint=0)` |
+| `scale_colour_binned()`, `scale_colour_viridis_b()` | `.colormap(scale="binned")` |
+| `scale_colour_manual(values = c(USA = "red"))` | `Trellis(..., palette={"USA": "red"})` |
 
 ```r
 ggplot(penguins, aes(flipper_length_mm, body_mass_g, colour = sex)) +

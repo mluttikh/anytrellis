@@ -163,7 +163,9 @@ export interface LegendSpec {
   title: string;
   /** The colour column's name. */
   name?: string;
-  kind: "category" | "number";
+  /** category: an entry per level; number: a gradient; bins: a stepped number scale's
+   * ranges as entries (labels written in Python). */
+  kind: "category" | "number" | "bins";
   labels?: string[];
   colors: string[];
   lo?: number;
