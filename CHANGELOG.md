@@ -8,6 +8,16 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- **A new default look**, `theme="minimal"`: panels without a fill, the grid as the text
+  colour at 10% opacity and only across y (across x too for points, or when y is a band),
+  an x baseline and no y axis line, strips as left-aligned semibold titles with nothing
+  behind them, the y title level over the plot (`↑ temp`), a grid's row labels level at the
+  right as wide as they need, no x title on a time axis unless given, and Petroff's
+  colour-vision-tested palette (`petroff10`) in place of tab10. A paged wrap's strip keeps
+  the panel's name whole and shows the sorted value in lighter type. `theme="classic"`
+  keeps the look before ([Upgrading](docs/user/reference/upgrading.md)); images saved from
+  Python (`save_svg`, `save_png`) draw both looks the same as the browser.
+
 - Panels with an `aspect` (banked or a number) keep their shape in full screen, in an
   opened panel and in an image of a given `height`: as large as fits, narrower and centred
   when the height is too low for the whole width. An opened panel is then at most 85% of
@@ -16,6 +26,8 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- `Trellis(theme=)` (`"minimal"` or `"classic"`), and on `pairs()`.
+- `palette=` takes a name: `"petroff10"`, `"petroff8"`, `"petroff6"` or `"tab10"`.
 - `Trellis(aspect="bank")`: the panels' shape that shows the median slope of the lines'
   segments at 45 degrees, each measured in its own panel's ranges (Cleveland's banking):
   the `smooth()` fits' (a trend, not the noise around it), or without them the `line()`

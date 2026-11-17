@@ -20,7 +20,7 @@ import numpy as np
 from anytrellis.data import Column, Table
 from anytrellis.plot import Trellis, _text
 from anytrellis.stats import _kde
-from anytrellis.styling import TAB10
+from anytrellis.styling import palette_of
 
 Diag = Literal["auto", "density", "hist"]
 
@@ -47,11 +47,12 @@ def pairs(
     size: float = 3.0,
     opacity: float = 0.6,
     tooltip: Sequence[str] = (),
-    palette: Sequence[str] | None = None,
+    palette: str | Sequence[str] | None = None,
     height: int | None = None,
     panel_height: int | None = None,
     title: str = "",
     legend: str = "auto",
+    theme: str = "minimal",
     renderer: str = "auto",
 ) -> Pairs:
     """A scatterplot matrix: each pair of ``columns`` plotted against each other, x by
@@ -79,16 +80,17 @@ def pairs(
         size: Point diameter in CSS pixels.
         opacity: The points' opacity, 0 to 1.
         tooltip: More columns shown on hover (the plotted columns and ``color`` always are).
-        palette: Colours for a category colour column (default: tab10).
+        palette: Colours for a category colour column: as for ``Trellis``.
         height: The plot's height in CSS pixels (default: square panels).
         panel_height: Each panel's height in CSS pixels (default: square panels).
         title: A title over the plot.
         legend: As for ``Trellis``.
+        theme: As for ``Trellis``.
         renderer: As for ``Trellis``.
     """
     return Pairs(data, columns, color=color, diag=diag, corner=corner, bins=bins, size=size,
                  opacity=opacity, tooltip=tooltip, palette=palette, height=height,
-                 panel_height=panel_height, title=title, legend=legend,
+                 panel_height=panel_height, title=title, legend=legend, theme=theme,
                  renderer=renderer)  # fmt: skip
 
 
@@ -108,11 +110,12 @@ class Pairs(Trellis):
         size: float = 3.0,
         opacity: float = 0.6,
         tooltip: Sequence[str] = (),
-        palette: Sequence[str] | None = None,
+        palette: str | Sequence[str] | None = None,
         height: int | None = None,
         panel_height: int | None = None,
         title: str = "",
         legend: str = "auto",
+        theme: str = "minimal",
         renderer: str = "auto",
     ) -> None:
         if diag not in ("auto", "density", "hist", None):
@@ -133,7 +136,7 @@ class Pairs(Trellis):
             None, row=ROW, col=COL, share_x="col", share_y="row", x_title="", y_title="",
             height=height, panel_height=panel_height,
             aspect=None if height or panel_height else 1.0, title=title, palette=palette,
-            legend=legend, link=KEY, renderer=renderer,
+            legend=legend, link=KEY, theme=theme, renderer=renderer,
         )  # fmt: skip
         self._source = source
         self._columns = names
@@ -141,7 +144,7 @@ class Pairs(Trellis):
         self._tips = [n for n in (*names, color_column, *tooltip) if n is not None]
         self._keep_empty = not corner
         cat = color_column is not None and source.column(color_column).kind == "category"
-        one = (palette or TAB10)[0] if color is None else color
+        one = palette_of(palette, theme)[0] if color is None else color
         self._data = _melt(source, names, color_column, corner)
         self.points(x=X, y=Y, color=color_column or one, size=size, opacity=opacity,
                     name="points")  # fmt: skip

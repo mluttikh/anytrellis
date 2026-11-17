@@ -62,7 +62,8 @@ def test_an_svg_of_the_plot(temps: Trellis, tmp_path: Path) -> None:
     assert "Temperatures" in words  # the title
     assert {f"station {i}" for i in range(1, 5)} <= set(words)  # the strips
     assert {"sensor", "s1", "s2", "s3"} <= set(words)  # the legend
-    assert {"time", "temp"} <= set(words)  # the axis titles
+    assert "↑ temp" in words  # the y title, over the axis
+    assert "time" not in words  # dates say what they are: no x title
     assert any(re.fullmatch(r"Mar \d+", w) for w in words)  # time ticks
     assert len(parse(svg).findall(f".//{NS}path")) > 4 * 3  # marks, gridlines, axes
     # colours every SVG reader takes: #rrggbb and an opacity, no rgba()

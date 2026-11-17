@@ -52,8 +52,9 @@ What differs:
   names.
 - **No stats on plain marks.** `bars()` draws the heights you give it; `hist()` counts.
   Summarise with your table library first, as for `geom_col()`.
-- **No themes or scales objects.** Colours come from `palette=` and `color=`; the plot
-  follows the notebook's light or dark theme.
+- **Two looks, no theme objects.** `theme="minimal"` (the default, close to
+  `theme_minimal()`) or `theme="classic"` (close to `theme_grey()`); colours come from
+  `palette=` and `color=`; the plot follows the notebook's light or dark theme.
 - **Interactive**: every plot zooms, pans, brushes and hands its selection to Python.
 
 ## seaborn

@@ -26,10 +26,10 @@ def sales() -> dict[str, list[Any]]:
     return rows
 
 
-def spans(strips: list[Any], vertical: bool) -> list[tuple[str, float, float]]:
-    return [(s.label, *((s.rect.y, s.rect.y + s.rect.h) if vertical else
+def spans(strips: list[Any], right: bool) -> list[tuple[str, float, float]]:
+    return [(s.label, *((s.rect.y, s.rect.y + s.rect.h) if right else
                         (s.rect.x, s.rect.x + s.rect.w)))
-            for s in strips if s.vertical == vertical]  # fmt: skip
+            for s in strips if (s.side == "right") == right]  # fmt: skip
 
 
 def test_nest_finds_the_runs_of_each_level() -> None:
@@ -47,15 +47,15 @@ def test_a_grid_nests_its_column_and_row_strips() -> None:
     top_row = sorted({b.rect.x for b in out.panels})
     left_col = sorted({b.rect.y for b in out.panels})
     pw, ph = out.panels[0].rect.w, out.panels[0].rect.h
-    top = spans(out.strips, vertical=False)
+    top = spans(out.strips, right=False)
     assert [s[0] for s in top] == ["north", "south", "n1", "n2", "s1"]
     assert top[0][1:] == (top_row[0], top_row[1] + pw)  # north over its two stores
     assert top[1][1:] == (top_row[2], top_row[2] + pw)
-    right = spans(out.strips, vertical=True)
+    right = spans(out.strips, right=True)
     assert [s[0] for s in right] == ["food", "toys", "big", "small", "big"]
     assert right[0][1:] == (left_col[0], left_col[1] + ph)  # food over its two sizes
-    outer = next(s.rect.x for s in out.strips if s.vertical and s.label == "food")
-    inner = next(s.rect.x for s in out.strips if s.vertical and s.label == "small")
+    outer = next(s.rect.x for s in out.strips if s.side == "right" and s.label == "food")
+    inner = next(s.rect.x for s in out.strips if s.side == "right" and s.label == "small")
     assert outer > inner  # the first row column outermost, on the right
     assert out.strips[0].rect.y + out.strips[0].rect.h < out.strips[2].rect.y  # above
 

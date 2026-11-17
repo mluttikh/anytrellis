@@ -43,6 +43,13 @@ THEMES: dict[str, dict[str, str]] = {
 }  # fmt: skip
 """The widget's colours (widget.css), light and dark."""
 
+GRID_ALPHA = 0.1
+"""The minimal look's grid: the text colour at this opacity."""
+ROW_LABEL_MAX = 120
+"""The widest a minimal look's row label gets (px); a longer one is cut."""
+BOLD = 1.06
+"""Strip text is semibold: about this much wider."""
+
 FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, 'DejaVu Sans', sans-serif"
 FONT_SIZE = 12.0
 DEFAULT_WIDTH = 800
@@ -96,14 +103,14 @@ def text_width(text: str, size: float = FONT_SIZE, *, bold: bool = False) -> flo
     return total * size / 1000 * (1.06 if bold else 1.0)
 
 
-def fit(text: str, width: float, size: float = FONT_SIZE) -> str:
+def fit(text: str, width: float, size: float = FONT_SIZE, *, bold: bool = False) -> str:
     """``text`` cut with an ellipsis to fit ``width`` px."""
-    if text_width(text, size) <= width:
+    if text_width(text, size, bold=bold) <= width:
         return text
     lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) >> 1
-        if text_width(text[:mid] + "…", size) <= width:
+        if text_width(text[:mid] + "…", size, bold=bold) <= width:
             lo = mid
         else:
             hi = mid - 1
@@ -376,6 +383,11 @@ class Strip:
     rect: Rect
     label: str
     vertical: bool
+    """Its text turned on its side (the classic look's row strips)."""
+    side: str = "top"
+    """Over the columns (``"top"``) or right of the rows (``"right"``)."""
+    span: bool = False
+    """It spans several panels (a nested strip's outer level)."""
 
 
 @dataclass
@@ -402,6 +414,27 @@ def _y_labels_width(spec: dict[str, Any], domain: list[float], h: float | None) 
              else y_tick_count(y["kind"], domain[0], domain[1], h))  # fmt: skip
     labels = ticks(y["kind"], domain[0], domain[1], y["origin"], count, y["levels"])
     return math.ceil(max([0.0, *(text_width(s) for _, s in labels)])) + TICK + 4
+
+
+def is_classic(spec: dict[str, Any]) -> bool:
+    """The classic look: filled panels and strips, a full grid, titles on their side."""
+    return spec.get("theme") == "classic"
+
+
+def _y_title_room(spec: dict[str, Any], fs: float) -> tuple[float, float]:
+    """The width of the column left of the plot holding the y title (classic), or the height
+    of the line over it (minimal)."""
+    if not spec["y"]["title"]:
+        return 0, 0
+    return (_round(fs * 1.4 + 4), 0) if is_classic(spec) else (0, _round(fs * 1.4 + 2))
+
+
+def _y_title_at(spec: dict[str, Any], fs: float, side: tuple[float, float],
+                left: float) -> tuple[float, float] | None:  # fmt: skip
+    """Where the y title goes: on its side at ``side`` (classic), or at the left of the line
+    over the plot, from ``left`` (minimal)."""
+    w, h = _y_title_room(spec, fs)
+    return side if w else (left, 6 + h / 2) if h else None
 
 
 def panel_shape(spec: dict[str, Any]) -> float | None:
@@ -481,12 +514,22 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         if not own and grid["kind"] == "grid" and grid.get("row_labels") else 0  # fmt: skip
     wrap_strip = wrap_depth * strip_h
     top_strip = col_depth * strip_h
-    right_strip = row_depth * strip_h
+    # the row strips' widths, outermost level first: on their side, a strip's height; level,
+    # as wide as their longest label
+    row_w: list[float] = []
+    for k in range(row_depth):
+        if is_classic(spec):
+            row_w.append(strip_h)
+            continue
+        labels = grid["row_labels"] if row_depth == 1 else [keys[k] for keys in grid["row_keys"]]
+        widest = max([0.0, *(text_width(label) for label in labels)])
+        row_w.append(min(ROW_LABEL_MAX, math.ceil(widest * BOLD) + 2 * STRIP_PAD + 4))
+    right_strip = sum(row_w)
     x_title_h = _round(fs * 1.4 + 4) if spec["x"]["title"] else 0
-    y_title_w = _round(fs * 1.4 + 4) if spec["y"]["title"] else 0
+    y_title_w, y_title_h = _y_title_room(spec, fs)
     left = 4 + y_title_w
     right = 10
-    top = 6
+    top = 6 + y_title_h
     bottom = 4 + x_title_h
     axis_rows = sum(x_axis_h for r in row_has_x if r)
 
@@ -557,15 +600,22 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     elif col_depth > 1:
         for k, a, b in nest(grid["col_keys"], col_depth):
             strips.append(Strip(Rect(col_x[a], top + k * strip_h, col_x[b] + pw - col_x[a],
-                                     strip_h - 1), grid["col_keys"][a][k], False))  # fmt: skip
+                                     strip_h - 1), grid["col_keys"][a][k], False,
+                                span=b > a))  # fmt: skip
+    vertical = is_classic(spec)
+
+    def row_x(k: int) -> float:  # a level's strips: right of the inner levels' (outermost last)
+        return plot_right + GAP + sum(row_w[k + 1 :])
+
     if row_depth == 1:
         for r, label in enumerate(grid["row_labels"]):
-            strips.append(Strip(Rect(plot_right + GAP, row_y[r], strip_h - 1, ph), label, True))
+            strips.append(Strip(Rect(row_x(0), row_y[r], row_w[0] - 1, ph), label, vertical,
+                                side="right"))  # fmt: skip
     elif row_depth > 1:
         for k, a, b in nest(grid["row_keys"], row_depth):
-            x0 = plot_right + GAP + (row_depth - 1 - k) * strip_h  # the first column outermost
-            strips.append(Strip(Rect(x0, row_y[a], strip_h - 1, row_y[b] + ph - row_y[a]),
-                                grid["row_keys"][a][k], True))  # fmt: skip
+            strips.append(Strip(Rect(row_x(k), row_y[a], row_w[k] - 1, row_y[b] + ph - row_y[a]),
+                                grid["row_keys"][a][k], vertical, side="right",
+                                span=b > a))  # fmt: skip
     if wrap_depth > 1:  # the outer levels' strips over the panels side by side sharing them
         for r in range(rows):
             in_row = sorted((p for p in panels if p["row"] == r), key=lambda p: p["col"])
@@ -580,7 +630,8 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
                 for k, a, b in nest(keys, wrap_depth - 1):
                     x0, x1 = col_x[run[a]["col"]], col_x[run[b]["col"]] + pw
                     strips.append(Strip(Rect(x0, row_y[r] - wrap_strip + k * strip_h, x1 - x0,
-                                             strip_h - 1), keys[a][k], False))  # fmt: skip
+                                             strip_h - 1), keys[a][k], False,
+                                        span=b > a))  # fmt: skip
 
     spare = None
     if grid["kind"] == "wrap" and panels and not pages:
@@ -601,7 +652,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         panels=boxes,
         strips=strips,
         x_title=(centre_x, plot_bottom + x_title_h - 2) if x_title_h else None,
-        y_title=(shift + 4 + fs, centre_y) if y_title_w else None,
+        y_title=_y_title_at(spec, fs, (shift + 4 + fs, centre_y), left + shift),
         spare=spare,
         x_axis_h=x_axis_h,
     )
@@ -628,8 +679,8 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
     strip_h = _round(fs * 1.5 + 4)
     x_axis_h = fs + TICK + 6
     x_title_h = _round(fs * 1.4 + 4) if spec["x"]["title"] else 0
-    y_title_w = _round(fs * 1.4 + 4) if spec["y"]["title"] else 0
-    left, right, top, bottom = 4 + y_title_w, 10, 6, 4 + x_title_h
+    y_title_w, y_title_h = _y_title_room(spec, fs)
+    left, right, top, bottom = 4 + y_title_w, 10, 6 + y_title_h, 4 + x_title_h
     total = height if height is not None else 360
     most = max(MIN_PANEL, math.floor(total - top - strip_h - x_axis_h - bottom - 2))
     h = most
@@ -661,7 +712,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
         panels=[box],
         strips=[],
         x_title=(rect.x + w / 2, plot_bottom + x_title_h - 2) if x_title_h else None,
-        y_title=(shift + 4 + fs, rect.y + h / 2) if y_title_w else None,
+        y_title=_y_title_at(spec, fs, (shift + 4 + fs, rect.y + h / 2), left + shift),
         spare=None,
         x_axis_h=x_axis_h,
     )
@@ -918,26 +969,42 @@ class _Svg:
                 f"{defs}{''.join(self.out)}</svg>")  # fmt: skip
 
 
+def grid_axes(spec: dict[str, Any]) -> tuple[bool, bool]:
+    """Which axes draw grid lines: both in the classic look; in the minimal one, y always,
+    and x for points (a scatter reads off both) or when y is a band (bars along x)."""
+    x, y = spec["x"]["kind"] != "band", spec["y"]["kind"] != "band"
+    if is_classic(spec):
+        return x, y
+    return x and (not y or any(lr["type"] == "points" for lr in spec["layers"])), y
+
+
 def _draw_back(svg: _Svg, spec: dict[str, Any], views: list[_View], th: dict[str, str]) -> None:
+    classic = is_classic(spec)
+    grid_x, grid_y = grid_axes(spec)
+    stroke = f'stroke="{th["grid"]}"' if classic else \
+        f'stroke="{th["text"]}" stroke-opacity="{_n(GRID_ALPHA)}"'  # fmt: skip
+    minor_stroke = f'stroke="{th["grid"]}" stroke-opacity="0.45"' if classic else \
+        f'stroke="{th["text"]}" stroke-opacity="{_n(0.45 * GRID_ALPHA)}"'  # fmt: skip
     for v in views:
         r = v.rect
-        svg.rect(r, th["panel"])
+        if classic:
+            svg.rect(r, th["panel"])
         d: list[str] = []
-        if spec["x"]["kind"] != "band":
+        if grid_x:
             for value, _ in _x_ticks(spec, v):
                 x = _round(v.ox + value * v.sx) + 0.5
                 d.append(f"M{_n(x)} {_n(r.y)}V{_n(r.y + r.h)}")
-        if spec["y"]["kind"] != "band":
+        if grid_y:
             for value, _ in _y_ticks(spec, v):
                 y = _round(v.oy + value * v.sy) + 0.5
                 d.append(f"M{_n(r.x)} {_n(y)}H{_n(r.x + r.w)}")
         minor: list[str] = []
         xk, yk = spec["x"]["kind"], spec["y"]["kind"]
-        if xk == "log":
+        if xk == "log" and grid_x:
             for value in minor_ticks(xk, *v.x, spec["x"]["origin"], _x_ticks(spec, v), r.w):
                 x = _round(v.ox + value * v.sx) + 0.5
                 minor.append(f"M{_n(x)} {_n(r.y)}V{_n(r.y + r.h)}")
-        if yk == "log":
+        if yk == "log" and grid_y:
             for value in minor_ticks(yk, *v.y, spec["y"]["origin"], _y_ticks(spec, v), r.h):
                 y = _round(v.oy + value * v.sy) + 0.5
                 minor.append(f"M{_n(r.x)} {_n(y)}H{_n(r.x + r.w)}")
@@ -945,10 +1012,9 @@ def _draw_back(svg: _Svg, spec: dict[str, Any], views: list[_View], th: dict[str
             continue
         svg.open(svg.clip(r))
         if d:
-            svg.add(f'<path d="{"".join(d)}" fill="none" stroke="{th["grid"]}"/>')
+            svg.add(f'<path d="{"".join(d)}" fill="none" {stroke}/>')
         if minor:
-            svg.add(f'<path d="{"".join(minor)}" fill="none" stroke="{th["grid"]}" '
-                    'stroke-opacity="0.45"/>')  # fmt: skip
+            svg.add(f'<path d="{"".join(minor)}" fill="none" {minor_stroke}/>')
         svg.close()
 
 
@@ -1076,6 +1142,7 @@ def _draw_text(svg: _Svg, t: _Texts, v: _View, th: dict[str, str]) -> None:
 def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View],
                 th: dict[str, str], texts: list[_Texts], brushes: list[Rect]) -> None:  # fmt: skip
     fs = FONT_SIZE
+    classic = is_classic(spec)
     rules = [lr for lr in spec["layers"] if lr["type"] == "rule"]
     for v in views:
         if not rules and not any(t.starts[v.panel + 1] > t.starts[v.panel] for t in texts):
@@ -1110,7 +1177,8 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
                 svg.text(lx, r.y + r.h + 4 + fs * 0.75, label, th["muted"], anchor="middle")
                 last_right = lx + w / 2
         if box.show_y:
-            d.append(f"M{_n(r.x - 0.5)} {_n(r.y)}V{_n(r.y + r.h)}")
+            if classic:
+                d.append(f"M{_n(r.x - 0.5)} {_n(r.y)}V{_n(r.y + r.h)}")
             last_top = math.inf
             for value, label in _y_ticks(spec, v):
                 y = v.oy + value * v.sy
@@ -1127,37 +1195,23 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
             svg.add(f'<path d="{"".join(d)}" fill="none" stroke="{th["axis"]}"/>')
 
     # strips
-    def strip(rect: Rect, label: str, vertical: bool, note: str = "") -> None:
-        svg.rect(rect, th["strip"])
-        svg.open(svg.clip(rect))
-        cx, cy = rect.x + rect.w / 2, rect.y + rect.h / 2
-        if vertical:
-            svg.open(f'transform="translate({_n(cx)} {_n(cy)}) rotate(90)"')
-            svg.text(0, 0, fit(label, rect.h - 6), th["strip_text"], anchor="middle")
-            svg.close()
-        elif note:  # the name at the left, cut to leave the value whole at the right
-            w = text_width(note)
-            svg.text(rect.x + rect.w - STRIP_PAD, cy + 0.5, note, th["strip_text"], anchor="end")
-            svg.text(rect.x + STRIP_PAD, cy + 0.5, fit(label, rect.w - 3 * STRIP_PAD - w),
-                     th["strip_text"])  # fmt: skip
-        else:
-            svg.text(cx, cy + 0.5, fit(label, rect.w - 6), th["strip_text"], anchor="middle")
-        svg.close()
-
+    strip = _classic_strip if classic else _minimal_strip
     for box in lay.panels:
         if box.strip is not None:
-            strip(box.strip, box.label, False, box.note)
+            strip(svg, th, Strip(box.strip, box.label, False), box.note)
     for s in lay.strips:
-        strip(s.rect, s.label, s.vertical)
+        strip(svg, th, s)
 
     # axis titles
     if lay.x_title:
         svg.text(*lay.x_title, spec["x"]["title"], th["muted"], anchor="middle")
-    if lay.y_title:
+    if lay.y_title and classic:
         x, y = lay.y_title
         svg.open(f'transform="translate({_n(x)} {_n(y)}) rotate(-90)"')
         svg.text(0, 0, spec["y"]["title"], th["muted"], anchor="middle")
         svg.close()
+    elif lay.y_title:
+        svg.text(*lay.y_title, f"↑ {spec['y']['title']}", th["muted"])
 
     for b in brushes:
         svg.rect(b, th["accent"], ' fill-opacity="0.07"')
@@ -1165,6 +1219,49 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
         svg.add(f'<rect x="{_n(edge.x)}" y="{_n(edge.y)}" width="{_n(edge.w)}" '
                 f'height="{_n(edge.h)}" fill="none" stroke="{th["accent"]}" '
                 'stroke-opacity="0.8"/>')  # fmt: skip
+
+
+def _classic_strip(svg: _Svg, th: dict[str, str], s: Strip, note: str = "") -> None:
+    """A classic strip: filled, its label centred (a row's on its side), a paged wrap's
+    sorted value at the right."""
+    rect, label = s.rect, s.label
+    svg.rect(rect, th["strip"])
+    svg.open(svg.clip(rect))
+    cx, cy = rect.x + rect.w / 2, rect.y + rect.h / 2
+    if s.vertical:
+        svg.open(f'transform="translate({_n(cx)} {_n(cy)}) rotate(90)"')
+        svg.text(0, 0, fit(label, rect.h - 6), th["strip_text"], anchor="middle")
+        svg.close()
+    elif note:  # the name at the left, cut to leave the value whole at the right
+        w = text_width(note)
+        svg.text(rect.x + rect.w - STRIP_PAD, cy + 0.5, note, th["strip_text"], anchor="end")
+        svg.text(rect.x + STRIP_PAD, cy + 0.5, fit(label, rect.w - 3 * STRIP_PAD - w),
+                 th["strip_text"])  # fmt: skip
+    else:
+        svg.text(cx, cy + 0.5, fit(label, rect.w - 6), th["strip_text"], anchor="middle")
+    svg.close()
+
+
+def _minimal_strip(svg: _Svg, th: dict[str, str], s: Strip, note: str = "") -> None:
+    """A minimal strip: the label as a semibold title at the left, nothing behind it; one
+    spanning several panels underlined (a row's: a line at its left); a paged wrap's sorted
+    value at the right in the muted colour, the name keeping at least half the room."""
+    rect, label = s.rect, s.label
+    right = s.side == "right"
+    x = rect.x + (STRIP_PAD if right else 1)
+    y = rect.y + rect.h / 2 + 0.5
+    if s.span:
+        d = (f"M{_n(rect.x + 0.5)} {_n(rect.y)}V{_n(rect.y + rect.h)}" if right
+             else f"M{_n(rect.x)} {_n(rect.y + rect.h - 0.5)}H{_n(rect.x + rect.w)}")  # fmt: skip
+        svg.add(f'<path d="{d}" fill="none" stroke="{th["axis"]}"/>')
+    svg.open(svg.clip(rect))
+    room = rect.x + rect.w - x - 2
+    if note:
+        shown = fit(note, max(0.0, room / 2))
+        svg.text(rect.x + rect.w - 1, y, shown, th["muted"], anchor="end")
+        room -= text_width(shown) + 2 * STRIP_PAD
+    svg.text(x, y, fit(label, room, bold=True), th["text"], bold=True)
+    svg.close()
 
 
 LABEL_ROOM = 4

@@ -180,6 +180,10 @@ export interface TrellisSpec {
   legend_position?: "auto" | "bottom";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
+  /** The look. `minimal` (the default): no panel fill, strips as left-aligned titles, a
+   * faint grid only where it helps, the y title over the axis. `classic`: filled panels
+   * and strips and a full grid. */
+  theme?: "minimal" | "classic";
   /** A wrap shown a page at a time (null: all its panels at once). */
   pages?: PagesSpec | null;
 }

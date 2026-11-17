@@ -83,11 +83,12 @@ from anytrellis.stats import PANEL, Members, Part
 from anytrellis.stats import parts as summary_parts
 from anytrellis.styling import (
     CONTEXT_COLOR,
+    LOOKS,
     MISSING_COLOR,
-    TAB10,
     colormap_rgba,
     is_color,
     palette_colors,
+    palette_of,
     rgba,
 )
 from anytrellis.summaries import counts as counts_of_rows
@@ -161,7 +162,9 @@ class Trellis:
         title: A title over the plot.
         x_title: The x axis title (default: the x column's name).
         y_title: The y axis title (default: the y column's name).
-        palette: Colours for category colour columns (default: tab10).
+        palette: Colours for category colour columns: a list of colours, or a name
+            (``"petroff10"``, ``"petroff8"``, ``"petroff6"``, ``"tab10"``; default: the
+            theme's, ``"petroff10"`` in the minimal one and ``"tab10"`` in the classic one).
         legend: ``"auto"``: in a wrap's empty cells after its last panel when it fits there,
             under the plot otherwise; ``"bottom"``: always under the plot.
         strips: With several facet columns, ``"nested"``: a strip per column, each spanning
@@ -193,6 +196,11 @@ class Trellis:
             the axes' ranges and the colours' levels come from the database). For a table
             in a database: lines, points and text drawn from the plot's data (other layers
             bring their own); not with ``link``. ``save_html`` still reads every row.
+        theme: How the plot looks. ``"minimal"`` (the default): no panel fill, strips as
+            left-aligned titles, a faint grid across y (and x for points), the y title
+            over the axis (``"↑ temp"``), a grid's row labels level, no x title for times,
+            Petroff's colour-vision-tested palette. ``"classic"``: the look before 0.6, with
+            filled panels and strips, a full grid, titles on their side and tab10.
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
     """
 
@@ -216,7 +224,7 @@ class Trellis:
         title: str = "",
         x_title: str | None = None,
         y_title: str | None = None,
-        palette: Sequence[str] | None = None,
+        palette: str | Sequence[str] | None = None,
         legend: str = "auto",
         strips: str = "nested",
         strip_label: str | None = None,
@@ -225,8 +233,13 @@ class Trellis:
         fit_y: bool = False,
         link: str | Sequence[str] | None = None,
         load: str = "all",
+        theme: str = "minimal",
         renderer: str = "auto",
     ) -> None:
+        if theme not in LOOKS:
+            raise ValueError(f"theme must be one of {LOOKS}, got {theme!r}")
+        self.theme = theme
+        palette_of(palette, theme)  # an unknown name or colour raises here
         self._data = None if data is None else Table(data)
         if load not in LOADS:
             raise ValueError(f"load must be one of {LOADS}, got {load!r}")
@@ -283,7 +296,9 @@ class Trellis:
         self.title = title
         self.x_title = x_title
         self.y_title = y_title
-        self.palette = list(palette) if palette else None
+        self.palette: str | list[str] | None = (
+            palette if isinstance(palette, str) else list(palette) if palette else None
+        )
         if legend not in LEGENDS:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
         self.legend = legend
@@ -2375,7 +2390,8 @@ class Trellis:
             x_kind = "log"
         if "y" in logs:
             y_kind = "log"
-        colors = _ColorScales(shown, lambda lr: table_of(id(lr)), self.palette, given)
+        colors = _ColorScales(shown, lambda lr: table_of(id(lr)),
+                              palette_of(self.palette, self.theme), given)  # fmt: skip
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
         plain = [lr for lr in marks if lr.mark not in SUMMARIES]
         bars_step = step_of([axis_values(table_of(id(lr)).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
@@ -2489,6 +2505,8 @@ class Trellis:
             self._keys = {id(lr): k for (lr, _), k in zip(mark_entries, keys, strict=True)}
         first = shown[0] if shown else None
         x_title = self.x_title if self.x_title is not None else (first.x or "" if first else "")
+        if self.x_title is None and x_kind == "time" and self.theme == "minimal":
+            x_title = ""  # dates say what they are
         y_title = self.y_title if self.y_title is not None else (first.y or "" if first else "")
         spec = {
             "version": SPEC_VERSION,
@@ -2518,6 +2536,7 @@ class Trellis:
             "legend_position": self.legend,
             "fit_y": self.fit_y,
             "pages": pages,
+            "theme": self.theme,
         }
         # dense points' cells: over each panel's domain, sized for the panel's pixels
         cell_details = [(i, dt) for i, dt in details if isinstance(dt, PointDetail)]
@@ -3058,7 +3077,7 @@ class _ColorScales:
         self,
         marks: list[Layer],
         table_of: Any,
-        palette: list[str] | None,
+        palette: list[str],
         given: dict[str, tuple[str, ...]],
     ) -> None:
         self.palette = palette
@@ -3098,7 +3117,7 @@ class _ColorScales:
 
     def key(self) -> tuple[Any, ...]:
         """What the colours are made from: the same key, the same colours."""
-        return (tuple(self.palette or ()), tuple((k, tuple(v)) for k, v in self.levels.items()),
+        return (tuple(self.palette), tuple((k, tuple(v)) for k, v in self.levels.items()),
                 tuple(self.ranges.items()), tuple(self.order),
                 tuple((k, tuple(v.items())) for k, v in self.fixed.items()))  # fmt: skip
 
@@ -3125,7 +3144,7 @@ class _ColorScales:
     def default(self, layer: Layer, index: int) -> str:
         if layer.facet == "exclude":
             return CONTEXT_COLOR
-        return "#4a5260" if self.colored else TAB10[index % len(TAB10)]
+        return "#4a5260" if self.colored else self.palette[index % len(self.palette)]
 
 
 def _geometry(

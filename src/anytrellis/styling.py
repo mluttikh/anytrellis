@@ -14,6 +14,47 @@ TAB10 = [
 ]  # fmt: skip
 """matplotlib's tab10: the categorical colours, in order."""
 
+PETROFF10 = [
+    "#3f90da", "#ffa90e", "#bd1f01", "#94a4a2", "#832db6",
+    "#a96b59", "#e76300", "#b9ac70", "#717581", "#92dadd",
+]  # fmt: skip
+"""Petroff's ten colours (arXiv 2107.02270), chosen for colour-vision deficiency and ranked
+by a survey of preference; matplotlib's ``petroff10``. The minimal look's palette."""
+
+PALETTES: dict[str, list[str]] = {
+    "petroff10": PETROFF10,
+    "petroff8": [
+        "#1845fb", "#ff5e02", "#c91f16", "#c849a9", "#adad7d", "#86c8dd", "#578dff", "#656364",
+    ],
+    "petroff6": ["#5790fc", "#f89c20", "#e42536", "#964a8b", "#9c9ca1", "#7a21dd"],
+    "tab10": TAB10,
+}  # fmt: skip
+"""Named category palettes (``palette="tab10"``)."""
+
+LOOKS = ("minimal", "classic")
+"""How a plot looks (``Trellis(theme=)``): ``"minimal"``, the default (no panel fill, strips
+as titles, a faint grid where it helps, the y title over the axis, Petroff's colours), or
+``"classic"`` (filled panels and strips, a full grid, titles on their side, tab10)."""
+
+LOOK_PALETTES = {"minimal": "petroff10", "classic": "tab10"}
+"""Each look's category palette."""
+
+
+def palette_of(palette: str | Sequence[str] | None, look: str = "minimal") -> list[str]:
+    """A palette's colours: a name in ``PALETTES``, a list of colours, or None (the look's)."""
+    if palette is None or (not isinstance(palette, str) and not list(palette)):
+        palette = LOOK_PALETTES[look]
+    if isinstance(palette, str):
+        if palette not in PALETTES:
+            raise ValueError(f"unknown palette {palette!r}; built in: {sorted(PALETTES)}, "
+                             "or give a list of colours")  # fmt: skip
+        return list(PALETTES[palette])
+    colors = list(palette)
+    for c in colors:
+        rgba(c)  # an unknown colour raises here, not when it is drawn
+    return colors
+
+
 CONTEXT_COLOR = "#b8bec6"
 """The colour of context layers (``facet="exclude"``): the other panels' data, in grey."""
 
