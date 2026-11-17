@@ -69,6 +69,8 @@ export interface Layout {
   spare: Rect | null;
   /** Tick labels' height (x) and the y labels' width per column. */
   xAxisHeight: number;
+  /** How a band x axis sets its labels (others: flat). */
+  xLabels: XLabels;
   yAxisWidth: number[];
 }
 
@@ -101,6 +103,40 @@ export const STRIP_PAD = 4;
 const ROW_LABEL_MAX = 120;
 /** Strip text is semibold: about this much wider than measured. */
 export const BOLD = 1.06;
+
+/** How x labels are set: side by side (`flat`, thinned when they don't fit), on two lines
+ * (`wrap`), or at 45 degrees (`angle`). Categories too long to sit side by side take the
+ * first of wrap and angle that shows every one of them. */
+export type XLabels = "flat" | "wrap" | "angle";
+
+/** The longest an angled label gets (px); a longer one is cut. */
+export const ANGLE_MAX = 90;
+
+/** A label on two lines, split at the space nearest its middle (one line: no space). */
+export function wrapLabel(label: string): string[] {
+  let best = -1;
+  for (let i = label.indexOf(" "); i >= 0; i = label.indexOf(" ", i + 1)) {
+    if (best < 0 || Math.abs(i - label.length / 2) < Math.abs(best - label.length / 2)) best = i;
+  }
+  return best < 0 ? [label] : [label.slice(0, best), label.slice(best + 1)];
+}
+
+/** How a band x axis `panelW` px wide sets its labels, and the axis's height. Side by side
+ * when the longest fits its band (estimated as the ticks thin them: 7.2 px a character);
+ * else on two lines when each fits its band, measured; else at 45 degrees. */
+export function xLabelMode(spec: TrellisSpec, panelW: number, opts: Pick<LayoutOptions, "fontSize" | "measure">): { mode: XLabels; height: number } {
+  const fs = opts.fontSize;
+  const flat = fs + TICK + 6;
+  const levels = spec.x.kind === "band" ? spec.x.levels : null;
+  if (!levels?.length) return { mode: "flat", height: flat };
+  const per = panelW / levels.length;
+  const longest = Math.max(...levels.map((l) => l.length));
+  if (longest * 7.2 + 10 <= per) return { mode: "flat", height: flat };
+  const fits = (t: string): boolean => opts.measure(t) + 4 <= per;
+  if (levels.every((l) => fits(l) || wrapLabel(l).every(fits))) return { mode: "wrap", height: flat + Math.round(fs * 1.2) };
+  const widest = Math.min(ANGLE_MAX, Math.max(...levels.map((l) => opts.measure(l))));
+  return { mode: "angle", height: Math.ceil((widest + fs) * Math.SQRT1_2) + TICK + 6 };
+}
 
 /** The width of the column left of the plot holding the y title on its side, or the height
  * of the line over the plot holding it level. */
@@ -156,7 +192,8 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     });
   };
   yGutters();
-  const xAxisHeight = fs + TICK + 6;
+  let xAxisHeight = fs + TICK + 6;
+  let xLabels: XLabels = "flat";
   const rowHasX = new Array<boolean>(rows).fill(false);
   panels.forEach((p, i) => {
     if (showX[i] && (p.row === rows - 1 || cell(p.row + 1, p.col) !== undefined)) rowHasX[p.row] = true;
@@ -193,7 +230,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   const top = 6 + titleH + yTitle.h;
   const bottom = 4 + xTitleH;
 
-  const axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
+  let axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
   const shape = panelShape(spec);
   // the width the panels share
   const freeWidth = (): number => {
@@ -223,6 +260,12 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
   });
   yGutters();
   [pw, ph] = panelSize();
+  // categories that don't fit side by side: on two lines or angled, the axis as high as that
+  ({ mode: xLabels, height: xAxisHeight } = xLabelMode(spec, pw, opts));
+  if (xLabels !== "flat") {
+    axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
+    [pw, ph] = panelSize();
+  }
   // panels narrowed to keep their shape: the grid centred
   const shift = Math.max(0, Math.floor((freeWidth() - cols * pw) / 2));
 
@@ -327,6 +370,7 @@ export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
     yTitle: yTitle.w ? { x: shift + 4 + fs, y: centreY } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
     spare,
     xAxisHeight,
+    xLabels,
     yAxisWidth,
   };
 }
@@ -360,7 +404,6 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
   const fs = opts.fontSize;
   const p = spec.panels[index];
   const stripH = Math.round(fs * 1.5 + 4);
-  const xAxisHeight = fs + TICK + 6;
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
   const xTitleH = spec.x.title ? Math.round(fs * 1.4 + 4) : 0;
   const yTitle = yTitleRoom(spec, fs);
@@ -369,6 +412,7 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
   const top = 6 + titleH + yTitle.h;
   const bottom = 4 + xTitleH;
   const total = opts.height ?? 360;
+  const { mode: xLabels, height: xAxisHeight } = xLabelMode(spec, opts.width - left - right - yLabelsWidth(spec, p.y, opts, null), opts);
   const most = Math.max(MIN_PANEL, Math.floor(total - top - stripH - xAxisHeight - bottom - 2));
   let h = most;
   let yW = yLabelsWidth(spec, p.y, opts, h);
@@ -410,6 +454,7 @@ function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Lay
     yTitle: yTitle.w ? { x: shift + 4 + fs, y: rect.y + h / 2 } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
     spare: null,
     xAxisHeight,
+    xLabels,
     yAxisWidth: [yW],
   };
 }
