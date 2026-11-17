@@ -80,6 +80,34 @@ print(plot._embed_html())  # markdown-exec: hide
 The years are cast to text so they are categories (two colours), not numbers (a colour
 scale). `width=` sets a bar's width as a share of the step between x values.
 
+### Bars along y
+
+When y is a category column and x is not, the bars lie along y, from zero to x. Long
+category names then read across, and ranked bars read from the top:
+
+```python exec="on" source="above" session="marks" html="true"
+plot = Trellis(barley, wrap="site", cols=3, panel_height=170)
+plot.bars(x="yield", y="variety", color="year")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+### Shares: `position="fill"`
+
+`position="fill"` stacks the colours as shares of each stack, so every stack reaches 1
+and the composition compares across positions and panels, whatever their totals. The axis
+reads in percent (`format(y=...)` changes it):
+
+```python exec="on" source="above" session="marks" html="true"
+plot = Trellis(barley, wrap="site", cols=3, panel_height=140)
+plot.bars(x="variety", y="yield", color="year", position="fill")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+`area()` and `hist()` take `position="fill"` too: each region's share of the population
+at each year, each sex's share of each bin.
+
 Bars count nothing themselves: to count rows, use a [histogram](distributions.md), or count
 with your table library first (`df.group_by(...).len()`).
 
@@ -101,7 +129,8 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
-`rule()` draws reference lines across every panel: `rule(y=0)`, `rule(x=[1960, 1980])`.
+`rule()` draws reference lines across every panel, `rule(y=0)`, `rule(x=[1960, 1980])`,
+or each panel's own from a table (see [Reference lines](more-marks.md#reference-lines)).
 Each layer gets a name (`points`, `line`, ...) for `selected("line")`; `name=` sets your
 own.
 

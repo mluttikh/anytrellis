@@ -34,6 +34,7 @@ from anytrellis.facets import Grid, Order, Panel, Summary, build_grid, ordered_l
 from anytrellis.formats import number_format, time_format
 from anytrellis.layers import (
     FACET_MODES,
+    STACKED,
     STEPS,
     SUMMARIES,
     FacetMode,
@@ -45,6 +46,7 @@ from anytrellis.layers import (
     band_geometry,
     bar_geometry,
     expand,
+    jittered,
     line_geometry,
     point_geometry,
     rect_geometry,
@@ -329,6 +331,8 @@ class Trellis:
         self._legend: dict[str, Any] = {"position": legend, "title": None}
         self._limits: dict[str, tuple[Any, Any]] = {}
         self._formats: dict[str, str] = {}
+        self._shares: str | None = None
+        """The axis of shares (every mark ``position="fill"``), as last drawn."""
         if strips not in STRIPS:
             raise ValueError(f"strips must be one of {STRIPS}, got {strips!r}")
         self.strips = strips
@@ -447,6 +451,7 @@ class Trellis:
         color: str | None = None,
         size: float = 5.0,
         opacity: float = 0.85,
+        jitter: float = 0.0,
         facet: FacetMode = "auto",
         tooltip: Sequence[str] = (),
         name: str | None = None,
@@ -456,6 +461,7 @@ class Trellis:
         ```python
         t = Trellis(penguins, wrap="species")
         t.points(x="flipper_length_mm", y="body_mass_g", color="sex")
+        t.box(x="species", y="body_mass_g").points(x="species", y="body_mass_g", jitter=0.4)
         ```
 
         Args:
@@ -465,12 +471,18 @@ class Trellis:
             color: A colour column or one colour.
             size: Diameter in CSS pixels.
             opacity: 0 to 1.
+            jitter: Spread the points of a category axis across their band, up to this
+                fraction of its width (0 to 1; 0.4 is a strip plot's), so points with the
+                same value don't hide each other. Each row keeps its place from draw to draw.
             facet: As for ``line``.
             tooltip: Columns shown on hover, besides x and y.
             name: The layer's name.
         """
+        if not 0 <= jitter <= 1:
+            raise ValueError(f"jitter is a fraction of a category's band, 0 to 1; got {jitter!r}")
         layer = Layer("points", name or self._name("points"), data, x, y, color, (),
-                      facet, size=size, opacity=opacity, tooltip=list(tooltip))  # fmt: skip
+                      facet, size=size, opacity=opacity, tooltip=list(tooltip),
+                      jitter=float(jitter))  # fmt: skip
         return self._add(layer)
 
     def bars(
@@ -487,27 +499,32 @@ class Trellis:
         tooltip: Sequence[str] = (),
         name: str | None = None,
     ) -> Self:
-        """Bars from 0 to y at each x (categories, numbers or times).
+        """Bars from 0 to y at each x (categories, numbers or times); with a category y and
+        x not, horizontal bars from 0 to x at each y.
 
         ```python
         Trellis(barley, wrap="site").bars(x="variety", y="yield", color="year", position="dodge")
+        Trellis(barley, wrap="site").bars(x="yield", y="variety", color="year")  # horizontal
+        Trellis(barley, wrap="site").bars(x="variety", y="yield", color="year", position="fill")
         ```
 
         Args:
             data: The layer's table (default: the plot's).
-            x: The x column.
-            y: The bar heights.
+            x: The x column (horizontal bars: their lengths).
+            y: The bar heights (horizontal bars: a category column, their positions).
             color: A colour column or one colour.
-            position: With a category colour: ``"stack"`` (default), ``"dodge"`` (side by
-                side) or ``"identity"`` (overlapping).
-            width: Bar width as a fraction of the step between x values.
+            position: With a category colour: ``"stack"`` (default), ``"fill"`` (stacked as
+                shares of each stack, every stack as tall as 1: the composition, whatever
+                the totals), ``"dodge"`` (side by side) or ``"identity"`` (overlapping).
+            width: Bar width as a fraction of the step between positions.
             opacity: 0 to 1.
             facet: As for ``line``.
             tooltip: Columns shown on hover, besides x and y.
             name: The layer's name.
         """
-        if position not in ("stack", "dodge", "identity"):
-            raise ValueError(f"position must be 'stack', 'dodge' or 'identity', got {position!r}")
+        if position not in ("stack", "fill", "dodge", "identity"):
+            raise ValueError("position must be 'stack', 'fill', 'dodge' or 'identity', got "
+                             f"{position!r}")  # fmt: skip
         if not 0 < width <= 1:
             raise ValueError("width must be in (0, 1]")
         return self._add(Layer("bars", name or self._name("bars"), data, x, y, color, (),
@@ -540,15 +557,16 @@ class Trellis:
             y: The y column.
             color: A colour column (one area per category) or one colour.
             group: Column(s) whose combinations are separate areas (besides ``color``).
-            position: ``"stack"`` (default: each series on the ones before it, at equal x)
-                or ``"identity"`` (each from 0, overlapping).
+            position: ``"stack"`` (default: each series on the ones before it, at equal x),
+                ``"fill"`` (stacked as shares of the total at each x, up to 1) or
+                ``"identity"`` (each from 0, overlapping).
             opacity: 0 to 1.
             facet: As for ``line``.
             tooltip: Columns shown on hover, besides x and y.
             name: The layer's name.
         """
-        if position not in ("stack", "identity"):
-            raise ValueError(f"position must be 'stack' or 'identity', got {position!r}")
+        if position not in ("stack", "fill", "identity"):
+            raise ValueError(f"position must be 'stack', 'fill' or 'identity', got {position!r}")
         return self._add(Layer("area", name or self._name("area"), data, x, y, color,
                                _names(group), facet, opacity=opacity, position=position,
                                tooltip=list(tooltip)))  # fmt: skip
@@ -765,7 +783,8 @@ class Trellis:
                 the edges at its multiples.
             stat: ``"count"``, ``"percent"`` (of each panel's rows) or ``"density"`` (each
                 panel's bars cover an area of 1).
-            position: With a colour: ``"stack"`` (default) or ``"identity"`` (overlapping).
+            position: With a colour: ``"stack"`` (default), ``"fill"`` (each bin's colours as
+                shares of it, up to 1) or ``"identity"`` (overlapping).
             width: Bar width as a fraction of the bin (default 1; categories 0.8).
             opacity: 0 to 1.
             facet: As for ``line``; ``"exclude"``: the other panels' histogram, in grey.
@@ -773,8 +792,8 @@ class Trellis:
         """
         if stat not in ("count", "percent", "density"):
             raise ValueError(f"stat must be 'count', 'percent' or 'density', got {stat!r}")
-        if position not in ("stack", "identity"):
-            raise ValueError(f"position must be 'stack' or 'identity', got {position!r}")
+        if position not in ("stack", "fill", "identity"):
+            raise ValueError(f"position must be 'stack', 'fill' or 'identity', got {position!r}")
         if width is not None and not 0 < width <= 1:
             raise ValueError("width must be in (0, 1]")
         args = {"bins": bins, "binwidth": binwidth, "stat": stat, "width": width}
@@ -1101,6 +1120,7 @@ class Trellis:
 
     def rule(
         self,
+        data: Any = None,
         *,
         x: Any = None,
         y: Any = None,
@@ -1109,16 +1129,21 @@ class Trellis:
         dash: Sequence[float] = (),
         name: str | None = None,
     ) -> Self:
-        """Reference lines across every panel: vertical at ``x``, or horizontal at ``y``
-        (a value or a list of values).
+        """Reference lines: vertical at ``x``, or horizontal at ``y``. A value or a list of
+        values: across every panel. With a table, a column of it: a line per row, in the
+        panel of its facet columns' values (a table without them: in every panel), so each
+        panel can have its own target, mean or limit.
 
         ```python
         t.rule(y=0, color="#888888", dash=(4, 3))
+        targets = pl.DataFrame({"site": ["Crookston", "Morris"], "target": [40, 35]})
+        Trellis(barley, wrap="site").points(x="yield", y="variety").rule(targets, x="target")
         ```
 
         Args:
-            x: Position(s) of vertical lines.
-            y: Position(s) of horizontal lines.
+            data: A table of the lines' positions (and the facet columns), or None.
+            x: Position(s) of vertical lines; with ``data``, its column of them.
+            y: Position(s) of horizontal lines; with ``data``, its column of them.
             color: Their colour.
             width: Line width in CSS pixels.
             dash: A dash pattern in pixels, e.g. ``(4, 3)``.
@@ -1126,11 +1151,20 @@ class Trellis:
         """
         if (x is None) == (y is None):
             raise ValueError("give rule() x= or y=")
+        axis = "x" if x is not None else "y"
+        rgba(color)
+        if data is not None:
+            column = x if x is not None else y
+            if not isinstance(column, str):
+                raise ValueError(f"rule(data, {axis}=...): name the data's column of positions, "
+                                 f"got {column!r}")  # fmt: skip
+            layer = Layer("rule", name or self._name("rule"), data, x=x, y=y, axis=axis,
+                          color=color, width=width, dash=list(dash))  # fmt: skip
+            return self._add(layer)
         values = x if x is not None else y
         values = list(values) if isinstance(values, list | tuple | np.ndarray) else [values]
-        rgba(color)
-        layer = Layer("rule", name or self._name("rule"), axis="x" if x is not None else "y",
-                      values=values, color=color, width=width, dash=list(dash))  # fmt: skip
+        layer = Layer("rule", name or self._name("rule"), axis=axis, values=values,
+                      color=color, width=width, dash=list(dash))  # fmt: skip
         return self._add(layer)
 
     def share(self, x: bool | str | None = None, y: bool | str | None = None) -> Self:
@@ -1234,6 +1268,11 @@ class Trellis:
         if isinstance(given, dict) and name in given:
             return given[name]
         return self._label(name)
+
+    def _share_format(self, axis: str) -> str | None:
+        """A filled stack's value axis (``position="fill"``), unless a format is given: in
+        percent, ``"40%"``."""
+        return ".0%" if self._shares == axis else None
 
     def _axis_format(self, axis: str, kind: AxisKind) -> str | None:
         """An axis's format (``format()``), checked against what the axis holds."""
@@ -2157,7 +2196,13 @@ class Trellis:
             raise ValueError(f"a layer is already named {layer.name!r}")
         if layer.facet not in FACET_MODES:
             raise ValueError(f"facet must be one of {FACET_MODES}, got {layer.facet!r}")
-        if layer.mark != "rule":
+        if layer.mark == "rule" and layer.data is not None:  # a line per row
+            table = Table(layer.data)
+            column = layer.x if layer.axis == "x" else layer.y
+            assert column is not None
+            table.check(column)
+            self._tables[id(layer)] = table
+        elif layer.mark != "rule":
             table = self._data if layer.data is None else Table(layer.data)
             if table is None:
                 raise ValueError(f"{layer.mark}() needs data: give the plot or the layer a table")
@@ -2482,6 +2527,9 @@ class Trellis:
         tables = [] if self._data is None else [self._data]
         for layer in self._layers:
             if layer.mark == "rule":
+                if layer.data is not None:
+                    tables.append(self._tables[id(layer)])
+                    self._tables[id(layer)].want(layer.x, layer.y)
                 continue
             table = self._tables[id(layer)]
             tables.append(table)
@@ -2544,7 +2592,9 @@ class Trellis:
         logs = [axis for axis in ("x", "y") if self._scales[axis] == "log"]
         for layer in self._layers:
             if layer.mark == "rule":
-                drawn.append(_Drawn(layer, layer, self._data or Table({}), None))
+                table = (self._data or Table({})) if layer.data is None else \
+                    _scaled(layer, self._tables[id(layer)], logs)  # fmt: skip
+                drawn.append(_Drawn(layer, layer, table, None))
                 continue
             if paged and self._on_page(layer) and layer.mark in SUMMARIES:
                 made = self._page_summary(layer, grid, logs)
@@ -2566,6 +2616,15 @@ class Trellis:
             x_kind = "log"
         if "y" in logs:
             y_kind = "log"
+        horizontal = _horizontal(x_levels, y_levels)
+        if horizontal and "x" in logs and any(lr.mark == "bars" for lr in shown):
+            raise ValueError("bars along y draw from zero, which a log x axis has no place "
+                             "for; use points, or a linear x")  # fmt: skip
+        for lr in shown:
+            if lr.jitter and x_levels is None and y_levels is None:
+                raise ValueError(f"{lr.name}: jitter spreads points across a category's band; "
+                                 "neither axis holds categories (as_category() makes a "
+                                 "number column one)")  # fmt: skip
         colors = _ColorScales(shown, lambda lr: table_of(id(lr)), self._palette(), given,
                               self._named_colors, self._number_scale)  # fmt: skip
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
@@ -2582,7 +2641,7 @@ class Trellis:
                  for lr in plain if lr.mark == "rect" and lr.y2 is None]),
         }  # fmt: skip
         built: list[tuple[Layer, Table, Geometry | None]] = []
-        rule_values: dict[str, list[float]] = {}
+        rule_values: dict[str, tuple[list[float], list[int] | None]] = {}
         self._plain = _plain_indices(drawn)
         self._colors = colors
         details: list[tuple[int, Detail]] = []
@@ -2592,11 +2651,15 @@ class Trellis:
             layer = d.layer
             with_cells.append(d)
             if layer.mark == "rule":
-                values = [_scalar(v, x_kind if layer.axis == "x" else y_kind,
-                                  x_levels if layer.axis == "x" else y_levels)
-                          for v in layer.values]  # fmt: skip
-                rule_values[layer.name] = values
-                extents[layer.axis].add_everywhere(values)
+                kind = x_kind if layer.axis == "x" else y_kind
+                levels = x_levels if layer.axis == "x" else y_levels
+                if layer.data is None:
+                    values = [_scalar(v, kind, levels) for v in layer.values]
+                    rule_values[layer.name] = (values, None)
+                    extents[layer.axis].add_everywhere(values)
+                else:
+                    rule_values[layer.name] = _rules_of(layer, d.table, grid, kind, levels,
+                                                        extents[layer.axis])  # fmt: skip
                 built.append((layer, d.table, None))
                 continue
             table = d.table
@@ -2642,7 +2705,14 @@ class Trellis:
         self._drawn = drawn
         self._geometry = built
         self._details = details
-        zero = any(lr.mark in ("bars", "area") or lr.stat == "density" for lr in shown)
+        # bars' and areas' base: 0 on their value axis, unpadded
+        zero = any((lr.mark == "bars" and not horizontal) or lr.mark == "area"
+                   or lr.stat == "density" for lr in shown)  # fmt: skip
+        zero_x = horizontal and any(lr.mark == "bars" for lr in shown)
+        # every mark filled ("fill"): the value axis reads as shares, in percent
+        filled = bool(shown) and all(lr.position == "fill" and lr.mark in ("bars", "area")
+                                     for lr in shown)  # fmt: skip
+        self._shares = ("x" if horizontal else "y") if filled else None
         for axis, kind in (("x", x_kind), ("y", y_kind)):
             if self._share[axis] == "sliced" and kind == "band":
                 raise ValueError(
@@ -2656,6 +2726,7 @@ class Trellis:
             xg,
             x_kind,
             band_size=len(x_levels or []),
+            zero_base=zero_x,
             sliced=self._share["x"] == "sliced",
         )
         yd = domains(
@@ -2718,11 +2789,11 @@ class Trellis:
             ],
             "x": {
                 **_axis_spec(x_kind, x_levels, x_origin, self._share["x"], x_title),
-                "format": self._axis_format("x", x_kind),
+                "format": self._axis_format("x", x_kind) or self._share_format("x"),
             },
             "y": {
                 **_axis_spec(y_kind, y_levels, y_origin, self._share["y"], y_title),
-                "format": self._axis_format("y", y_kind),
+                "format": self._axis_format("y", y_kind) or self._share_format("y"),
             },
             "layers": [],
             # each with its column's name (select(color=...)) and its title as shown
@@ -2771,7 +2842,7 @@ class Trellis:
         for i, (d, (layer, _table, geom)) in enumerate(zip(drawn, built, strict=True)):
             if geom is None:
                 origin = x_origin if layer.axis == "x" else y_origin
-                layers_spec.append(_rule_spec(layer, rule_values[layer.name], origin))
+                layers_spec.append(_rule_spec(layer, *rule_values[layer.name], origin))
                 self._full.append((layer, _table, None, None))
                 self._sent.append((layer, _table, None, None))
                 continue
@@ -3607,6 +3678,11 @@ def _series_names(layer: Layer, table: Table) -> list[str]:
     return extra
 
 
+def _horizontal(x_levels: list[str] | None, y_levels: list[str] | None) -> bool:
+    """Bars along y: categories on y and not on x."""
+    return y_levels is not None and x_levels is None
+
+
 def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
            y_levels: list[str] | None, colors: _ColorScales, steps: dict[str, float],
            panel_of: np.ndarray | None) -> Geometry:  # fmt: skip
@@ -3621,13 +3697,19 @@ def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
                              layer.step)  # fmt: skip
     elif layer.mark == "area":
         geom = area_geometry(rows, panel, x, y, _series(layer, table, panel_of, len(grid.panels)),
-                             stack=layer.position == "stack")  # fmt: skip
+                             stack=layer.position in STACKED,
+                             fill=layer.position == "fill")  # fmt: skip
     elif layer.mark == "band":
         assert layer.y2 is not None
         upper = axis_values(table.column(layer.y2), y_levels)
         geom = band_geometry(rows, panel, x, y, upper,
                              _series(layer, table, panel_of, len(grid.panels)))  # fmt: skip
     elif layer.mark in ("points", "text"):
+        if layer.jitter:  # within the bands of a category axis
+            if x_levels is not None:
+                x = jittered(x, np.arange(len(x)), layer.jitter, 1)
+            if y_levels is not None:
+                y = jittered(y, np.arange(len(y)), layer.jitter, 2)
         geom = point_geometry(rows, panel, x, y)
     elif layer.mark == "rect":
         x2 = axis_values(table.column(layer.x2), x_levels) if layer.x2 else None
@@ -3644,9 +3726,11 @@ def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
             levels = colors.levels[color_col.name]
             codes = axis_values(color_col, levels).astype(np.int64)
             ncodes = len(levels)
-        step = 1.0 if x_levels is not None else steps["bars"]
+        horizontal = _horizontal(x_levels, y_levels)
+        step = 1.0 if x_levels is not None or horizontal else steps["bars"]
         geom = bar_geometry(rows, panel, x, y, step=step, width=layer.bar_width, codes=codes,
-                            ncodes=ncodes, position=layer.position)  # fmt: skip
+                            ncodes=ncodes, position=layer.position,
+                            horizontal=horizontal)  # fmt: skip
     _paint(layer, table, geom, colors)
     return geom
 
@@ -3777,12 +3861,44 @@ def _text_spec(
     }
 
 
-def _rule_spec(layer: Layer, values: list[float], origin: float) -> dict[str, Any]:
+def _rules_of(layer: Layer, table: Table, grid: Grid, kind: AxisKind, levels: list[str] | None,
+              extent: Extent) -> tuple[list[float], list[int]]:  # fmt: skip
+    """A rule from data: each row's position, in its panel (and a margin's), or −1 (every
+    panel: the table has no facet columns); added to the axis's extent there."""
+    name = layer.x if layer.axis == "x" else layer.y
+    assert name is not None
+    column = table.column(name)
+    if (column.kind == "category") != (kind == "band"):
+        what = "categories" if kind == "band" else "numbers or times"
+        raise ValueError(f"rule(data, {layer.axis}={name!r}): the {layer.axis} axis holds "
+                         f"{what}, the column {column.kind}s")  # fmt: skip
+    if kind == "time" and column.kind != "time":
+        raise ValueError(f"rule(data, {layer.axis}={name!r}): the {layer.axis} axis holds "
+                         "times; give a column of dates or datetimes")  # fmt: skip
+    values = axis_values(column, levels)
+    panel_of = grid.assign(table)
+    if panel_of is None:
+        finite = values[np.isfinite(values)]
+        extent.add_everywhere(finite.tolist())
+        return finite.tolist(), [-1] * len(finite)
+    rows, panel = expand(panel_of, table.n, len(grid.panels), "auto", grid.also)
+    v = values[rows]
+    keep = np.isfinite(v)
+    v, panel = v[keep], panel[keep]
+    extent.add(panel, v)
+    return v.tolist(), panel.astype(int).tolist()
+
+
+def _rule_spec(layer: Layer, values: list[float], panels: list[int] | None,
+               origin: float) -> dict[str, Any]:  # fmt: skip
+    """A rule layer: its lines' positions, and (from data) each one's panel (−1: every
+    panel; none given: each line in every panel)."""
     return {
         "type": "rule",
         "name": layer.name,
         "axis": layer.axis,
         "values": [v - origin for v in values],
+        "panels": panels,
         "color": list(rgba(layer.color or MISSING_COLOR)),
         "width": layer.width,
         "dash": layer.dash,

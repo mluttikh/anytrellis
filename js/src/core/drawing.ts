@@ -411,7 +411,9 @@ function drawRule(ctx: CanvasRenderingContext2D, l: RuleLayerSpec, v: PanelView)
   ctx.lineWidth = l.width;
   ctx.setLineDash(l.dash);
   ctx.beginPath();
-  for (const value of l.values) {
+  l.values.forEach((value, i) => {
+    const at = l.panels?.[i] ?? -1; // from data: its panel's (−1: every panel's)
+    if (at >= 0 && at !== v.panel) return;
     if (l.axis === "x") {
       const x = Math.round(v.map.ox + value * v.map.sx) + 0.5;
       ctx.moveTo(x, r.y);
@@ -421,7 +423,7 @@ function drawRule(ctx: CanvasRenderingContext2D, l: RuleLayerSpec, v: PanelView)
       ctx.moveTo(r.x, y);
       ctx.lineTo(r.x + r.w, y);
     }
-  }
+  });
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.lineWidth = 1;

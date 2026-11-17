@@ -26,6 +26,10 @@ redo well-known figures of both.
 | `aes(colour = factor(cyl))` | `.as_category("cyl")`, then `color="cyl"` |
 | `scale_y_log10()` | `Trellis(..., y_scale="log")` |
 | `position = "dodge"` | `.bars(position="dodge")` |
+| `position = "fill"` | `.bars(position="fill")`, also `.area()`, `.hist()` |
+| `geom_col()` with a discrete y, `coord_flip()` | `.bars(x="value", y="category")` |
+| `geom_jitter()`, `sns.stripplot()` | `.points(x="category", y="value", jitter=0.4)` |
+| `geom_hline(data = targets, aes(yintercept = target))` | `.rule(targets, y="target")` |
 | `gghighlight()` | a layer with `facet="exclude"` |
 | `fct_reorder(f, x, median)` | `.order("f", by="median", of="x")` |
 | `labs(title =, subtitle =, caption =, x =, y =)` | `Trellis(..., title=, subtitle=, caption=, x_title=, y_title=)` |
