@@ -10,7 +10,7 @@ import { FADED, filled, highlighted, select, selectionColors, selects, toggleLeg
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { drawMarks } from "../src/core/renderers/canvas2d";
 import { deviceClip } from "../src/core/renderers/renderer";
-import { formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
+import { formatHeight, formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
 import type { MarkLayerSpec, PanelSpec, PanelStat, Paging, TrellisSpec } from "../src/core/types";
 
 const DAY = 86_400_000;
@@ -74,6 +74,23 @@ describe("ticks", () => {
     expect(fine).toEqual([3, 4, 6, 7, 8, 9]);
     expect(minorTicks("number", 0, 1, 0, [], 400)).toEqual([]);
     expect(formatValue("log", Math.log10(1234.5), 0, 0.5)).toBe("1235");
+  });
+
+  it("puts sqrt ticks on round values and symlog's on decades either side of 0", () => {
+    const labels = (kind: "sqrt" | "symlog", lo: number, hi: number, count: number) => ticks(kind, lo, hi, 0, count).map((t) => t.label);
+    // (figure.py: test_sqrt_and_symlog_ticks_as_the_browser_writes_them)
+    expect(labels("sqrt", 0, 10, 8)).toEqual(["0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"]);
+    expect(labels("sqrt", 0, 10, 4)).toEqual(["0", "20", "40", "60", "80", "100"]);
+    expect(labels("sqrt", -0.4, 10.4, 5)).toEqual(["0", "20", "40", "60", "80", "100"]);
+    expect(labels("symlog", -3.1, 3.1, 8)).toEqual(["−1000", "−100", "−10", "0", "10", "100", "1000"]);
+    expect(labels("symlog", 0, 6.1, 6)).toEqual(["0", "100", "10000", "1M"]);
+    expect(labels("symlog", -0.2, 0.3, 5)).toEqual(["−0.4", "−0.2", "0.0", "0.2", "0.4", "0.6", "0.8"]);
+    for (const t of ticks("sqrt", 0, 10, 0, 8)) expect(t.value).toBeCloseTo(Math.sqrt(Number(t.label)));
+    expect(ticks("sqrt", 0, 10, 0, 8, null, ".1f")[1].label).toBe("10.0");
+    expect(formatValue("sqrt", 3, 0, 10)).toBe("9.0");
+    expect(formatValue("symlog", -2, 0, 4)).toBe("−99");
+    expect(formatHeight("sqrt", 4, 3, 0, 10)).toBe("7.0");
+    expect(formatHeight("number", 4, 3, 0, 10)).toBe("1.00");
   });
 
   it("formats values at the precision of the view", () => {

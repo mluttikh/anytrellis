@@ -12,7 +12,7 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 
 - [Choose a facet layout](layout.md): a wrap or a grid, columns, height, titles.
 - [Share or free the scales](scales.md): per row, per column, per panel.
-- [Use a log scale](log.md)
+- [Use a log, sqrt or symlog scale, or reverse one](log.md)
 
 **Layers**
 

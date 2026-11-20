@@ -17,8 +17,9 @@ import numpy as np
 
 from anytrellis.facets import Grid
 
-AxisKind = Literal["number", "time", "band", "log"]
-"""``log``: numbers in log10 units (a log scale); padded and zoomed like numbers."""
+AxisKind = Literal["number", "time", "band", "log", "sqrt", "symlog"]
+"""``log``, ``sqrt``, ``symlog``: numbers in a transformed scale's units (``transforms``);
+padded and zoomed like numbers."""
 Share = Literal["all", "row", "col", "page", "none", "sliced"]
 
 PAD = 0.04

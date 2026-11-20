@@ -1,6 +1,8 @@
 // Axis ticks and their labels: numbers (1-2-5 steps), times (calendar steps in UTC, the
-// wall-clock time Python sent), bands (one tick per category, thinned to fit), and log
-// scales (decades, with 2 and 5 between when there is room; within a decade, round values).
+// wall-clock time Python sent), bands (one tick per category, thinned to fit), log scales
+// (decades, with 2 and 5 between when there is room; within a decade, round values), and
+// sqrt and symlog scales (round values, or symlog's decades either side of 0, thinned where
+// the scale crowds them).
 
 import { axisFormat } from "./format";
 import type { AxisKind } from "./types";
@@ -9,6 +11,27 @@ export interface Tick {
   /** Position in axis units (relative to the origin). */
   value: number;
   label: string;
+}
+
+/** Whether an axis's numbers are a transformed scale's units (Python: transforms.py). */
+export function isTransformed(kind: AxisKind): boolean {
+  return kind === "log" || kind === "sqrt" || kind === "symlog";
+}
+
+/** A transformed axis's units as the values they stand for (others: as they are). */
+export function untransform(kind: AxisKind, u: number): number {
+  if (kind === "log") return Math.pow(10, u);
+  if (kind === "sqrt") return Math.sign(u) * u * u;
+  if (kind === "symlog") return Math.sign(u) * (Math.pow(10, Math.abs(u)) - 1);
+  return u;
+}
+
+/** Values in a transformed axis's units (NaN: not on its scale). */
+export function transform(kind: AxisKind, v: number): number {
+  if (kind === "log") return v > 0 ? Math.log10(v) : NaN;
+  if (kind === "sqrt") return v >= 0 ? Math.sqrt(v) : NaN;
+  if (kind === "symlog") return Math.sign(v) * Math.log10(1 + Math.abs(v));
+  return v;
 }
 
 /** How many ticks a y axis of `h` px draws over [lo, hi]: one per 36 px; bands, one per
@@ -25,7 +48,7 @@ export function ticks(kind: AxisKind, lo: number, hi: number, origin: number, co
   const out = placedTicks(kind, lo, hi, origin, count, levels);
   const f = axisFormat(kind, format);
   if (!f) return out;
-  return out.map((t) => ({ value: t.value, label: f(kind === "log" ? Math.pow(10, t.value + origin) : t.value + origin) }));
+  return out.map((t) => ({ value: t.value, label: f(untransform(kind, t.value + origin)) }));
 }
 
 function placedTicks(kind: AxisKind, lo: number, hi: number, origin: number, count: number, levels: string[] | null): Tick[] {
@@ -34,6 +57,7 @@ function placedTicks(kind: AxisKind, lo: number, hi: number, origin: number, cou
   if (kind === "band") return bandTicks(lo, hi, levels ?? [], count);
   if (kind === "time") return timeTicks(lo + origin, hi + origin, count).map((t) => ({ value: t.value - origin, label: t.label }));
   if (kind === "log") return logTicks(lo + origin, hi + origin, count).map((t) => ({ value: t.value - origin, label: t.label }));
+  if (kind === "sqrt" || kind === "symlog") return scaleTicks(kind, lo + origin, hi + origin, count).map((t) => ({ value: t.value - origin, label: t.label }));
   const step = niceStep(hi - lo, count);
   const first = Math.ceil(lo / step - 1e-9);
   const last = Math.floor(hi / step + 1e-9);
@@ -70,7 +94,7 @@ export function formatNumber(v: number, step: number, decimals: number): string 
  * says when one is given. */
 export function formatValue(kind: AxisKind, v: number, origin: number, span: number, levels: string[] | null = null, format: string | null = null): string {
   const f = axisFormat(kind, format);
-  if (f) return f(kind === "log" ? Math.pow(10, v + origin) : v + origin);
+  if (f) return f(untransform(kind, v + origin));
   if (kind === "band") return levels?.[Math.round(v)] ?? "";
   if (kind === "time") return formatTime(v + origin, span / 200);
   if (kind === "log") {
@@ -80,9 +104,83 @@ export function formatValue(kind: AxisKind, v: number, origin: number, span: num
     const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
     return formatNumber(value, step, Math.min(decimals, 12));
   }
+  if (kind === "sqrt" || kind === "symlog") {
+    // the value, as precise as a 200th of the view's span (in its units) there
+    const u = v + origin;
+    const value = untransform(kind, u);
+    return formatAmount(value, Math.abs(untransform(kind, u + span / 200) - value));
+  }
   const step = span / 1000 || 1;
   const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
   return formatNumber(v + origin, step, Math.min(decimals, 6));
+}
+
+/** A bar's or a stacked area's own value, from `base` to `top` (axis units): on a
+ * transformed axis, the difference of the values they stand for. */
+export function formatHeight(kind: AxisKind, top: number, base: number, origin: number, span: number, format: string | null = null): string {
+  if (!isTransformed(kind)) return formatValue(kind, top - base, origin, span, null, format);
+  const value = untransform(kind, top + origin) - untransform(kind, base + origin);
+  const f = axisFormat(kind, format);
+  if (f) return f(value);
+  return formatAmount(value, Math.abs(untransform(kind, top + origin + span / 200) - untransform(kind, top + origin)));
+}
+
+/** A value (not in axis units: a bar's height on a transformed axis) to the precision
+ * `step`. */
+export function formatAmount(value: number, step: number): string {
+  const s = step > 0 && Number.isFinite(step) ? step : Math.abs(value) * 1e-6 || 1e-6;
+  const decimals = Math.max(0, -Math.floor(Math.log10(s) + 1e-9));
+  return formatNumber(value, s, Math.min(decimals, 12));
+}
+
+/** Ticks of a sqrt or symlog axis over [lo, hi] (its units), none closer than 0.4 of an
+ * even step: round values (1-2-5 steps of the values, the finest that are not crowded); a
+ * symlog axis spanning a decade or more, 0 and the decades either side (with 2 and 5
+ * between when there is room), thinned where they crowd: a tick is kept when far enough
+ * from those kept before it, 0 first, then the decades, then the rest from small to large. */
+function scaleTicks(kind: "sqrt" | "symlog", lo: number, hi: number, count: number): Tick[] {
+  const found: { value: number; label: string; rank: number }[] = [];
+  const gap = ((hi - lo) / count) * 0.4;
+  const add = (v: number, label: string, rank: number): void => {
+    const u = transform(kind, v);
+    if (u >= lo - 1e-9 && u <= hi + 1e-9) found.push({ value: u, label, rank });
+  };
+  if (kind === "symlog" && hi - lo >= 1) {
+    const decades = hi - lo;
+    const every = Math.max(1, Math.ceil(decades / count));
+    const mults = every === 1 && decades * 3 <= count * 1.5 ? [1, 2, 5] : [1];
+    add(0, "0", 0);
+    const top = Math.ceil(Math.max(Math.abs(lo), Math.abs(hi)));
+    for (let e = 0; e <= top && found.length < 1000; e++) {
+      if (e % every !== 0) continue;
+      for (const m of mults) {
+        const v = m * Math.pow(10, e);
+        const label = formatNumber(v, v, Math.max(0, -Math.floor(Math.log10(v) + 1e-9)));
+        add(v, label, m === 1 ? 1 : 2);
+        add(-v, "−" + label, m === 1 ? 1 : 2);
+      }
+    }
+  } else {
+    const a = untransform(kind, lo);
+    const b = untransform(kind, hi);
+    for (let c = count; c >= 1; c--) {
+      found.length = 0;
+      const step = niceStep(b - a, c);
+      const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+      for (let i = Math.ceil(a / step - 1e-9); i * step <= b + step * 1e-9 && found.length < 1000; i++) {
+        const v = i * step || 0;
+        if (kind === "sqrt" && v < 0) continue;
+        add(v, formatNumber(v, step, decimals), v === 0 ? 0 : 2);
+      }
+      if (found.every((t, k) => k === 0 || t.value - found[k - 1].value >= gap - 1e-12)) break;
+    }
+  }
+  const order = found.slice().sort((p, q) => p.rank - q.rank || Math.abs(p.value) - Math.abs(q.value) || p.value - q.value);
+  const kept: typeof found = [];
+  for (const t of order) {
+    if (kept.every((k) => Math.abs(k.value - t.value) >= gap - 1e-12)) kept.push(t);
+  }
+  return kept.sort((p, q) => p.value - q.value).map((t) => ({ value: t.value, label: t.label }));
 }
 
 /** Log ticks over [lo, hi] (log10 units): decades (every few when there are many), with

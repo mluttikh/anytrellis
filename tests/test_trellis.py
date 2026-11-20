@@ -1073,7 +1073,7 @@ def test_log_scale_method_rules_and_errors():
     with pytest.raises(ValueError, match="needs numbers"):
         Trellis({"x": ["a", "b"], "y": [1.0, 2.0]}, x_scale="log").points(x="x", y="y")._scene()
     with pytest.raises(ValueError, match="scale is one of"):
-        Trellis(data, x_scale="sqrt")
+        Trellis(data, x_scale="cube")
     with pytest.raises(ValueError, match="not on a log axis"):
         Trellis(data, x_scale="log").points(x="x", y="y").rule(x=0)._scene()
 
@@ -1091,6 +1091,58 @@ def test_summaries_on_a_log_axis_are_computed_on_it():
     assert np.allclose([body[1], body[3]], [0.75, 2.25])  # quartiles of the logs
     tips = scene(b)[0]["layers"][0]["tips"]["values"][0]
     assert tips[2] == f"{10**1.5:.6g}"  # the median as a value
+
+
+# ---- sqrt and symlog scales, reversed axes ------------------------------------------------
+
+
+def test_sqrt_and_symlog_axes_send_their_units():
+    data = {"x": [-99.0, 0.0, 9.0, 99.0], "y": [0.0, 4.0, 16.0, -1.0], "name": list("abcd")}
+    t = Trellis(data, x_scale="symlog", y_scale="sqrt").points(x="x", y="y", tooltip=["name"])
+    spec, _ = scene(t)
+    assert (spec["x"]["kind"], spec["y"]["kind"]) == ("symlog", "sqrt")
+    c = coords(t)
+    assert np.allclose(c[:, 0], [-2.0, 0.0, 1.0])  # y = -1: off a sqrt axis
+    assert np.allclose(c[:, 1], [0.0, 2.0, 4.0])
+    t.select(x=(-200, 5), y=(1, 20))  # values, not units
+    assert list(t.selected()["name"]) == ["b"]
+    lo, hi = t.selection["x"]  # ty: ignore[not-subscriptable]
+    assert np.isclose(lo, -200)
+    assert np.isclose(hi, 5)
+    r = Trellis(data, y_scale="sqrt").points(x="x", y="y").rule(y=9).limits(y=(0, 25))
+    spec, _ = scene(r)
+    assert spec["layers"][1]["values"] == [3.0]
+    assert spec["panels"][0]["y"] == [0.0, 5.0]
+    with pytest.raises(ValueError, match="not on a sqrt axis"):
+        Trellis(data, y_scale="sqrt").points(x="x", y="y").rule(y=-1)._scene()
+
+
+def test_marks_from_zero_are_stacked_then_transformed():
+    data = {"g": ["a", "a", "b"], "k": ["p", "q", "p"], "v": [9.0, 7.0, 4.0]}
+    bars = Trellis(data, y_scale="sqrt").bars(x="g", y="v", color="k")
+    c = coords(bars)
+    tops = sorted(zip(c[:, 1].round(9), c[:, 3].round(9), strict=True))
+    assert tops == [(0.0, 2.0), (0.0, 3.0), (3.0, 4.0)]  # 9, then 9 + 7 = 16
+    along_y = Trellis(data, x_scale="symlog").bars(x="v", y="g")
+    assert np.allclose(sorted(coords(along_y)[:, 2]), np.log10([5.0, 8.0, 10.0]))
+    hist = Trellis({"v": [1.0, 1.5, 2.5, 2.6, 2.7, 2.8]}, y_scale="sqrt").hist(x="v", binwidth=1)
+    assert np.allclose(sorted(coords(hist)[:, 3]), [np.sqrt(2), 2.0])  # counts 2 and 4
+    with pytest.raises(ValueError, match="draws from zero"):
+        Trellis(data, y_scale="log").area(x="v", y="v")._scene()
+
+
+def test_reverse_runs_an_axis_from_high_to_low():
+    data = {"x": [1.0, 10.0, 100.0], "y": [0.0, 5.0, 10.0]}
+    t = Trellis(data, y_scale="reverse").points(x="x", y="y").scale(x=("log", "reverse"))
+    spec, _ = scene(t)
+    assert (spec["x"]["kind"], spec["x"]["reverse"]) == ("log", True)
+    assert (spec["y"]["kind"], spec["y"]["reverse"]) == ("number", True)
+    assert scene(Trellis(data).points(x="x", y="y"))[0]["y"]["reverse"] is False
+    t.select(x=(5, 50))
+    assert list(t.selected()["x"]) == [10.0]
+    for bad in ("upside", ("log", "sqrt"), ("reverse", 3)):
+        with pytest.raises(ValueError, match="scale is one of"):
+            Trellis(data, x_scale=bad)  # ty: ignore[invalid-argument-type]
 
 
 # ---- bands and smooth fits -------------------------------------------------------------------

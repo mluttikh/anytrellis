@@ -16,7 +16,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Self, cast
 
 import numpy as np
 
@@ -98,6 +98,7 @@ from anytrellis.summaries import linked_counts
 from anytrellis.summaries import parts as queried_parts
 from anytrellis.summaries import selected as summaries_selected
 from anytrellis.theme import Theme, theme_of
+from anytrellis.transforms import SCALES, TRANSFORMS, forward, on_scale_expr, scalar
 
 if TYPE_CHECKING:
     from anytrellis.widget import TrellisWidget
@@ -150,10 +151,14 @@ class Trellis:
             ``"sliced"`` (each panel its own range, all as wide as the widest, so a change
             of 5 looks the same size in every panel; zooming one zooms all to its width).
         share_y: The same for y.
-        x_scale: ``"linear"`` or ``"log"`` (log10: values of 0 or less are left out; a
-            histogram's bins and a density are computed on the log scale).
-        y_scale: The same for y (not with marks drawn from zero: bars, areas, histograms,
-            densities).
+        x_scale: ``"linear"``; ``"log"`` (log10: values of 0 or less are left out; a
+            histogram's bins and a density are computed on the log scale); ``"sqrt"`` (the
+            square root: sizes, counts; values of 0 and up); ``"symlog"`` (log-like away
+            from zero and linear near it, for values either side of 0); ``"reverse"``,
+            linear from high to low, or a scale and ``"reverse"`` together,
+            ``("log", "reverse")``.
+        y_scale: The same for y (not ``"log"`` with marks drawn from zero: bars, areas,
+            histograms, densities).
         height: The plot's height in CSS pixels (default: from ``panel_height``).
         panel_height: Each panel's height in CSS pixels (default: from its width).
         aspect: Each panel's height as a multiple of its width (``1``: square), or
@@ -234,8 +239,8 @@ class Trellis:
         page: str | Sequence[str] | None = None,
         share_x: bool | str = True,
         share_y: bool | str = True,
-        x_scale: str = "linear",
-        y_scale: str = "linear",
+        x_scale: str | Sequence[str] = "linear",
+        y_scale: str | Sequence[str] = "linear",
         height: int | None = None,
         panel_height: int | None = None,
         aspect: float | str | None = None,
@@ -301,7 +306,10 @@ class Trellis:
         self._paging: Paging = {}
         self._stats: list[Stat] = []
         self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
-        self._scales: dict[str, str] = {"x": _scale(x_scale), "y": _scale(y_scale)}
+        self._scales: dict[str, str] = {}
+        self._reverse: dict[str, bool] = {}
+        for axis, given in (("x", x_scale), ("y", y_scale)):
+            self._scales[axis], self._reverse[axis] = _scale(given)
         self._orders: dict[str, Order] = {}
         self._categories: frozenset[str] = frozenset()
         """Number columns read as categories (``as_category``)."""
@@ -1178,12 +1186,23 @@ class Trellis:
             self._share["y"] = share_mode(y)
         return self._changed()
 
-    def scale(self, x: str | None = None, y: str | None = None) -> Self:
-        """The axes' scales: ``"linear"`` or ``"log"`` (as ``Trellis(x_scale=...)``)."""
+    def scale(self, x: str | Sequence[str] | None = None,
+              y: str | Sequence[str] | None = None) -> Self:  # fmt: skip
+        """The axes' scales, as ``Trellis(x_scale=...)``: ``"linear"``, ``"log"``,
+        ``"sqrt"`` or ``"symlog"``; ``"reverse"`` runs an axis from high to low (y: high at
+        the bottom), alone or with a scale.
+
+        ```python
+        t.scale(y="sqrt")                  # areas, counts: square-root steps
+        t.scale(x="symlog")                # changes either side of zero
+        t.scale(y="reverse")               # depth: 0 at the top
+        t.scale(y=("log", "reverse"))      # a rank: 1 at the top
+        ```
+        """
         if x is not None:
-            self._scales["x"] = _scale(x)
+            self._scales["x"], self._reverse["x"] = _scale(x)
         if y is not None:
-            self._scales["y"] = _scale(y)
+            self._scales["y"], self._reverse["y"] = _scale(y)
         return self._changed()
 
     def limits(self, x: tuple[Any, Any] | None = None, y: tuple[Any, Any] | None = None) -> Self:
@@ -1752,8 +1771,10 @@ class Trellis:
         for axis in ("x", "y"):
             name = getattr(user, axis)
             kind, levels, _ = self._axes[axis]
-            if kind == "log":  # values of 0 or less: not drawn
-                where = where & (nw.col(name) > 0)
+            scale = kind if kind in TRANSFORMS else ""
+            domain = on_scale_expr(scale, nw.col(name)) if scale else None
+            if domain is not None:  # values off the scale (0 on a log axis): not drawn
+                where = where & domain
             r = self._absolute(axis, brush.get(axis))
             if r is None:
                 continue
@@ -1762,7 +1783,7 @@ class Trellis:
                 chosen = [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
                 where = where & among_labels(whole, name, chosen)
             else:
-                where = where & within(whole, name, lo, hi, kind)
+                where = where & within(whole, name, lo, hi, kind, scale=scale)
         if brush.get("panel") is not None:
             where = where & self._panels_filter(self._grid, [int(brush["panel"])])
         legend = self._legend_out(brush)
@@ -2438,22 +2459,22 @@ class Trellis:
             self._banked = aspect
         return aspect
 
-    def _page_summary(self, layer: Layer, grid: Grid, logs: list[str]) -> list[Part]:
+    def _page_summary(self, layer: Layer, grid: Grid, scales: dict[str, str]) -> list[Part]:
         """``load="pages"``: a summary layer's parts, every panel's: from the database, or
         (a summary it doesn't compute) from every row of the columns it draws, read once."""
-        key = (tuple(p.keys for p in grid.panels), tuple(logs))
+        key = (tuple(p.keys for p in grid.panels), tuple(sorted(scales.items())))
         made = self._queried.get(id(layer))
         if made is not None and made[0] == key:
             return made[1]
         whole = self._data
         assert whole is not None
-        _check_log(layer, logs)
-        found = queried_parts(layer, whole, grid, logs)
+        _check_log(layer, scales)
+        found = queried_parts(layer, whole, grid, _input_scales(layer, scales))
         if found is None:
             names = tuple(n for n in dict.fromkeys([*grid.columns, *_layer_columns(layer)])
                           if n is not None and n in whole)  # fmt: skip
             rows = whole.memo(("rows", names), lambda: self._query_rows(grid, None, names))
-            table = _scaled(layer, rows, logs)
+            table = _scaled(layer, rows, scales)
             found = summary_parts(layer, table, grid.assign(table), len(grid.panels))
         self._queried[id(layer)] = (key, found)
         return found
@@ -2472,7 +2493,8 @@ class Trellis:
         rows.whole = whole
         return rows
 
-    def _page_extents(self, grid: Grid, extents: dict[str, Extent], logs: list[str]) -> None:
+    def _page_extents(self, grid: Grid, extents: dict[str, Extent],
+                      scales: dict[str, str]) -> None:  # fmt: skip
         """``load="pages"``: each panel's range of x and y, of all its rows, from the
         database (the rows read are a few pages')."""
         whole = self._data
@@ -2484,8 +2506,8 @@ class Trellis:
             x, y = layer.x, layer.y
             assert x is not None
             assert y is not None
-            found = whole.memo(("extents", keys, x, y, tuple(logs)),
-                               lambda x=x, y=y: panel_extents(whole, keys, x, y, logs))  # fmt: skip
+            key = ("extents", keys, x, y, tuple(sorted(scales.items())))
+            found = whole.memo(key, lambda x=x, y=y: panel_extents(whole, keys, x, y, scales))
             if not found.names:
                 continue
             at = grid.assign(found)
@@ -2496,8 +2518,8 @@ class Trellis:
                     continue
                 for end in ("lo", "hi"):
                     values = found.column(f"{axis}_{end}").values[ok]
-                    if axis in logs:
-                        values = np.log10(values)
+                    if axis in scales:
+                        values = forward(scales[axis], values)
                     extents[axis].add(at[ok], values)
 
     def _scene(self) -> tuple[dict[str, Any], Buffers]:
@@ -2590,17 +2612,17 @@ class Trellis:
         given = self._given_orders(tables)
         # every layer as the plain layers it draws: a summary (hist, box, ...) as its parts
         drawn: list[_Drawn] = []
-        logs = [axis for axis in ("x", "y") if self._scales[axis] == "log"]
+        scales = {axis: s for axis, s in self._scales.items() if s in TRANSFORMS}
         for layer in self._layers:
             if layer.mark == "rule":
                 table = (self._data or Table({})) if layer.data is None else \
-                    _scaled(layer, self._tables[id(layer)], logs)  # fmt: skip
+                    _scaled(layer, self._tables[id(layer)], scales)  # fmt: skip
                 drawn.append(_Drawn(layer, layer, table, None))
                 continue
             if paged and self._on_page(layer) and layer.mark in SUMMARIES:
-                made = self._page_summary(layer, grid, logs)
+                made = self._page_summary(layer, grid, scales)
             else:
-                table = _scaled(layer, self._table(layer), logs)
+                table = _scaled(layer, self._table(layer), scales)
                 if layer.mark not in SUMMARIES:
                     drawn.append(_Drawn(layer, layer, table, None))
                     continue
@@ -2613,12 +2635,12 @@ class Trellis:
         shown = [d.layer for d in drawn if d.layer.mark != "rule"]
         x_kind, x_levels = _axis(shown, lambda lr: table_of(id(lr)), "x", given)
         y_kind, y_levels = _axis(shown, lambda lr: table_of(id(lr)), "y", given)
-        if "x" in logs:
-            x_kind = "log"
-        if "y" in logs:
-            y_kind = "log"
+        if "x" in scales:
+            x_kind = cast("AxisKind", scales["x"])
+        if "y" in scales:
+            y_kind = cast("AxisKind", scales["y"])
         horizontal = _horizontal(x_levels, y_levels)
-        if horizontal and "x" in logs and any(lr.mark == "bars" for lr in shown):
+        if horizontal and scales.get("x") == "log" and any(lr.mark == "bars" for lr in shown):
             raise ValueError("bars along y draw from zero, which a log x axis has no place "
                              "for; use points, or a linear x")  # fmt: skip
         for lr in shown:
@@ -2681,6 +2703,12 @@ class Trellis:
                                          None if read is None else read.panel_of, kept)  # fmt: skip
                 if read is not None:
                     self._made[id(layer)] = (table, geom, made_for)
+            # a mark drawn from zero on a sqrt or symlog axis: stacked or counted in values,
+            # then transformed (a summary's parts: a histogram's or a density's, on y)
+            value = _value_axis(d.user, table) if d.part is None else \
+                "y" if d.user.mark in FROM_ZERO else None  # fmt: skip
+            if value is not None and scales.get(value) in ("sqrt", "symlog"):
+                geom = _transformed(geom, value, scales[value])
             extents["x"].add(geom.panel, geom.x0)
             extents["x"].add(geom.panel, geom.x1)
             extents["y"].add(geom.panel, geom.y0)
@@ -2701,7 +2729,7 @@ class Trellis:
                 with_cells.append(_Drawn(d.user, cells, none, None, cells=True))
                 built.append((cells, none, _no_geometry()))
         if window is not None:  # each panel's range of all its rows, not only those read
-            self._page_extents(grid, extents, logs)
+            self._page_extents(grid, extents, scales)
         drawn = with_cells
         self._drawn = drawn
         self._geometry = built
@@ -2790,11 +2818,15 @@ class Trellis:
                 for i, p in enumerate(grid.panels)
             ],
             "x": {
-                **_axis_spec(x_kind, x_levels, x_origin, self._share["x"], x_title),
+                **_axis_spec(
+                    x_kind, x_levels, x_origin, self._share["x"], x_title, self._reverse["x"]
+                ),
                 "format": self._axis_format("x", x_kind) or self._share_format("x"),
             },
             "y": {
-                **_axis_spec(y_kind, y_levels, y_origin, self._share["y"], y_title),
+                **_axis_spec(
+                    y_kind, y_levels, y_origin, self._share["y"], y_title, self._reverse["y"]
+                ),
                 "format": self._axis_format("y", y_kind) or self._share_format("y"),
             },
             "layers": [],
@@ -3156,24 +3188,59 @@ class Trellis:
 
 # ---- helpers ------------------------------------------------------------------------------
 
-SCALES = ("linear", "log")
 FROM_ZERO = ("bars", "area", "hist", "density")
-"""Marks drawn from zero up, which a log y axis has no place for."""
+"""Marks drawn from zero up, which a log y axis has no place for; on a sqrt or symlog
+one their heights are stacked or counted as values, then transformed (``_transformed``)."""
 
 
-def _scale(value: str) -> str:
-    if value not in SCALES:
-        raise ValueError(f"a scale is one of {SCALES}, got {value!r}")
-    return value
+def _scale(value: str | Sequence[str]) -> tuple[str, bool]:
+    """A scale given (``"log"``, ``"reverse"``, ``("sqrt", "reverse")``): its name, and
+    whether it runs from high to low."""
+    words = [value] if isinstance(value, str) else list(value)
+    reverse = "reverse" in words
+    named = [w for w in words if w != "reverse"]
+    if (
+        len(named) > 1
+        or any(w not in SCALES for w in named)
+        or not all(isinstance(w, str) for w in words)
+    ):
+        raise ValueError(f'a scale is one of {SCALES}, "reverse", or one of them with '
+                         f'"reverse"; got {value!r}')  # fmt: skip
+    return (named[0] if named else "linear"), reverse
 
 
-def _check_log(layer: Layer, logs: list[str]) -> None:
+def _check_log(layer: Layer, scales: Mapping[str, str]) -> None:
     """A layer drawn from zero has no log y axis."""
-    if "y" in logs and layer.mark in FROM_ZERO:
+    if scales.get("y") == "log" and layer.mark in FROM_ZERO:
         raise ValueError(
             f"{layer.mark}() draws from zero, which a log y axis has no place for; use "
-            "points or lines, or a linear y"
+            "points or lines, or a linear, sqrt or symlog y"
         )
+
+
+def _value_axis(layer: Layer, table: Table) -> str | None:
+    """The axis a mark drawn from zero measures on: y, or x for bars along y (a category
+    y); None for other marks."""
+    if layer.mark not in FROM_ZERO:
+        return None
+    if layer.mark == "bars" and layer.y is not None and layer.y in table and \
+            table.kind(layer.y) == "category":  # fmt: skip
+        return "x"
+    return "y"
+
+
+def _transformed(geom: Geometry, axis: str, scale: str) -> Geometry:
+    """A mark drawn from zero, stacked or counted in values: its ends on ``axis`` (and an
+    area's base) in a sqrt or symlog axis's units."""
+    from dataclasses import replace as changed
+
+    if axis == "x":
+        return changed(geom, x0=forward(scale, geom.x0), x1=forward(scale, geom.x1))
+    return changed(
+        geom, y0=forward(scale, geom.y0), y1=forward(scale, geom.y1),
+        base0=None if geom.base0 is None else forward(scale, geom.base0),
+        base1=None if geom.base1 is None else forward(scale, geom.base1),
+    )  # fmt: skip
 
 
 def _layer_columns(layer: Layer) -> list[str | None]:
@@ -3183,17 +3250,29 @@ def _layer_columns(layer: Layer) -> list[str | None]:
             *layer.tooltip, *ends]  # fmt: skip
 
 
-def _scaled(layer: Layer, table: Table, logs: list[str]) -> Table:
-    """A layer's table with its columns on log axes in log10 units."""
-    _check_log(layer, logs)
-    names = set()
-    if "x" in logs:
-        names |= {n for n in (layer.x, layer.x2) if n is not None}
-        names |= set(layer.stat_args.get("x_columns", ()))
-    if "y" in logs:
-        names |= {n for n in (layer.y, layer.y2) if n is not None}
-        names |= set(layer.stat_args.get("y_columns", ()))
-    return table.log_scaled(names) if names else table
+def _scaled(layer: Layer, table: Table, scales: Mapping[str, str]) -> Table:
+    """A layer's table with its columns on transformed axes in their units (``scales``:
+    ``{"y": "sqrt"}``); a mark drawn from zero keeps its values, transformed once stacked
+    (``_transformed``)."""
+    _check_log(layer, scales)
+    value = _value_axis(layer, table)
+    names: dict[str, str] = {}
+    for axis in ("x", "y"):
+        scale = scales.get(axis)
+        if scale is None or axis == value:
+            continue
+        ends = (layer.x, layer.x2) if axis == "x" else (layer.y, layer.y2)
+        for n in [*ends, *layer.stat_args.get(f"{axis}_columns", ())]:
+            if n is not None:
+                names[n] = scale
+    return table.scaled(names) if names else table
+
+
+def _input_scales(layer: Layer, scales: Mapping[str, str]) -> dict[str, str]:
+    """The scales a summary's input is transformed by: not a histogram's or a density's
+    y, whose counts are transformed once counted."""
+    value = "y" if layer.mark in FROM_ZERO else None
+    return {axis: s for axis, s in scales.items() if axis != value or s == "log"}
 
 
 @dataclass(frozen=True)
@@ -3329,11 +3408,8 @@ def _axis(
 
 def _scalar(value: Any, kind: AxisKind, levels: list[str] | None) -> float:
     """A value (a rule's position, a selection's end) in axis units."""
-    if kind == "log":
-        v = float(value)
-        if not v > 0:
-            raise ValueError(f"{value!r} is not on a log axis (it holds values above 0)")
-        return float(np.log10(v))
+    if kind in TRANSFORMS:
+        return scalar(kind, value)
     if kind == "band":
         lookup = {v: i for i, v in enumerate(levels or [])}
         if str(value) not in lookup:
@@ -3418,9 +3494,11 @@ def _labels(labels: Mapping[str, str] | None) -> dict[str, str]:
 
 
 def _axis_spec(
-    kind: AxisKind, levels: list[str] | None, origin: float, share: Share, title: str
-) -> dict[str, Any]:
-    return {"kind": kind, "levels": levels, "origin": origin, "share": share, "title": title}
+    kind: AxisKind, levels: list[str] | None, origin: float, share: Share, title: str,
+    reverse: bool = False,
+) -> dict[str, Any]:  # fmt: skip
+    return {"kind": kind, "levels": levels, "origin": origin, "share": share, "title": title,
+            "reverse": reverse}  # fmt: skip
 
 
 class _ColorScales:

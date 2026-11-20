@@ -13,9 +13,9 @@ export interface BufferRef {
   byteLength: number;
 }
 
-/** `log`: numbers in log10 units (a log scale): zoomed and panned like numbers, labelled
- * as the values. */
-export type AxisKind = "number" | "time" | "band" | "log";
+/** `log`, `sqrt`, `symlog`: numbers in a transformed scale's units (log10, √, symlog):
+ * zoomed and panned like numbers, labelled as the values (ticks.ts: `untransform`). */
+export type AxisKind = "number" | "time" | "band" | "log" | "sqrt" | "symlog";
 /** `sliced`: each panel its own group, every domain as wide as the widest (lattice's
  * relation="sliced"); zooming one panel gives every panel its width, about its own centre. */
 export type Share = "all" | "row" | "col" | "page" | "none" | "sliced";
@@ -30,6 +30,8 @@ export interface AxisSpec {
   title: string;
   /** How its values are written (`Trellis.format`): a d3-format string, or strftime for times. */
   format?: string | null;
+  /** From high to low: x right to left, y top to bottom. */
+  reverse?: boolean;
 }
 
 export interface PanelSpec {

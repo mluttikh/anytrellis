@@ -18,6 +18,7 @@ import numpy as np
 
 from anytrellis.data import Column, Table
 from anytrellis.layers import Geometry, Layer, _stack, axis_values, expand, step_of
+from anytrellis.transforms import DOMAIN, forward, inverse
 
 PANEL = "__panel__"
 """A summary table's panel column: its rows are already in their panels."""
@@ -77,15 +78,15 @@ class Part:
 
 @dataclass
 class Range:
-    """Values of a number or time column from ``lo`` to ``hi`` (axis units: a log axis's
-    in log10 units, times in milliseconds), each row's; ``open``: below ``hi``, not at it;
-    ``lo == hi``: that value."""
+    """Values of a number or time column from ``lo`` to ``hi`` (axis units: a transformed
+    axis's in its units, ``scale``; times in milliseconds), each row's; ``open``: below
+    ``hi``, not at it; ``lo == hi``: that value."""
 
     name: str
     kind: str
     lo: np.ndarray
     hi: np.ndarray
-    log: bool = False
+    scale: str = ""
     open: np.ndarray | None = None
 
 
@@ -106,8 +107,9 @@ class Where:
     panel: np.ndarray
     color: Labels | None
     tests: list[Range | Labels]
-    finite: tuple[tuple[str, bool], ...] = ()
-    """(name, on a log axis) of each column the rows need a finite value of."""
+    finite: tuple[tuple[str, str], ...] = ()
+    """(name, its axis's scale: "" or a transform) of each column the rows need a finite
+    value of."""
 
     def take(self, rows: np.ndarray) -> Where:
         tests = [_take_test(t, rows) for t in self.tests]
@@ -118,7 +120,7 @@ class Where:
 def _take_test(test: Range | Labels, rows: np.ndarray) -> Range | Labels:
     if isinstance(test, Labels):
         return Labels(test.name, test.labels[rows])
-    return Range(test.name, test.kind, test.lo[rows], test.hi[rows], test.log,
+    return Range(test.name, test.kind, test.lo[rows], test.hi[rows], test.scale,
                  None if test.open is None else test.open[rows])  # fmt: skip
 
 
@@ -231,7 +233,7 @@ def hist_parts(layer: Layer, col: Column, color: Column | None, edges: np.ndarra
             extra[col.name] = _times(lo)
         shown_lo, shown_hi = _shown(col, lo, hi)
         extra["bin"] = _ranges(shown_lo, shown_hi, col.kind)
-        test = Range(col.name, col.kind, lo, hi, col.log, bi < nbins - 1)
+        test = Range(col.name, col.kind, lo, hi, col.scale, bi < nbins - 1)
     cols.append(Column(stat, "number", value))
     if color is not None:
         cols.append(Column(color.name, "category", labels[ci], color.levels))
@@ -269,11 +271,11 @@ def bin_edges(col: Column, bins: Any, binwidth: Any) -> np.ndarray:
     (aligned to multiples of it), or ``bins`` equal bins over the values' range."""
     if isinstance(bins, Sequence | np.ndarray) and not isinstance(bins, str):
         edges = np.array([_value(b, col.kind) for b in bins], dtype=np.float64)
-        if col.log:  # edges as values: on the axis, their logs
-            with np.errstate(divide="ignore", invalid="ignore"):
-                edges = np.where(edges > 0, np.log10(edges), np.nan)
+        if col.scale:  # edges as values: on the axis, in its units
+            edges = forward(col.scale, edges)
             if not np.isfinite(edges).all():
-                raise ValueError("bins= edges on a log axis must be above 0")
+                raise ValueError(f"bins= edges on a {col.scale} axis must be "
+                                 f"{DOMAIN[col.scale]}")  # fmt: skip
         if len(edges) < 2 or not np.all(np.diff(edges) > 0):
             raise ValueError("bins= edges must be at least two values, increasing")
         return edges
@@ -362,8 +364,8 @@ class Keys:
 
     def raw_position(self, index: np.ndarray) -> np.ndarray:
         values = self.puniq[index]
-        if self.pos.log:
-            return 10.0 ** values.astype(np.float64)
+        if self.pos.scale:
+            return inverse(self.pos.scale, values.astype(np.float64))
         return _times(values) if self.pos.kind == "time" else values
 
     def columns(self, index: np.ndarray, value: np.ndarray) -> list[Column]:
@@ -393,10 +395,10 @@ class Keys:
             test: Range | Labels = Labels(pos.name, at.astype(object))
         else:
             at = at.astype(np.float64)
-            test = Range(pos.name, pos.kind, at, at.copy(), pos.log)
+            test = Range(pos.name, pos.kind, at, at.copy(), pos.scale)
         tests = [test] if value is None else [test, value]
         return Where(self.gp[index], _color_where(self.color, self.labels, self.gc[index]),
-                     tests, ((self.val.name, self.val.log),))  # fmt: skip
+                     tests, ((self.val.name, self.val.scale),))  # fmt: skip
 
 
 @dataclass
@@ -577,7 +579,7 @@ def box_parts(g: Keys, q1: np.ndarray, med: np.ndarray, q3: np.ndarray, wlo: np.
     points = replace(layer, mark="points", tooltip=list(layer.tooltip))
     where = g.where(groups)
     val = g.val
-    outlier_where = g.where(og, Range(val.name, val.kind, ov, ov.copy(), val.log))
+    outlier_where = g.where(og, Range(val.name, val.kind, ov, ov.copy(), val.scale))
     return [
         Part(body, boxes, build_body, members, hide=("x", "y"), family=True, where=where),
         Part(lines, boxes, build_lines, members, hide=("x", "y"), family=True, where=where),
@@ -630,7 +632,7 @@ def violin(
 
         dots = replace(layer, mark="points", tooltip=list(layer.tooltip))
         val = g.val
-        where = g.where(g.sg, Range(val.name, val.kind, g.sv, g.sv.copy(), val.log))
+        where = g.where(g.sg, Range(val.name, val.kind, g.sv, g.sv.copy(), val.scale))
         out.append(Part(dots, values, build_points, Members.each(g.srows), where=where))
     return out
 
@@ -820,7 +822,7 @@ def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
     value_name = centre_name or ends[0].name
     cols = [Column(PANEL, "number", panel.astype(np.float64)), _take(pos, rows),
             Column(value_name, values[-1].kind, centre if centre is not None else lo,
-                   log=values[-1].log)]  # fmt: skip
+                   scale=values[-1].scale)]  # fmt: skip
     if color is not None:
         cols.append(_take(color, rows))
     names = [pos_name, *([centre_name] if centre_name else []), ends[0].name, ends[1].name]
@@ -838,9 +840,9 @@ def _errorbar_given(layer: Layer, table: Table, panel_of: np.ndarray | None,
         test: Range | Labels = Labels(pos_name, pos.values[rows])
     else:
         at = pos.values[rows]
-        test = Range(pos_name, pos.kind, at, at.copy(), pos.log)
+        test = Range(pos_name, pos.kind, at, at.copy(), pos.scale)
     labels, ci = _color_codes(color, rows)
-    finite = tuple((e.name, e.log) for e in ends)
+    finite = tuple((e.name, e.scale) for e in ends)
     where = Where(panel, _color_where(color, labels, ci), [test], finite)
     return _errorbar_parts(replace(layer, **axes), bars, panel, slots, centre, lo, hi,
                            Members.each(rows), tips, where)  # fmt: skip
@@ -975,7 +977,7 @@ def density_parts(layer: Layer, col: Column, color: Column | None, guniq: np.nda
     out = _table(cols, {col.name: _times(x)} if col.kind == "time" else {})
     pair = np.flatnonzero(curve[1:] == curve[:-1]) if len(curve) else np.zeros(0, np.int64)
     where = Where(p, _color_where(color, labels, ci), [_pieces(col, x, curve)],
-                  ((col.name, col.log),))  # fmt: skip
+                  ((col.name, col.scale),))  # fmt: skip
 
     def build(_x: Any, _y: Any, _c: Any, area: bool = False) -> Geometry:
         a, b = pair, pair + 1
@@ -1007,7 +1009,7 @@ def _pieces(col: Column, x: np.ndarray, curve: np.ndarray) -> Range:
         hi[:-1] = np.where(same, x[1:], np.inf)
         lo[1:] = np.where(same, x[1:], -np.inf)
         lo[0] = -np.inf
-    return Range(col.name, col.kind, lo, hi, col.log, np.ones(len(x), dtype=bool))
+    return Range(col.name, col.kind, lo, hi, col.scale, np.ones(len(x), dtype=bool))
 
 
 # ---- horizon charts ------------------------------------------------------------------------
@@ -1041,8 +1043,9 @@ def horizon(
         if col.kind == "category":
             raise ValueError(f"horizon(): {axis} must be numbers or times; {col.name!r} holds "
                              "categories")  # fmt: skip
-    if ycol.log:
-        raise ValueError("horizon(): not on a log y (its bands are distances from the origin)")
+    if ycol.scale:
+        raise ValueError(f"horizon(): not on a {ycol.scale} y (its bands are distances from "
+                         "the origin)")  # fmt: skip
     rows, panel = expand(panel_of, table.n, npanels, layer.facet)
     x, v = xcol.values[rows], ycol.values[rows]
     keep = np.isfinite(x) & np.isfinite(v)
@@ -1250,7 +1253,7 @@ def smooth_parts(layer: Layer, xc: Column, yc: Column, color: Column | None,
     out = _table(cols, extra)
     pair = np.flatnonzero(curve[1:] == curve[:-1]) if len(curve) else np.zeros(0, np.int64)
     where = Where(p, _color_where(color, labels, ci), [_pieces(xc, x, curve)],
-                  ((xc.name, xc.log), (yc.name, yc.log)))  # fmt: skip
+                  ((xc.name, xc.scale), (yc.name, yc.scale)))  # fmt: skip
 
     def build_line(_x: Any, _y: Any, _c: Any) -> Geometry:
         a, b = pair, pair + 1
@@ -1489,7 +1492,7 @@ def _table(columns: list[Column], extra: dict[str, np.ndarray]) -> Table:
 def _take(col: Column, rows: np.ndarray) -> Column:
     """These rows of a column."""
     codes = col.level_codes()[rows] if col.kind == "category" else None
-    return Column(col.name, col.kind, col.values[rows], col.levels, codes, col.log)
+    return Column(col.name, col.kind, col.values[rows], col.levels, codes, col.scale)
 
 
 def _sorted(g: Geometry) -> Geometry:
@@ -1501,8 +1504,8 @@ def _times(ms: np.ndarray) -> np.ndarray:
 
 
 def _shown(col: Column, *values: np.ndarray) -> tuple[np.ndarray, ...]:
-    """Values on ``col``'s axis as the data's own (a log axis: 10 to their power)."""
-    return tuple(10.0**v if col.log else v for v in values)
+    """Values on ``col``'s axis as the data's own (a transformed axis: ``inverse``)."""
+    return tuple(inverse(col.scale, v) if col.scale else v for v in values)
 
 
 def _ranges(lo: np.ndarray, hi: np.ndarray, kind: str, digits: int = 6) -> np.ndarray:

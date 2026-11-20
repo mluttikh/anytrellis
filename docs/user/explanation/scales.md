@@ -36,10 +36,13 @@ keeps the levels comparable *and* shows each group's change, because on a log sc
 doubling is the same distance at any size.
 
 A log scale has no place for zero or below, so marks drawn from zero (bars, areas,
-histograms, densities) don't go on a log y, and values of 0 or less are left out.
+histograms, densities) don't go on a log y, and values of 0 or less are left out. A
+square-root scale compresses less and keeps 0, so those marks go on it; a symlog scale
+compresses both ways from 0, for values of either sign. See [Log, sqrt, symlog and
+reversed scales](../how-to/log.md).
 
 ## Summaries follow the scale
 
-`hist`, `density` and `smooth` are computed on the scale they are drawn on: on a log x, a
-histogram's bins are equally wide on the log scale, as in ggplot2. Their bins and x values
+`hist`, `density` and `smooth` are computed on the scale they are drawn on: on a log (sqrt,
+symlog) x, a histogram's bins are equally wide on that scale, as in ggplot2. Their bins and x values
 are the same in every panel, so the summaries compare as the marks do.

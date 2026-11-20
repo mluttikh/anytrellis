@@ -1,6 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs, details.mjs, paging.mjs, levels.mjs)."""
+many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,11 @@ def main(out: Path) -> None:
     years.points(x="fertility", y="life_expect", color="region", size=6,
                  tooltip=["country", "pop"])  # fmt: skip
     years.save_html(out / "years.html")
+    # reversed axes (reverse.mjs): x high to low, y a sqrt scale high at the bottom
+    flipped = Trellis(gapminder, wrap="year", cols=4, panel_height=150, x_scale="reverse",
+                      y_scale=("sqrt", "reverse"))  # fmt: skip
+    flipped.points(x="fertility", y="pop", color="region", size=6, tooltip=["country"])
+    flipped.save_html(out / "reversed.html")
     labelled = Trellis(gapminder, wrap="year", cols=4, panel_height=150,
                        title="Fertility and life expectancy, 1955-2005",
                        subtitle="Each point is a country, five years apart. As families got "

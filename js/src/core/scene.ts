@@ -174,11 +174,34 @@ export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Sce
 }
 
 /** Maps a panel's data (axis units) to CSS px: screen = o + v * s. */
+/** Axis units to CSS px: `px = ox + value * sx`, `py = oy + value * sy` (sx below 0: x
+ * reversed; sy above 0: y reversed, high at the bottom). */
 export interface PanelMap {
   sx: number;
   ox: number;
   sy: number;
   oy: number;
+}
+
+/** A panel's map from its view (`x`, `y`: the axis units shown) to its rect. */
+export function panelMap(r: { x: number; y: number; w: number; h: number }, x: [number, number], y: [number, number], reverseX = false, reverseY = false): PanelMap {
+  const sx = (reverseX ? -r.w : r.w) / (x[1] - x[0] || 1);
+  const sy = (reverseY ? r.h : -r.h) / (y[1] - y[0] || 1);
+  return { sx, ox: (reverseX ? r.x + r.w : r.x) - x[0] * sx, sy, oy: (reverseY ? r.y : r.y + r.h) - y[0] * sy };
+}
+
+/** The x units between two px, low to high (either way round: x may be reversed). */
+export function xUnits(map: PanelMap, a: number, b: number): [number, number] {
+  const p = (a - map.ox) / map.sx;
+  const q = (b - map.ox) / map.sx;
+  return p <= q ? [p, q] : [q, p];
+}
+
+/** The y units between two px, low to high. */
+export function yUnits(map: PanelMap, a: number, b: number): [number, number] {
+  const p = (a - map.oy) / map.sy;
+  const q = (b - map.oy) / map.sy;
+  return p <= q ? [p, q] : [q, p];
 }
 
 export interface Hit {
