@@ -68,6 +68,12 @@ class Layer:
     step: str | None = None
     # points: a random offset within a category band, as a fraction of its width
     jitter: float = 0.0
+    # points: a shape column or one shape's name; a size column, and its sizes (px)
+    shape: str | None = None
+    size_by: str | None = None
+    size_range: tuple[float, float] = (2.0, 14.0)
+    # lines: a dash column (``dash``: one dash, in px)
+    dash_by: str | None = None
     # rules: constant positions, or (with data) a column's, in each row's panel
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
@@ -99,6 +105,12 @@ class Geometry:
     """An area's base at each end of a segment (its top is y0, y1); None otherwise."""
     values: np.ndarray | None = None
     """Per instance value of a number colour column (a legend's range selects by it)."""
+    shapes: np.ndarray | None = None
+    """Per instance shape code of a shape column (channels.SHAPES), uint8."""
+    sizes: np.ndarray | None = None
+    """Per instance diameter of a size column, as a share of the largest (float32)."""
+    dashes: np.ndarray | None = None
+    """Per instance dash code of a dash column (channels.DASHES), uint8."""
 
     @property
     def count(self) -> int:
@@ -118,6 +130,9 @@ class Geometry:
             None if self.base0 is None else self.base0[order],
             None if self.base1 is None else self.base1[order],
             None if self.values is None else self.values[order],
+            None if self.shapes is None else self.shapes[order],
+            None if self.sizes is None else self.sizes[order],
+            None if self.dashes is None else self.dashes[order],
         )  # fmt: skip
 
 

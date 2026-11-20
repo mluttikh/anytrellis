@@ -71,6 +71,11 @@ weather = load("seattle_weather")
 Trellis(cars, wrap="origin").points(x="weight", y="mpg", color="cylinders", size=5,
                                     opacity=0.85, tooltip=["name"])
 Trellis(barley, wrap="year").points(x="site", y="yield", jitter=0.3)  # spread in its band
+Trellis(penguins, wrap="island").points(x="bill_length_mm", y="bill_depth_mm",
+                                        color="species", shape="species",
+                                        size="body_mass_g")  # size_range=(2, 14)
+Trellis(gapminder, wrap="region").line(x="year", y="pop", group="country",
+                                       dash="country")  # or dash=(4, 3), every line
 Trellis(gapminder, wrap="region").line(x="year", y="life_expect", group="country",
                                        width=1)  # step="post", "pre" or "mid"
 Trellis(barley, wrap="site").bars(x="variety", y="yield", color="year",

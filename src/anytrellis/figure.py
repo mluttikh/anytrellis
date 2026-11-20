@@ -22,6 +22,7 @@ from xml.sax.saxutils import escape
 
 import numpy as np
 
+from anytrellis.channels import dash_pattern, dash_pieces, shape_paths
 from anytrellis.codec import DTYPES, Buffers
 from anytrellis.formats import axis_format, number_format
 from anytrellis.pages import page_list
@@ -78,7 +79,7 @@ FADED = 0.15
 LINE = 1.35
 """A line's height, in its text size (widget.css .atr-root)."""
 
-KIND_CAPSULE, KIND_RECT, KIND_TRAP = 0, 1, 2
+KIND_CAPSULE, KIND_RECT, KIND_TRAP, KIND_POINT = 0, 1, 2, 3
 
 
 # ---- text -----------------------------------------------------------------------------------
@@ -951,6 +952,9 @@ class _Marks:
     groups: np.ndarray | None
     values: np.ndarray | None = None
     """A number colour's value per instance (a legend's range selects by it)."""
+    dash: list[list[float]] | None = None
+    """A dashed line's patterns (line widths), and each segment's (None: the first)."""
+    dash_codes: np.ndarray | None = None
 
 
 @dataclass
@@ -987,21 +991,31 @@ def _scene(spec: dict[str, Any], buffers: Buffers) -> tuple[list[_Marks], list[_
         def opt(ref: dict[str, Any] | None) -> np.ndarray | None:
             return None if ref is None else _array(buffers, ref)
 
+        base = None if lr.get("base") is None else _array(buffers, lr["base"]).reshape(n, 2)
+        marker = lr.get("marker") if kind == "points" else None
+        if marker:  # a point's shape code and size factor, as scene.ts
+            shapes, sizes = opt(marker.get("shapes")), opt(marker.get("sizes"))
+            code = np.full(n, float(marker["shape"])) if shapes is None else shapes
+            factor = np.ones(n) if sizes is None else sizes
+            base = np.stack([code.astype(np.float64), factor.astype(np.float64)], 1)
+        dash = lr.get("dash") if kind == "line" else None
         marks.append(_Marks(
             index=index,
             spec=lr,
             kind=(KIND_RECT if kind in ("bars", "rect") else KIND_TRAP if kind in ("area", "band")
-                  else KIND_CAPSULE),
+                  else KIND_POINT if marker else KIND_CAPSULE),
             half_width=lr["width"] / 2 if kind == "line" else lr["size"] / 2 if kind == "points"
             else 0.0,
             coords=_array(buffers, lr["coords"]).reshape(n, 4),
             starts=_array(buffers, lr["starts"]),
             colors=colors,
-            base=None if lr.get("base") is None else _array(buffers, lr["base"]).reshape(n, 2),
+            base=base,
             codes=opt(color.get("codes")),
             link=opt(lr.get("link")),
             groups=opt(lr.get("groups")),
             values=opt(color.get("values")),
+            dash=None if not dash else dash["patterns"],
+            dash_codes=None if not dash else opt(dash.get("codes")),
         ))  # fmt: skip
     return marks, texts
 
@@ -1271,6 +1285,12 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
         reach = width / 2 + 1
         keep &= (np.maximum(ax, bx) >= r.x - reach) & (np.minimum(ax, bx) <= r.x + r.w + reach)
         ba = bb = None
+        if layer.dash is not None:  # a dashed line: its dashes, each a capsule (channels.ts)
+            codes = None if layer.dash_codes is None else layer.dash_codes[start:end]
+            pieces, src = dash_pieces(ax, ay, bx, by, codes, layer.dash, width)
+            ax, ay, bx, by = pieces[:, 0], pieces[:, 1], pieces[:, 2], pieces[:, 3]
+            rgba = rgba[src]
+            keep = keep[src]
         if kind == KIND_TRAP and layer.base is not None:
             b = layer.base[start:end].astype(np.float64) - by_
             b32 = b.astype(np.float32).astype(np.float64)
@@ -1281,7 +1301,13 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
         idx = np.flatnonzero(keep)
         if not len(idx):
             continue
-        if kind == KIND_RECT:
+        shapes: list[str] = []
+        if kind == KIND_POINT and layer.base is not None:  # each point's shape
+            b = layer.base[start:end][idx]
+            shapes = shape_paths(np.rint(b[:, 0]), ax[idx], ay[idx], layer.half_width * b[:, 1])
+            pieces = np.zeros((len(idx), 0))
+            fmt = ""
+        elif kind == KIND_RECT:
             x = np.minimum(ax, bx)
             y = np.minimum(ay, by)
             w = np.maximum(1, np.abs(bx - ax))
@@ -1302,7 +1328,7 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
         svg.open(svg.clip(r))
         for a, z in itertools.pairwise(cuts):
             color = rgba[idx[a]]
-            d = "".join(fmt % tuple(row) for row in rows[a:z])
+            d = "".join(shapes[a:z]) if shapes else "".join(fmt % tuple(row) for row in rows[a:z])
             alpha = color[3] / 255 * opacity
             if kind == KIND_CAPSULE:
                 svg.add(f'<path d="{d}" fill="none" stroke="{_hex(color)}" '
@@ -1615,6 +1641,8 @@ class _Entry:
     colors: tuple[str, ...] = ()
     state: str = ""  # "on", "off" or ""
     size: float = FONT_SIZE  # its text's (the page's)
+    glyph: dict[str, Any] | None = None
+    """An item's shape, dash or size (channels.ts: Glyph); None: a square of its colour."""
 
     @property
     def width(self) -> float:
@@ -1622,7 +1650,18 @@ class _Entry:
         if self.kind == "gradient":
             return 90.0
         w = text_width(self.label, self.size, bold=bold)
-        return w + 14 if self.kind == "item" else w
+        return w + self.swatch[0] + 4 if self.kind == "item" else w
+
+    @property
+    def swatch(self) -> tuple[float, float]:
+        """The swatch's width and height (channels.ts: glyphBox)."""
+        g = self.glyph or {}
+        if "dash" in g:
+            return 22.0, 10.0
+        if "size" in g:
+            side = max(10.0, g["size"] + 2)
+            return side, side
+        return 10.0, 10.0
 
 
 def _legend_label(v: float) -> str:
@@ -1643,7 +1682,7 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
     groups = []
     for index, lg in enumerate(spec["legends"]):
         entries = [_Entry("title", lg["title"], size=size)]
-        if lg["kind"] in ("category", "bins"):  # an entry each (a stepped scale's ranges)
+        if lg["kind"] != "number":  # an entry each (a stepped scale's ranges; shapes, sizes)
             labels = lg["labels"]
             for i, (label, color) in enumerate(zip(labels[:LEGEND_ROWS], lg["colors"],
                                                    strict=False)):  # fmt: skip
@@ -1659,7 +1698,8 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
                     a, b = sorted(chosen["range"])
                     inside = lg["breaks"][i] < b and lg["breaks"][i + 1] > a
                     state = "on" if inside else "off"
-                entries.append(_Entry("item", label, color, state=state, size=size))
+                entries.append(_Entry("item", label, color, state=state, size=size,
+                                      glyph=_glyph(lg, i)))  # fmt: skip
             if len(labels) > LEGEND_ROWS:  # as the page shows a long legend: the first ones
                 entries.append(_Entry("text", f"{len(labels) - LEGEND_ROWS} more", size=size))
         else:
@@ -1669,6 +1709,39 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
                         _Entry("text", end(lg.get("hi", 1)), size=size)]  # fmt: skip
         groups.append(entries)
     return groups
+
+
+def _glyph(lg: dict[str, Any], i: int) -> dict[str, Any] | None:
+    """A legend entry's shape, dash or size (view.ts: legendSwatch)."""
+    glyph: dict[str, Any] = {}
+    if lg.get("shapes"):
+        glyph["shape"] = lg["shapes"][i]
+    if lg.get("dashes"):
+        glyph["dash"] = lg["dashes"][i]
+        glyph["line_width"] = lg.get("line_width") or 1.5
+    if lg.get("sizes"):
+        glyph["size"] = lg["sizes"][i]
+    return glyph or None
+
+
+def _draw_glyph(svg: _Svg, e: _Entry, x: float, y: float) -> None:
+    """A legend entry's shape, dash or size, its box's top left at x, y (channels.ts:
+    drawGlyph)."""
+    g = e.glyph or {}
+    w, h = e.swatch
+    color = escape(e.color)
+    if "dash" in g:
+        lw = max(1.0, min(4.0, g["line_width"]))
+        dash = dash_pattern(g["dash"], lw)
+        dashes = f' stroke-dasharray="{" ".join(_n(v) for v in dash)}"' if dash else ""
+        line = f"M{_n(x + lw / 2)} {_n(y + h / 2)}H{_n(x + w - lw / 2)}"
+        svg.add(f'<path d="{line}" fill="none" stroke="{color}" stroke-width="{_n(lw)}" '
+                f'stroke-linecap="round"{dashes}/>')  # fmt: skip
+    if "shape" in g or "size" in g:
+        r = g["size"] / 2 if "size" in g else 3.0 if "dash" in g else 4.0
+        d = shape_paths(np.array([g.get("shape", 0)]), np.array([x + w / 2]),
+                        np.array([y + h / 2]), np.array([r]))[0]  # fmt: skip
+        svg.add(f'<path d="{d}" fill="{color}"/>')
 
 
 def _flow(widths: list[float], room: float, gap: float) -> list[list[tuple[int, float]]]:
@@ -1778,10 +1851,14 @@ def _draw_legend(svg: _Svg, placed: list[_Placed], dy: float, th: dict[str, str]
             off = e.state == "off"
             if off:
                 svg.open('opacity="0.4"')
-            svg.add(f'<rect x="{_n(x)}" y="{_n(mid - 5)}" width="10" height="10" rx="2" '
-                    f'fill="{escape(e.color)}"/>')  # fmt: skip
+            sw, sh = e.swatch
+            if e.glyph:
+                _draw_glyph(svg, e, x, mid - sh / 2)
+            else:
+                svg.add(f'<rect x="{_n(x)}" y="{_n(mid - 5)}" width="10" height="10" rx="2" '
+                        f'fill="{escape(e.color)}"/>')  # fmt: skip
             on = e.state == "on"
-            svg.text(x + 14, mid, e.label, th["text"] if on else th["muted"], size=e.size,
+            svg.text(x + sw + 4, mid, e.label, th["text"] if on else th["muted"], size=e.size,
                      bold=on)  # fmt: skip
             if off:
                 svg.close()

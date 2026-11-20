@@ -2,7 +2,7 @@
 // panel's base (its initial domain's low end, so float32 keeps precision for times), RGBA
 // bytes, and the panel ranges. Also finding the instance nearest the pointer (hover).
 
-import { type InstanceSet, KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "./renderers/renderer";
+import { type InstanceSet, KIND_CAPSULE, KIND_POINT, KIND_RECT, KIND_TRAP } from "./renderers/renderer";
 import type { BufferRef, DataSource, MarkLayerSpec, TextLayerSpec, TrellisSpec } from "./types";
 import { isMark } from "./types";
 
@@ -28,6 +28,10 @@ export interface LayerData {
   kind: number;
   /** Half the line width or point size (px); 0 for bars. */
   halfWidth: number;
+  /** Points of a size column: each one's radius (px). Null: halfWidth. */
+  radii: Float32Array | null;
+  /** A dashed line: its patterns (line widths) and each segment's (null: the first). */
+  dash: { patterns: number[][]; codes: Uint8Array | null } | null;
 }
 
 /** A text layer: its labels decoded, at points (axis units, relative to the origins). */
@@ -66,6 +70,9 @@ export function bufferIds(spec: TrellisSpec): string[] {
     if (l.base) ids.push(l.base.id);
     if (l.groups) ids.push(l.groups.id);
     if (l.tip_rows) ids.push(l.tip_rows.id);
+    if (l.marker?.shapes) ids.push(l.marker.shapes.id);
+    if (l.marker?.sizes) ids.push(l.marker.sizes.id);
+    if (l.dash?.codes) ids.push(l.dash.codes.id);
   }
   return ids;
 }
@@ -139,8 +146,21 @@ export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Sce
         }
       }
     }
-    const kind = l.type === "bars" || l.type === "rect" ? KIND_RECT : l.type === "area" || l.type === "band" ? KIND_TRAP : KIND_CAPSULE;
+    let kind = l.type === "bars" || l.type === "rect" ? KIND_RECT : l.type === "area" || l.type === "band" ? KIND_TRAP : KIND_CAPSULE;
     const halfWidth = l.type === "line" ? l.width / 2 : l.type === "points" ? l.size / 2 : 0;
+    // points of shapes or sizes: each one's shape code and size factor
+    let radii: Float32Array | null = null;
+    if (l.type === "points" && l.marker) {
+      kind = KIND_POINT;
+      const shapes = l.marker.shapes ? (view(source, l.marker.shapes) as Uint8Array) : null;
+      const sizes = l.marker.sizes ? (view(source, l.marker.sizes) as Float32Array) : null;
+      base = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        base[i * 2] = shapes ? shapes[i] : l.marker.shape;
+        base[i * 2 + 1] = sizes ? sizes[i] : 1;
+      }
+      if (sizes) radii = sizes.map((f) => f * halfWidth);
+    }
     layers.push({
       spec: l,
       index,
@@ -156,6 +176,8 @@ export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Sce
       base: b64,
       kind,
       halfWidth,
+      radii,
+      dash: l.dash ? { patterns: l.dash.patterns, codes: l.dash.codes ? (view(source, l.dash.codes) as Uint8Array) : null } : null,
     });
   });
   const decoder = new TextDecoder();
@@ -222,8 +244,10 @@ export function pick(scene: Scene, p: number, map: PanelMap, px: number, py: num
     const layer = scene.layers[li];
     if (layer.spec.context) continue;
     const c = layer.coords;
-    const reach = radius + layer.halfWidth;
+    const radii = layer.radii;
     for (let i = layer.starts[p]; i < layer.starts[p + 1]; i++) {
+      const reach = radius + (radii ? radii[i] : layer.halfWidth);
+      if (!(reach >= 0)) continue; // a point without a size
       const ax = map.ox + c[i * 4] * map.sx;
       const ay = map.oy + c[i * 4 + 1] * map.sy;
       const bx = map.ox + c[i * 4 + 2] * map.sx;

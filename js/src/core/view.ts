@@ -31,6 +31,7 @@
 
 import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readTheme } from "./drawing";
 import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fileName, NO_DOWNLOADS, PNG_SCALE, pageMeasure, paintHtml, SvgContext, svgMessage } from "./export";
+import { type Glyph, dashPieces, drawGlyph, glyphBox } from "./channels";
 import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
 import { lookOf } from "./look";
@@ -266,6 +267,8 @@ export class TrellisView {
   /** The legend entry shown alone (a double-click), and its layers' instances as drawn. */
   private isolated: { index: number; level: number } | null = null;
   private isolatedSets: (InstanceSet | null)[] = [];
+  /** Dashed lines' dashes, per set and panel, and the scales they were cut at. */
+  private dashSets = new Map<string, { source: InstanceSet; version: number; sx: number; sy: number; set: InstanceSet }>();
   /** The selection before a legend entry's click (a double-click puts it back). */
   private beforeClick: Brush | null = null;
   /** Every y group follows its data in view as x changes. */
@@ -1393,10 +1396,12 @@ export class TrellisView {
         const count = layer.starts[p + 1] - start;
         if (!count) continue;
         const { map, rect } = v;
+        // a dashed line: its dashes at this panel's scales
+        const dashed = layer.dash ? this.dashSet(layer, set, p, start, count, map) : null;
         draws.push({
-          set,
-          start,
-          count,
+          set: dashed ?? set,
+          start: dashed ? 0 : start,
+          count: dashed ? dashed.count : count,
           clip: rect,
           sx: map.sx,
           ox: map.ox + scene.baseX[p] * map.sx,
@@ -1409,6 +1414,19 @@ export class TrellisView {
       }
     }
     return draws;
+  }
+
+  /** A dashed line's dashes in panel `p` at the map's scales (kept while those and its
+   * instances stay the same: a pan doesn't cut them again). */
+  private dashSet(layer: LayerData, set: InstanceSet, p: number, start: number, count: number, map: PanelMap): InstanceSet {
+    const key = `${set.key}:dash${p}`;
+    const had = this.dashSets.get(key);
+    if (had && had.source === set && had.version === set.version && had.sx === map.sx && had.sy === map.sy) return had.set;
+    const dash = layer.dash!;
+    const cut = dashPieces(set, start, count, map.sx, map.sy, dash.codes, dash.patterns, layer.halfWidth * 2);
+    const made: InstanceSet = { key, version: ++selectionVersion, count: cut.count, coords: cut.coords, colors: cut.colors };
+    this.dashSets.set(key, { source: set, version: set.version, sx: map.sx, sy: map.sy, set: made });
+    return made;
   }
 
   // ---- input ----------------------------------------------------------------------------
@@ -1783,7 +1801,8 @@ export class TrellisView {
     const hx = v.map.ox + pt.x * v.map.sx;
     const hy = v.map.oy + pt.y * v.map.sy;
     const color = colorOf(hit.layer, hit.instance);
-    this.front_.hovers = hit.layer.kind === 0 ? [] : [{ x: hx, y: hy, r: Math.max(3, hit.layer.halfWidth), color }];
+    const r = hit.layer.radii ? hit.layer.radii[hit.instance] : hit.layer.halfWidth;
+    this.front_.hovers = hit.layer.kind === 0 ? [] : [{ x: hx, y: hy, r: Math.max(3, r), color }];
     this.showTip(hit, p, pt, x, y, v);
     this.request();
   }
@@ -1868,7 +1887,7 @@ export class TrellisView {
         y: f.y,
         py: v.map.oy + f.y * v.map.sy,
         color: colorOf(f.layer, f.i),
-        r: Math.max(3, f.layer.halfWidth),
+        r: Math.max(3, f.layer.radii ? f.layer.radii[f.i] : f.layer.halfWidth),
       };
     });
     rows.sort((a, b) => a.py - b.py);
@@ -2088,8 +2107,7 @@ export class TrellisView {
       const items: HTMLElement[] = [];
       (lg.labels ?? []).forEach((label, i) => {
         const item = el("span", "atr-legend-item");
-        const sw = el("span", "atr-swatch");
-        sw.style.background = lg.colors[i];
+        const sw = legendSwatch(lg, i);
         item.append(sw, document.createTextNode(label));
         item.dataset.label = label.toLowerCase();
         items.push(item);
@@ -2518,3 +2536,35 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: stri
   return e;
 }
 
+
+/** A legend entry's swatch: its colour, or (a shape, dash or size) a small canvas drawn as
+ * the marks are, which the export draws again (export.ts: paintHtml, by its glyph). */
+function legendSwatch(lg: LegendSpec, i: number): HTMLElement {
+  const glyph: Glyph = { color: lg.colors[i] };
+  if (lg.shapes) glyph.shape = lg.shapes[i];
+  if (lg.dashes) {
+    glyph.dash = lg.dashes[i];
+    glyph.lineWidth = lg.line_width;
+  }
+  if (lg.sizes) glyph.size = lg.sizes[i];
+  if (!lg.shapes && !lg.dashes && !lg.sizes) {
+    const sw = el("span", "atr-swatch");
+    sw.style.background = lg.colors[i];
+    return sw;
+  }
+  const [w, h] = glyphBox(glyph);
+  const canvas = document.createElement("canvas");
+  canvas.className = "atr-swatch atr-glyph";
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+  canvas.dataset.glyph = JSON.stringify(glyph);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.ceil(w * dpr);
+  canvas.height = Math.ceil(h * dpr);
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.scale(dpr, dpr);
+    drawGlyph(ctx, glyph, 0, 0);
+  }
+  return canvas;
+}

@@ -50,8 +50,8 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 
 | method | draws |
 |---|---|
-| `line(x, y, color, group, step=None\|"post"\|"pre"\|"mid")` | a line per group (and colour), or steps |
-| `points(x, y, color, size)` | a point per row |
+| `line(x, y, color, group, step=None\|"post"\|"pre"\|"mid", dash)` | a line per group (and colour, and dash), or steps |
+| `points(x, y, color, shape, size)` | a point per row; `shape` a category column, `size` a number column or px |
 | `bars(x, y, color, position="stack"\|"dodge"\|"identity")` | a bar per row, from zero |
 | `bars(x, stat="count")` / `bars(x, y, stat="sum"\|"mean"\|"median")` | a bar per position (and colour): its rows counted, or its values summarised |
 | `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |

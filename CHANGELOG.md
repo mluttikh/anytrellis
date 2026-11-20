@@ -48,6 +48,13 @@ All notable changes to anytrellis. The format follows
   (`stat="proportion"`, `"percent"` or `"count"`; `complementary=True` for survival).
 - Both come from the database with `load="pages"`: the bars as a grouped query, the ECDF
   counted in 1,024 bins.
+- **Shape, size and dash from columns**: `points(shape="species")` gives each category a
+  shape (circle, square, triangle, diamond, plus, cross, triangle down), `points(size="pop")`
+  sizes points by a number column, by area (`size_range=(2, 14)`, the largest drawn
+  first), and `line(dash="scenario")` dashes each category's line its own way (or
+  `dash=(4, 3)`, every line). The same column as `color=`: one legend shows both, a
+  second encoding for readers who can't tell the colours apart; another column gets a
+  legend of its own. The saved images (`save_svg`, `save_png`, Export) draw them alike.
 
 ### Changed
 

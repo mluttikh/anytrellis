@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 import numpy as np
 
+from anytrellis.channels import DASHES, SIZE_RANGE, Channels, dash_units, shape_code
 from anytrellis.codec import Buffers
 from anytrellis.data import Table, number_label
 from anytrellis.detail import (
@@ -412,6 +413,7 @@ class Trellis:
         color: str | None = None,
         group: str | Sequence[str] | None = None,
         step: str | None = None,
+        dash: str | Sequence[float] | None = None,
         width: float = 1.5,
         opacity: float = 1.0,
         facet: FacetMode = "auto",
@@ -424,6 +426,7 @@ class Trellis:
         t = Trellis(gapminder, wrap="region")
         t.line(x="year", y="life_expect", group="country", width=1)
         t.line(x="time", y="state", step="post")    # each value holds until the next
+        t.line(x="year", y="pop", color="scenario", dash="scenario")  # a dash each
         ```
 
         Args:
@@ -437,6 +440,10 @@ class Trellis:
                 point: a level that changes at the points, as a counter or a state),
                 ``"pre"`` (each value holds back to the point before) or ``"mid"`` (each
                 holds to halfway between the points).
+            dash: A category column (a line each, dashed by its level: solid, dashed,
+                dotted, dot-dash, long dash, two-dash, then again), or one dash as dash and
+                gap lengths in px (``(4, 3)``, as ``rule``'s). The same column as
+                ``color``: one legend shows both.
             width: Line width in CSS pixels.
             opacity: 0 to 1.
             facet: ``"auto"`` (each row in its panel; every panel when the data has no facet
@@ -447,9 +454,11 @@ class Trellis:
         """
         if step not in (None, *STEPS):
             raise ValueError(f"step must be one of {STEPS} or None, got {step!r}")
+        by = dash if isinstance(dash, str) else None
+        pattern = [] if dash is None or isinstance(dash, str) else dash_units(dash, width)
         layer = Layer("line", name or self._name("line"), data, x, y, color, _names(group),
                       facet, width=width, opacity=opacity, tooltip=list(tooltip),
-                      step=step)  # fmt: skip
+                      step=step, dash=pattern, dash_by=by)  # fmt: skip
         return self._add(layer)
 
     def points(
@@ -459,7 +468,9 @@ class Trellis:
         x: str,
         y: str,
         color: str | None = None,
-        size: float = 5.0,
+        shape: str | None = None,
+        size: float | str = 5.0,
+        size_range: tuple[float, float] = SIZE_RANGE,
         opacity: float = 0.85,
         jitter: float = 0.0,
         facet: FacetMode = "auto",
@@ -472,6 +483,10 @@ class Trellis:
         t = Trellis(penguins, wrap="species")
         t.points(x="flipper_length_mm", y="body_mass_g", color="sex")
         t.box(x="species", y="body_mass_g").points(x="species", y="body_mass_g", jitter=0.4)
+        Trellis(gapminder, wrap="year").points(x="fertility", y="life_expect",
+                                              color="region", size="pop")
+        Trellis(penguins, wrap="island").points(x="bill_length_mm", y="bill_depth_mm",
+                                                color="species", shape="species")
         ```
 
         Args:
@@ -479,7 +494,13 @@ class Trellis:
             x: The x column.
             y: The y column.
             color: A colour column or one colour.
-            size: Diameter in CSS pixels.
+            shape: A category column (a shape a level: circle, square, triangle, diamond,
+                plus, cross, triangle-down, then again), or one of those shapes. The same
+                column as ``color``: one legend shows both, a second encoding that doesn't
+                lean on colour alone.
+            size: Diameter in CSS pixels, or a number column: each point's area grows
+                with its value, from the smallest of ``size_range`` to the largest.
+            size_range: The smallest and largest diameters (px) of a size column.
             opacity: 0 to 1.
             jitter: Spread the points of a category axis across their band, up to this
                 fraction of its width (0 to 1; 0.4 is a strip plot's), so points with the
@@ -490,9 +511,15 @@ class Trellis:
         """
         if not 0 <= jitter <= 1:
             raise ValueError(f"jitter is a fraction of a category's band, 0 to 1; got {jitter!r}")
+        lo, hi = (float(v) for v in size_range)
+        if not 0 < lo <= hi:
+            raise ValueError(f"size_range: the smallest and largest diameters (px), 0 < "
+                             f"smallest <= largest; got {size_range!r}")  # fmt: skip
+        by = size if isinstance(size, str) else None
         layer = Layer("points", name or self._name("points"), data, x, y, color, (),
-                      facet, size=size, opacity=opacity, tooltip=list(tooltip),
-                      jitter=float(jitter))  # fmt: skip
+                      facet, size=hi if by else float(size), opacity=opacity,
+                      tooltip=list(tooltip), jitter=float(jitter), shape=shape, size_by=by,
+                      size_range=(lo, hi))  # fmt: skip
         return self._add(layer)
 
     def bars(
@@ -1361,6 +1388,26 @@ class Trellis:
     def _color_format(self) -> Callable[[float], str] | None:
         spec = self._formats.get("color")
         return number_format(spec) if spec else None
+
+    def _legends(self, colors: _ColorScales) -> list[dict[str, Any]]:
+        """The legends: a colour column's each (with its shapes and dashes, when the same
+        column draws them), then the other shape, dash and size columns'. Each with its
+        column's name (``select(color=...)``) and its title as shown."""
+        shown = colors.legends(self._color_format())
+        out = [{**lg, "name": lg["title"], "title": self._legend_title(i, lg["title"]),
+                **({"format": self._formats.get("color")} if lg["kind"] == "number" else {})}
+               for i, lg in enumerate(shown)]  # fmt: skip
+        if colors.channels is not None:
+            by_name: dict[str, dict[str, Any]] = {str(lg["name"]): lg for lg in out}
+            more = colors.channels.legends(
+                by_name,
+                lambda lr: lr.color or colors.default(lr, self._plain.get(id(lr), 0)),
+                self.theme.scale,
+            )
+            out += [{**lg, "name": lg["title"], "title": self._legend_title(len(out) + i,
+                                                                            lg["title"])}
+                    for i, lg in enumerate(more)]  # fmt: skip
+        return out
 
     def _legend_title(self, index: int, name: str) -> str:
         """A legend's title: given with ``legend(title=)``, else its column's label."""
@@ -2671,7 +2718,8 @@ class Trellis:
             tables.append(table)
             ends = [*layer.stat_args.get("x_columns", ()), *layer.stat_args.get("y_columns", ())]
             table.want(layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text,
-                       *layer.group, *layer.tooltip, *ends)  # fmt: skip
+                       layer.shape, layer.size_by, layer.dash_by, *layer.group,
+                       *layer.tooltip, *ends)  # fmt: skip
         for table in tables:
             table.want(*shared, *self._categories)
             table.categories = frozenset(n for n in self._categories if n in table)
@@ -2763,6 +2811,7 @@ class Trellis:
                                  "number column one)")  # fmt: skip
         colors = _ColorScales(shown, lambda lr: table_of(id(lr)), self._palette(), given,
                               self._named_colors, self._number_scale)  # fmt: skip
+        colors.channels = Channels(shown, lambda lr: table_of(id(lr)), given, _reorder)
         extents = {"x": Extent.empty(npanels), "y": Extent.empty(npanels)}
         plain = [lr for lr in marks if lr.mark not in SUMMARIES]
         bars_step = step_of([axis_values(table_of(id(lr)).column(lr.x), x_levels)  # ty: ignore[invalid-argument-type]
@@ -2948,15 +2997,7 @@ class Trellis:
             },
             "layers": [],
             # each with its column's name (select(color=...)) and its title as shown
-            "legends": [
-                {
-                    **lg,
-                    "name": lg["title"],
-                    "title": self._legend_title(i, lg["title"]),
-                    **({"format": self._formats.get("color")} if lg["kind"] == "number" else {}),
-                }
-                for i, lg in enumerate(colors.legends(self._color_format()))
-            ],
+            "legends": self._legends(colors),
             "height": self.height,
             "panel_height": self.panel_height,
             "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
@@ -3381,8 +3422,8 @@ def _transformed(geom: Geometry, axis: str, scale: str) -> Geometry:
 def _layer_columns(layer: Layer) -> list[str | None]:
     """The columns a layer draws."""
     ends = [*layer.stat_args.get("x_columns", ()), *layer.stat_args.get("y_columns", ())]
-    return [layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text, *layer.group,
-            *layer.tooltip, *ends]  # fmt: skip
+    return [layer.x, layer.y, layer.x2, layer.y2, layer.color, layer.text, layer.shape,
+            layer.size_by, layer.dash_by, *layer.group, *layer.tooltip, *ends]  # fmt: skip
 
 
 def _scaled(layer: Layer, table: Table, scales: Mapping[str, str]) -> Table:
@@ -3486,6 +3527,10 @@ def _buffer_ids(spec_layer: dict[str, Any]) -> list[str]:
     color = spec_layer.get("color")
     if isinstance(color, dict):
         refs += [color.get("rgba"), color.get("codes"), color.get("values")]
+    for channel, names in (("marker", ("shapes", "sizes")), ("dash", ("codes",))):
+        given = spec_layer.get(channel)
+        if isinstance(given, dict):
+            refs += [given.get(n) for n in names]
     return [r["id"] for r in refs if isinstance(r, dict) and "id" in r]
 
 
@@ -3652,6 +3697,8 @@ class _ColorScales:
         self.named = named or {}
         """Colours given to categories (``palette={...}``), in every column that has them."""
         self.numbers = numbers or NumberScale()
+        self.channels: Channels | None = None
+        """The shape, dash and size columns' scales."""
         values: dict[str, list[np.ndarray]] = {}
         self.levels: dict[str, list[str]] = {}
         self.ranges: dict[str, tuple[float, float]] = {}
@@ -3707,7 +3754,8 @@ class _ColorScales:
                 tuple(self.ranges.items()), tuple(self.order),
                 tuple((k, tuple(v.items())) for k, v in self.fixed.items()),
                 tuple(self.named.items()), self.numbers,
-                tuple((k, tuple(v or ())) for k, v in self.breaks.items()))  # fmt: skip
+                tuple((k, tuple(v or ())) for k, v in self.breaks.items()),
+                None if self.channels is None else self.channels.key())  # fmt: skip
 
     def colors(self, name: str) -> list[str]:
         """A category column's colours, a level each: a layer's own (a horizon's bands),
@@ -3895,11 +3943,14 @@ def _series(layer: Layer, table: Table, panel_of: np.ndarray | None, npanels: in
 
 
 def _series_names(layer: Layer, table: Table) -> list[str]:
-    """The columns splitting a line, area or band into series: its groups and colour."""
+    """The columns splitting a line, area or band into series: its groups, colour and
+    dash."""
     extra = list(layer.group)
     if layer.color is not None and layer.color in table and \
             table.column(layer.color).kind == "category":  # fmt: skip
         extra.append(layer.color)
+    if layer.dash_by is not None and layer.dash_by in table and layer.dash_by not in extra:
+        extra.append(layer.dash_by)
     return extra
 
 
@@ -3957,11 +4008,16 @@ def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
                             ncodes=ncodes, position=layer.position,
                             horizontal=horizontal)  # fmt: skip
     _paint(layer, table, geom, colors)
+    if geom.sizes is not None:  # the largest points first, so they hide no smaller one
+        geom = geom.take(np.lexsort((-geom.sizes, geom.panel)))
     return geom
 
 
 def _paint(layer: Layer, table: Table, geom: Geometry, colors: _ColorScales) -> None:
-    """Each instance's colour from the layer's colour column (none: one colour)."""
+    """Each instance's colour from the layer's colour column (none: one colour), and its
+    shape, size or dash from theirs."""
+    if colors.channels is not None:
+        colors.channels.paint(layer, table, geom)
     if layer.color is None or layer.color not in table:
         return
     column = table.column(layer.color)
@@ -4022,7 +4078,39 @@ def _layer_spec(
         "tooltip": bool(layer.tooltip),
         "context": layer.facet == "exclude",
         "step": layer.step if layer.mark == "line" else None,
+        "marker": _marker_spec(layer, geom, buffers),
+        "dash": _dash_spec(layer, geom, buffers),
     }
+
+
+def _marker_spec(layer: Layer, geom: Geometry, buffers: Buffers) -> dict[str, Any] | None:
+    """Points of other shapes than a circle, or of a size column: each one's shape code and
+    diameter (a share of the layer's ``size``). None: circles of one size."""
+    if layer.mark != "points":
+        return None
+    shape = 0
+    if layer.shape is not None and geom.shapes is None:
+        shape = shape_code(layer.shape)
+    if not shape and geom.shapes is None and geom.sizes is None:
+        return None
+    return {
+        "shape": shape,
+        "shapes": None if geom.shapes is None else buffers.add(geom.shapes, "uint8"),
+        "sizes": None if geom.sizes is None else buffers.add(geom.sizes, "float32"),
+    }
+
+
+def _dash_spec(layer: Layer, geom: Geometry, buffers: Buffers) -> dict[str, Any] | None:
+    """A dashed line's patterns (dash and gap lengths in line widths) and each segment's
+    (none: the first). None: solid."""
+    if layer.mark != "line":
+        return None
+    if geom.dashes is not None:
+        return {"patterns": [list(p) for p in DASHES.values()],
+                "codes": buffers.add(geom.dashes, "uint8")}  # fmt: skip
+    if layer.dash:
+        return {"patterns": [list(layer.dash)], "codes": None}
+    return None
 
 
 TIP_CELLS = 50_000
@@ -4051,6 +4139,9 @@ def _tooltip_columns(layer: Layer, table: Table) -> list[str]:
     color = layer.color
     if color is not None and color in table and color not in names:
         names += [color] if table.column(color).kind == "number" else []
+    for name in (layer.shape, layer.dash_by, layer.size_by):  # what a colour doesn't say
+        if name is not None and name in table and name not in names and name != color:
+            names.append(name)
     return names
 
 
