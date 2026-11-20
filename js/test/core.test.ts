@@ -8,6 +8,7 @@ import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../s
 import { BufferStore } from "../src/core/transport";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
+import { SHAPES, dashPieces, shapeCorners } from "../src/core/channels";
 import { drawMarks } from "../src/core/renderers/canvas2d";
 import { deviceClip } from "../src/core/renderers/renderer";
 import { formatHeight, formatNumber, formatValue, minorTicks, niceStep, ticks } from "../src/core/ticks";
@@ -928,5 +929,47 @@ describe("buffers asked for", () => {
     const text = { type: "text", coords: ref("tc"), starts: ref("ts"), labels: ref("tl"), offsets: ref("to"), colors: ref("tcol") };
     const spec = { layers: [mark, text] } as unknown as Parameters<typeof bufferIds>[0];
     expect(bufferIds(spec).sort()).toEqual(refs(spec.layers).sort());
+  });
+});
+
+describe("shapes and dashes (channels.ts, as channels.py)", () => {
+  const set = (coords: number[]) => ({ key: "k", version: 1, count: coords.length / 4, coords: new Float32Array(coords), colors: new Uint8Array((coords.length / 4) * 4).fill(255) });
+
+  it("cuts dashes by length, carrying the pattern on across joined segments", () => {
+    // 0..10 then 10..20 px, dashes of 4 and gaps of 4 at width 1: caps take 1 from each dash
+    const cut = dashPieces(set([0, 0, 10, 0, 10, 0, 20, 0]), 0, 2, 1, 1, null, [[4, 4]], 1);
+    const c = Array.from(cut.coords);
+    expect([c[0], c[4], c[8], c[12]]).toEqual([0, 8, 10, 16]);
+    expect([c[2], c[6], c[10], c[14]]).toEqual([3, 10, 11, 19]);
+  });
+
+  it("draws a dot pattern as zero-length dashes, and a solid one whole", () => {
+    const dots = dashPieces(set([0, 0, 9, 0]), 0, 1, 1, 1, null, [[1, 3]], 1);
+    expect(dots.count).toBe(3);
+    for (let i = 0; i < 3; i++) expect(dots.coords[i * 4]).toBe(dots.coords[i * 4 + 2]);
+    expect(dashPieces(set([0, 0, 9, 0]), 0, 1, 1, 1, new Uint8Array([0]), [[]], 1).count).toBe(1);
+  });
+
+  it("cuts at the panel's scales, in its axis units", () => {
+    // 1 unit = 10 px: a dash of 4 px is 0.3 units less its caps
+    const cut = dashPieces(set([0, 0, 1, 0]), 0, 1, 10, 10, null, [[4, 4]], 1);
+    expect(cut.coords[2]).toBeCloseTo(0.3);
+    expect(cut.coords[4]).toBeCloseTo(0.8);
+  });
+
+  it("has shapes' corners as figure.py draws them", () => {
+    expect(SHAPES).toEqual(["circle", "square", "triangle", "diamond", "plus", "cross", "triangle-down"]);
+    expect(shapeCorners(0, 0, 0, 1)).toEqual([]);
+    expect(shapeCorners(1, 0, 0, 1)[0]).toEqual([-0.8, -0.8]);
+    expect(shapeCorners(2, 0, 0, 1)[0]).toEqual([0, -1.25]);
+    expect(shapeCorners(6, 0, 0, 1)[0]).toEqual([0, 1.25]);
+    expect(shapeCorners(4, 0, 0, 1).length).toBe(12);
+  });
+
+  it("asks for the buffers of shapes, sizes and dashes", () => {
+    const ref = (id: string) => ({ id, dtype: "uint8", count: 1, components: 1, byteLength: 1 });
+    const spec = { layers: [{ type: "points", coords: ref("c"), starts: ref("s"), color: { rgba: null, codes: null, solid: [0, 0, 0, 255] }, marker: { shape: 0, shapes: ref("sh"), sizes: ref("sz") } }, { type: "line", coords: ref("c2"), starts: ref("s2"), color: { rgba: null, codes: null, solid: [0, 0, 0, 255] }, dash: { patterns: [[]], codes: ref("d") } }] };
+    const ids = bufferIds(spec as unknown as Parameters<typeof bufferIds>[0]);
+    expect(ids).toEqual(expect.arrayContaining(["sh", "sz", "d"]));
   });
 });

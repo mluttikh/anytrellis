@@ -25,6 +25,7 @@ redo well-known figures of both.
 | `geom_step()` | `.line(step="post")` |
 | `geom_smooth()`, `geom_smooth(method = "lm")` | `.smooth()`, `.smooth(method="linear")` |
 | `aes(colour = g)`, `aes(group = g)` | `color="g"`, `group="g"` |
+| `aes(shape = g)`, `aes(size = n)`, `aes(linetype = g)` | `.points(shape="g", size="n")`, `.line(dash="g")` |
 | `aes(colour = factor(cyl))` | `.as_category("cyl")`, then `color="cyl"` |
 | `scale_y_log10()` | `Trellis(..., y_scale="log")` |
 | `position = "dodge"` | `.bars(position="dodge")` |
@@ -62,8 +63,8 @@ print(plot._embed_html())  # markdown-exec: hide
 
 What differs:
 
-- **Columns by name**, not `aes()`: each mark takes `x=`, `y=` and `color=` as column
-  names.
+- **Columns by name**, not `aes()`: each mark takes `x=`, `y=` and `color=` (and
+  `shape=`, `size=` or `dash=`) as column names.
 - **Stats by name.** `bars()` draws the heights you give it, as `geom_col()`; with
   `stat="count"`, `"sum"`, `"mean"` or `"median"` it summarises the rows itself, as
   `geom_bar()` and `stat_summary()`. `hist()` counts in bins.
@@ -82,6 +83,7 @@ seaborn's `relplot`, `displot`, `catplot`, `lmplot` and `FacetGrid` take `col=`,
 | `col="a"`, `row="b"` | `col="a"`, `row="b"` |
 | `col="a", col_wrap=3` | `wrap="a", cols=3` |
 | `hue="g"` | `color="g"` |
+| `style="g"`, `size="n"` | `.points(shape="g", size="n")`, `.line(dash="g")` |
 | `facet_kws={"sharey": False}` | `share_y=False` |
 | `relplot(kind="scatter")`, `relplot(kind="line")` | `.points()`, `.line()` |
 | `displot(kind="hist")`, `displot(kind="kde")` | `.hist()`, `.density()` |

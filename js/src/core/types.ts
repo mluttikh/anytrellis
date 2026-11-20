@@ -124,6 +124,12 @@ export interface MarkLayerSpec {
   /** A paged plot in a notebook: the panels whose instances it has (Python sends the
    * others' when they are shown). Absent: every panel's. */
   panels?: number[] | null;
+  /** Points of other shapes or sizes (channels.ts): one shape's code, or each point's
+   * (uint8); each one's diameter as a share of `size` (float32). Absent: circles. */
+  marker?: { shape: number; shapes: BufferRef | null; sizes: BufferRef | null } | null;
+  /** A dashed line: dash and gap lengths in line widths, a pattern each, and each segment's
+   * pattern (uint8; null: the first). Absent: solid. */
+  dash?: { patterns: number[][]; codes: BufferRef | null } | null;
 }
 
 export interface RuleLayerSpec {
@@ -171,8 +177,9 @@ export interface LegendSpec {
   /** The colour column's name. */
   name?: string;
   /** category: an entry per level; number: a gradient; bins: a stepped number scale's
-   * ranges as entries (labels written in Python). */
-  kind: "category" | "number" | "bins";
+   * ranges as entries (labels written in Python); shape, dash: a shape or dash column's
+   * levels; size: a size column's values, as points. */
+  kind: "category" | "number" | "bins" | "shape" | "dash" | "size";
   labels?: string[];
   colors: string[];
   lo?: number;
@@ -181,6 +188,12 @@ export interface LegendSpec {
   breaks?: number[];
   /** A number legend's ends: a d3-format string. */
   format?: string | null;
+  /** Each entry's shape code (channels.ts: SHAPES), its dash (line widths), or its point's
+   * diameter (px); `line_width`: the dashed lines'. */
+  shapes?: number[];
+  dashes?: number[][];
+  line_width?: number;
+  sizes?: number[];
 }
 
 export interface TrellisSpec {

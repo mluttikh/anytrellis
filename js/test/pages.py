@@ -1,6 +1,7 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs)."""
+many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
+channels.mjs)."""
 
 from __future__ import annotations
 
@@ -90,6 +91,15 @@ def main(out: Path) -> None:
                     title="A grid per site")  # fmt: skip
     sites.line(x="t", y="v").save_html(out / "sites.html")
     many_plots(out / "many.html", gapminder)
+    # shapes, sizes and dashes (channels.mjs)
+    penguins = load("penguins")
+    Trellis(penguins, wrap="island", cols=3, panel_height=200).points(
+        x="bill_length_mm", y="bill_depth_mm", color="species", shape="species",
+        size="body_mass_g", tooltip=["sex"]).save_html(out / "channels.html")  # fmt: skip
+    flat = pl.DataFrame({"x": [0.0, 100.0, 0.0, 100.0], "y": [1.0, 1.0, 2.0, 2.0],
+                         "k": ["first", "first", "second", "second"]})  # fmt: skip
+    Trellis(flat, panel_height=200).line(x="x", y="y", dash="k", color="k", width=2).save_html(
+        out / "dashes.html")  # fmt: skip
     dense_points(out / "dense.html")
 
 

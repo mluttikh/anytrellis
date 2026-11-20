@@ -1,8 +1,9 @@
 // Canvas 2D backend: the same draws without a GPU. Runs of instances of one colour are
 // filled or stroked as one path.
 
+import { shapePath } from "../channels";
 import type { RendererKind } from "../types";
-import { type Draw, type Frame, KIND_RECT, KIND_TRAP, type Renderer } from "./renderer";
+import { type Draw, type Frame, KIND_POINT, KIND_RECT, KIND_TRAP, type Renderer } from "./renderer";
 
 export class Canvas2DRenderer implements Renderer {
   readonly kind: RendererKind = "canvas2d";
@@ -64,7 +65,7 @@ export function drawMarks(ctx: CanvasRenderingContext2D, draws: Draw[]): void {
     let open = false;
     const flush = (): void => {
       if (!open) return;
-      if (d.kind === KIND_RECT || d.kind === KIND_TRAP) ctx.fill();
+      if (d.kind === KIND_RECT || d.kind === KIND_TRAP || d.kind === KIND_POINT) ctx.fill();
       else ctx.stroke();
       open = false;
     };
@@ -84,7 +85,11 @@ export function drawMarks(ctx: CanvasRenderingContext2D, draws: Draw[]): void {
       const bx = d.ox + coords[i * 4 + 2] * d.sx;
       const by = d.oy + coords[i * 4 + 3] * d.sy;
       if (!Number.isFinite(ax + ay + bx + by)) continue;
-      if (d.kind === KIND_TRAP && base) {
+      if (d.kind === KIND_POINT && base) {
+        // a shape (channels.ts), its size a share of the layer's
+        const r = d.halfWidth * base[i * 2 + 1];
+        if (r > 0) shapePath(ctx, Math.round(base[i * 2]), ax, ay, r);
+      } else if (d.kind === KIND_TRAP && base) {
         const ba = d.oy + base[i * 2] * d.sy;
         const bb = d.oy + base[i * 2 + 1] * d.sy;
         if (!Number.isFinite(ba + bb)) continue;

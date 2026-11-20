@@ -3,6 +3,8 @@
 // PNG; on SvgContext, which records the same calls as SVG elements, it is the vector image.
 // Both go to the clipboard, a download, or (in a notebook) a file Python saves.
 
+import { type Glyph, drawGlyph } from "./channels";
+
 /** PNG pixels per CSS pixel: sharp on slides and high-resolution screens. */
 export const PNG_SCALE = 2;
 
@@ -429,6 +431,15 @@ export function paintHtml(ctx: CanvasRenderingContext2D, el: Element, origin: DO
   if (alpha <= 0) return;
   const box = el.getBoundingClientRect();
   const [x, y] = [box.left - origin.left, box.top - origin.top];
+  const glyph = (el as HTMLElement).dataset?.glyph;
+  if (glyph) {
+    // a legend's shape, dash or size: drawn again, as paths
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawGlyph(ctx, JSON.parse(glyph) as Glyph, x, y);
+    ctx.restore();
+    return;
+  }
   const colors = cs.backgroundImage.startsWith("linear-gradient") ? gradientColors(cs.backgroundImage) : [];
   if (colors.length > 1) {
     const g = ctx.createLinearGradient(x, 0, x + box.width, 0);

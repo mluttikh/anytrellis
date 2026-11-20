@@ -20,6 +20,26 @@ print(plot._embed_html())  # markdown-exec: hide
 `size=` is the diameter in pixels, `opacity=` from 0 to 1, and `tooltip=` adds columns to
 what hovering shows.
 
+### Shapes and sizes from columns
+
+`shape=` gives each category of a column a shape: circle, square, triangle, diamond, plus,
+cross and a triangle pointing down, then again. Give it the colour's column too, and the
+groups differ in two ways at once: one legend shows both, and nobody has to tell the
+colours apart. `size=` a number column makes each point's area grow with its value, from
+2 to 14 pixels across (`size_range=` sets them), the largest drawn first so none hides a
+smaller one:
+
+```python exec="on" source="above" session="marks" html="true"
+plot = Trellis(penguins, wrap="island", cols=3, panel_height=170)
+plot.points(x="bill_length_mm", y="bill_depth_mm", color="species", shape="species",
+            size="body_mass_g", opacity=0.75)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+A shape's name (`shape="square"`) draws every point so. Where points are dense enough to
+be drawn as cells, they are cells until you zoom in.
+
 ## Lines
 
 A line joins the rows of each series, sorted by x. `color=` makes a line per category;
@@ -34,6 +54,24 @@ print(plot._embed_html())  # markdown-exec: hide
 ```
 
 `group=["station", "sensor"]` takes several columns: a line per combination.
+
+### Dashes
+
+`dash=` a category column draws a line per category, each dashed its own way: solid,
+dashed, dotted, dot-dash, long dash and two-dash, then again. With the colour's column as
+well, a line reads by its dash where colours are hard to tell apart, or printed in grey:
+
+```python exec="on" source="above" session="marks" html="true"
+import polars as pl
+
+some = gapminder.filter(pl.col("country").is_in(["Japan", "Brazil", "India", "Nigeria"]))
+plot = Trellis(some, panel_height=200)
+plot.line(x="year", y="life_expect", color="country", dash="country", width=2)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+`dash=(4, 3)` dashes every line alike: dash and gap lengths in pixels, as a rule's.
 
 ### Steps
 

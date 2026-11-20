@@ -1,6 +1,7 @@
 // The one primitive, in GLSL (WebGL2) and WGSL (WebGPU): six vertices per instance, a box
-// for a rectangle, a capsule around a segment (antialiased by distance in the fragment), or
-// a trapezoid from a segment to its base (areas: two triangles, vertical sides).
+// for a rectangle, a capsule around a segment (antialiased by distance in the fragment), a
+// trapezoid from a segment to its base (areas: two triangles, vertical sides), or a point's
+// shape (a box around it; the shape's distance in the fragment, as channels.ts draws it).
 
 export const GLSL_VS = /* glsl */ `#version 300 es
 precision highp float;
@@ -46,6 +47,16 @@ void main() {
     px = mix(lo, hi, corner);
     v_local = vec2(0.0);
     v_seg = vec2(0.0);
+  } else if (v_kind == 3) {
+    float r = u_shape.x * a_base.y;
+    if (!(r > 0.0)) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      return;
+    }
+    float R = r * 1.3 + 1.0;
+    v_local = (corner * 2.0 - 1.0) * R;
+    px = a + v_local;
+    v_seg = vec2(r, a_base.x);
   } else {
     vec2 d = b - a;
     float len = length(d);
@@ -70,11 +81,37 @@ flat in int v_kind;
 uniform float u_opacity;
 uniform float u_dpr;
 out vec4 outColor;
+float sdBox(vec2 p, vec2 b) {
+  vec2 d = abs(p) - b;
+  return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+float sdTri(vec2 p, float R) {
+  float h = R * 0.8660254;
+  const float k = 1.7320508;
+  p.y = -p.y;
+  p.x = abs(p.x) - h;
+  p.y = p.y + h / k;
+  if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+  p.x -= clamp(p.x, -2.0 * h, 0.0);
+  return -length(p) * sign(p.y);
+}
+float sdShape(vec2 p, float r, int s) {
+  if (s == 1) return sdBox(p, vec2(0.8 * r));
+  if (s == 2) return sdTri(p, 1.25 * r);
+  if (s == 6) return sdTri(vec2(p.x, -p.y), 1.25 * r);
+  if (s == 3 || s == 5) p = vec2(p.x + p.y, p.y - p.x) * 0.70710678;
+  if (s == 3) return sdBox(p, vec2(0.8 * r));
+  if (s == 4 || s == 5) return min(sdBox(p, vec2(1.05 * r, 0.33 * r)), sdBox(p, vec2(0.33 * r, 1.05 * r)));
+  return length(p) - r;
+}
 void main() {
   float cover = 1.0;
   if (v_kind == 1) {
     float x = clamp(v_local.x, 0.0, v_seg.x);
     float d = length(vec2(v_local.x - x, v_local.y)) - v_seg.y;
+    cover = clamp(0.5 - d * u_dpr, 0.0, 1.0);
+  } else if (v_kind == 3) {
+    float d = sdShape(v_local, v_seg.x, int(v_seg.y + 0.5));
     cover = clamp(0.5 - d * u_dpr, 0.0, 1.0);
   }
   float a = v_color.a * u_opacity * cover;
@@ -134,6 +171,16 @@ fn vs(@builtin(vertex_index) vi: u32, @location(0) coords: vec4f, @location(1) c
     px = mix(mid - half, mid + half, corner);
     o.local = vec2f(0.0);
     o.seg = vec2f(0.0);
+  } else if (o.kind == 3u) {
+    let r = u.shape.x * base.y;
+    if (!(r > 0.0)) {
+      o.pos = vec4f(2.0, 2.0, 2.0, 1.0);
+      return o;
+    }
+    let R = r * 1.3 + 1.0;
+    o.local = (corner * 2.0 - 1.0) * R;
+    px = a + o.local;
+    o.seg = vec2f(r, base.x);
   } else {
     let d = b - a;
     let len = length(d);
@@ -150,12 +197,44 @@ fn vs(@builtin(vertex_index) vi: u32, @location(0) coords: vec4f, @location(1) c
   return o;
 }
 
+fn sdBox(p: vec2f, b: vec2f) -> f32 {
+  let d = abs(p) - b;
+  return length(max(d, vec2f(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+fn sdTri(q: vec2f, R: f32) -> f32 {
+  let h = R * 0.8660254;
+  let k = 1.7320508;
+  var p = vec2f(abs(q.x) - h, -q.y + h / k);
+  if (p.x + k * p.y > 0.0) {
+    p = vec2f(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+  }
+  p.x -= clamp(p.x, -2.0 * h, 0.0);
+  return -length(p) * sign(p.y);
+}
+
+fn sdShape(q: vec2f, r: f32, s: u32) -> f32 {
+  if (s == 1u) { return sdBox(q, vec2f(0.8 * r)); }
+  if (s == 2u) { return sdTri(q, 1.25 * r); }
+  if (s == 6u) { return sdTri(vec2f(q.x, -q.y), 1.25 * r); }
+  var p = q;
+  if (s == 3u || s == 5u) { p = vec2f(q.x + q.y, q.y - q.x) * 0.70710678; }
+  if (s == 3u) { return sdBox(p, vec2f(0.8 * r)); }
+  if (s == 4u || s == 5u) {
+    return min(sdBox(p, vec2f(1.05 * r, 0.33 * r)), sdBox(p, vec2f(0.33 * r, 1.05 * r)));
+  }
+  return length(p) - r;
+}
+
 @fragment
 fn fs(i: Out) -> @location(0) vec4f {
   var cover = 1.0;
   if (i.kind == 1u) {
     let x = clamp(i.local.x, 0.0, i.seg.x);
     let d = length(vec2f(i.local.x - x, i.local.y)) - i.seg.y;
+    cover = clamp(0.5 - d * u.dpr, 0.0, 1.0);
+  } else if (i.kind == 3u) {
+    let d = sdShape(i.local, i.seg.x, u32(i.seg.y + 0.5));
     cover = clamp(0.5 - d * u.dpr, 0.0, 1.0);
   }
   let a = i.color.a * u.opacity * cover;
