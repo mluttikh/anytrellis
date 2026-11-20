@@ -85,11 +85,15 @@ Trellis(gapminder, wrap="region").area(x="year", y="pop", group="country")  # st
 Trellis(weather, wrap="weather").band(x="date", ymin="temp_min", ymax="temp_max")
 Trellis(barley, wrap="year").rect(x="site", y="variety", color="yield")  # tiles
 Trellis(cars, wrap="origin").text(x="weight", y="mpg", text="cylinders", size=9)
+Trellis(cars, wrap="origin").text(x="weight", y="mpg", text="name", repel=True)  # apart
+Trellis(gapminder).line(x="year", y="life_expect", group="country",
+                        label="end")  # names at the ends, no legend
 Trellis(weather, wrap="weather").horizon(x="date", y="temp_max", bands=3)
 
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
 t.rule(y=30, dash=(4, 3))  # a line across every panel
 t.rule({"origin": ["USA", "Japan"], "goal": [25, 35]}, y="goal")  # a line per panel
+t.annotate("Light and frugal", x=2000, y=40, panel="Japan", dx=30, dy=10)  # a note
 Trellis(cars, wrap="origin").points(x="weight", y="mpg", facet="exclude")  # grey context
 ```
 

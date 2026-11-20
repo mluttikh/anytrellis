@@ -73,6 +73,24 @@ print(plot._embed_html())  # markdown-exec: hide
 
 `dash=(4, 3)` dashes every line alike: dash and gap lengths in pixels, as a rule's.
 
+### Names at the ends of lines
+
+`label="end"` writes each series' name at the end of its line, in its colour, in place of
+the legend: the reader's eye stays on the data. It suits up to about seven lines:
+
+```python exec="on" source="above" session="marks" html="true"
+plot = Trellis(some, panel_height=200)
+plot.line(x="year", y="life_expect", color="country", label="end", width=2)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+Each name appears once in the plot, in the panel where its line ends rightmost, at the
+last point in view: zoom in and the names follow. Where lines end close together the
+names move apart; one that would be too far from its line is left out until you zoom in.
+Hovering a name shows its line in every panel, and a click selects it, as its legend
+entry would. Without a colour column, the names are the `group=` columns' values.
+
 ### Steps
 
 `step=` draws a line as steps: flat between rows, then straight up or down. Use it for a

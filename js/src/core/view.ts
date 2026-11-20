@@ -32,6 +32,7 @@
 import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readTheme } from "./drawing";
 import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fileName, NO_DOWNLOADS, PNG_SCALE, pageMeasure, paintHtml, SvgContext, svgMessage } from "./export";
 import { type Glyph, dashPieces, drawGlyph, glyphBox } from "./channels";
+import { type EndLabel, endLabels } from "./labels";
 import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
 import { lookOf } from "./look";
@@ -244,7 +245,7 @@ export class TrellisView {
   private views: PanelView[] = [];
   private frameRequested = false;
   private frameId = 0;
-  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], texts: [] };
+  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], texts: [], ends: [] };
   /** A tooltip pinned by a click (null: none), and the views it was pinned in. */
   private pinned: HTMLDivElement | null = null;
   private pinnedAt = "";
@@ -267,6 +268,8 @@ export class TrellisView {
   /** The legend entry shown alone (a double-click), and its layers' instances as drawn. */
   private isolated: { index: number; level: number } | null = null;
   private isolatedSets: (InstanceSet | null)[] = [];
+  /** The pointer is over a line's end label (labels.ts). */
+  private overEnd = false;
   /** Dashed lines' dashes, per set and panel, and the scales they were cut at. */
   private dashSets = new Map<string, { source: InstanceSet; version: number; sx: number; sy: number; set: InstanceSet }>();
   /** The selection before a legend entry's click (a double-click puts it back). */
@@ -1115,7 +1118,7 @@ export class TrellisView {
     const position = this.spec.legend_position ?? "auto";
     // "right": a column right of the plot, the plot narrowed for it; under the plot when it
     // doesn't fit there
-    const right = position === "right" && this.spec.legends.length > 0;
+    const right = position === "right" && shownLegends(this.spec) > 0;
     const legendW = right ? this.legendWidth(width) : 0;
     let lay: Layout | null = null;
     if (this.focused === null) {
@@ -1235,6 +1238,7 @@ export class TrellisView {
     front.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     front.clearRect(0, 0, this.width, this.lay.height);
     this.front_.texts = this.scene.texts;
+    this.front_.ends = this.endsOf(views, front);
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.panelTheme(), this.front_);
     this.updateChips();
@@ -1581,6 +1585,12 @@ export class TrellisView {
       const d = this.drag;
       if (d) stage.releasePointerCapture?.(e.pointerId);
       this.drag = null;
+      // a click on a line's end label: as on its legend entry, its marks selected
+      const label = d && !d.moved && e.type === "pointerup" ? this.endAt(...this.local(e)) : null;
+      if (label && label.legend !== null) {
+        this.pickLegend(label.legend, label.series, e.shiftKey || e.metaKey || e.ctrlKey);
+        return;
+      }
       // a click (not a drag) pins the tooltip shown, or unpins one; not the click that gives
       // the plot the keys
       if (d && !d.moved && d.focused && e.type === "pointerup" && (d.kind === "pan" || d.kind === "box")) {
@@ -1759,8 +1769,41 @@ export class TrellisView {
     }
   }
 
+  /** The labels at the ends of lines in `views`, measured in the panels' font on `ctx`. */
+  private endsOf(views: PanelView[], ctx: CanvasRenderingContext2D): EndLabel[] {
+    const scene = this.scene!;
+    if (!scene.layers.some((l) => l.endSeries)) return [];
+    const theme = this.panelTheme();
+    ctx.save();
+    ctx.font = `${theme.fontSize}px ${theme.font}`;
+    const measure = (t: string): number => ctx.measureText(t).width;
+    const iso = this.isolated;
+    // another series shown alone: its label alone
+    const hidden = (layer: LayerData, s: number): boolean => !!iso && layer.spec.end_labels?.legend === iso.index && s !== iso.level;
+    const out = endLabels(scene.layers, views, measure, theme.fontSize, hidden);
+    ctx.restore();
+    return out;
+  }
+
+  /** The line-end label under a point of the stage, if any. */
+  private endAt(x: number, y: number): EndLabel | null {
+    const h = this.panelTheme().fontSize / 2 + 1;
+    return this.front_.ends.find((e) => x >= e.x - 2 && x <= e.x + e.w + 2 && Math.abs(y - e.y) <= h) ?? null;
+  }
+
   private hover(x: number, y: number): void {
     if (!this.spec || !this.scene) return;
+    // a line's end label: as its legend entry, its marks shown in every panel
+    const label = this.endAt(x, y);
+    if (label || this.overEnd) {
+      this.overEnd = !!label;
+      this.front.style.cursor = label && label.legend !== null ? "pointer" : "";
+      this.previewLegend(label && label.legend !== null ? { index: label.legend, levels: [label.series] } : null);
+      if (label) {
+        this.clearHover();
+        return;
+      }
+    }
     const vi = this.viewAt(x, y);
     if (vi < 0) {
       this.pointerPanel = null;
@@ -2070,7 +2113,7 @@ export class TrellisView {
 
   private placeLegend(spare: Rect | null): boolean {
     const lg = this.legend;
-    if (spare && this.spec?.legends.length) {
+    if (spare && this.spec && shownLegends(this.spec)) {
       if (lg.parentElement !== this.stage) this.stage.append(lg);
       lg.classList.add("atr-inset");
       Object.assign(lg.style, { left: `${spare.x}px`, top: `${spare.y}px`, width: `${spare.w}px`, height: `${spare.h}px` });
@@ -2097,6 +2140,7 @@ export class TrellisView {
     const selectable = this.scene?.layers.some((l) => l.codes && !l.spec.context) ?? false;
     const ranged = this.scene?.layers.some((l) => l.values && !l.spec.context) ?? false;
     legends.forEach((lg, index) => {
+      if (lg.direct) return; // labelled at the lines' ends instead
       const box = el("div", lg.kind === "number" ? "atr-legend-group" : "atr-legend-group atr-legend-cat");
       box.append(el("span", "atr-legend-title", lg.title));
       if (lg.kind === "number") {
@@ -2150,7 +2194,7 @@ export class TrellisView {
       if (items.length > LEGEND_ROWS) box.append(...this.legendSearch(items));
       this.legend.append(box);
     });
-    this.legend.style.display = legends.length && this.spec?.legend_position !== "none" ? "flex" : "none";
+    this.legend.style.display = legends.some((lg) => !lg.direct) && this.spec?.legend_position !== "none" ? "flex" : "none";
     this.updateLegend();
   }
 
@@ -2369,10 +2413,10 @@ export class TrellisView {
     ctx.clip();
     drawBack(ctx, this.spec, views, this.panelTheme());
     drawMarks(ctx, this.markDraws(views));
-    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts };
+    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts, ends: this.endsOf(views, ctx) };
     drawFront(ctx, this.spec, this.lay, views, this.panelTheme(), front);
     ctx.restore();
-    if (this.spec.legends.length && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);
+    if (shownLegends(this.spec) && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);
     paintHtml(ctx, this.caption, origin);
   }
 
@@ -2567,4 +2611,9 @@ function legendSwatch(lg: LegendSpec, i: number): HTMLElement {
     drawGlyph(ctx, glyph, 0, 0);
   }
   return canvas;
+}
+
+/** How many legends the plot shows (not those whose levels label the lines' ends). */
+function shownLegends(spec: TrellisSpec): number {
+  return spec.legends.filter((lg) => !lg.direct).length;
 }

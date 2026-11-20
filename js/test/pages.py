@@ -1,7 +1,7 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
-channels.mjs)."""
+channels.mjs, labels.mjs)."""
 
 from __future__ import annotations
 
@@ -101,6 +101,20 @@ def main(out: Path) -> None:
     Trellis(flat, panel_height=200).line(x="x", y="y", dash="k", color="k", width=2).save_html(
         out / "dashes.html")  # fmt: skip
     dense_points(out / "dense.html")
+    # names at the lines' ends, labels kept apart, notes (labels.mjs)
+    some = gapminder.filter(pl.col("country").is_in(["Japan", "Brazil", "India", "Nigeria"]))
+    some = some.with_columns(half=pl.when(pl.col("year") < 1980).then(pl.lit("before 1980"))
+                             .otherwise(pl.lit("from 1980")))  # fmt: skip
+    ends = Trellis(some, wrap="half", panel_height=220)
+    ends.line(x="year", y="life_expect", color="country", label="end")
+    ends.save_html(out / "ends.html")
+    y05 = gapminder.filter(pl.col("year") == 2005)
+    notes = Trellis(y05, wrap="region", cols=3, panel_height=200).points(
+        x="fertility", y="life_expect").text(x="fertility", y="life_expect", text="country",
+                                             repel=True)  # fmt: skip
+    notes.annotate("Long lives", x=1.5, y=82, panel="Europe & Central Asia", dx=40, dy=20)
+    notes.annotate("Replacement", x=2.1, dx=4)
+    notes.save_html(out / "notes.html")
 
 
 def site_readings() -> pl.DataFrame:

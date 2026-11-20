@@ -72,6 +72,36 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
+With many labels, `repel=True` keeps them apart: each takes the first spot around its
+point (right, left, above, below, the corners, then farther out with a line back) where
+it covers no other label nor a point. A label with no room is left out, until zooming in
+makes room; the table's first rows are placed first, so sort it by importance.
+
+```python exec="on" source="above" session="more" html="true"
+y2005 = gapminder.filter(pl.col("year") == 2005)
+plot = Trellis(y2005, wrap="region", cols=3, panel_height=170)
+plot.points(x="fertility", y="life_expect")
+plot.text(x="fertility", y="life_expect", text="country", repel=True, size=10)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+## Notes
+
+`annotate()` writes a note at a data position, in one panel (`panel=` its name), several
+or every one. `dx=` and `dy=` move the text from the position, with a line back to it;
+with `x=` alone the note sits at the panel's top, with `y=` alone at its left:
+
+```python exec="on" source="above" session="more" html="true"
+weather = load("seattle_weather")
+plot = Trellis(weather, wrap="weather", cols=3, panel_height=140)
+plot.line(x="date", y="temp_max", width=0.8)
+plot.annotate("Heat wave", x="2015-06-27", y=33, panel="sun", dx=-30, dy=18)
+plot.rule(x="2014-01-01").annotate("A new sensor", x="2014-01-01", dx=4)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
 ## Reference lines
 
 `rule(x=...)` draws vertical lines and `rule(y=...)` horizontal ones, at a value or a list

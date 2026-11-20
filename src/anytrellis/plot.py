@@ -13,7 +13,7 @@ import copy
 import functools
 import html
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, cast
@@ -115,6 +115,9 @@ LOADS = ("all", "pages")
 PAGE_MARKS = ("points", "line", "text")
 """The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
 _STATIC = Path(__file__).parent / "static"
+
+END_GAP = 5
+"""Room between a line's end and its name (px; labels.ts: END_GAP)."""
 
 
 class Trellis:
@@ -342,6 +345,8 @@ class Trellis:
         self._legend: dict[str, Any] = {"position": legend, "title": None}
         self._limits: dict[str, tuple[Any, Any]] = {}
         self._formats: dict[str, str] = {}
+        self._notes: list[dict[str, Any]] = []
+        """``annotate()``'s notes, as given."""
         self._shares: str | None = None
         """The axis of shares (every mark ``position="fill"``), as last drawn."""
         if strips not in STRIPS:
@@ -414,6 +419,7 @@ class Trellis:
         group: str | Sequence[str] | None = None,
         step: str | None = None,
         dash: str | Sequence[float] | None = None,
+        label: str | None = None,
         width: float = 1.5,
         opacity: float = 1.0,
         facet: FacetMode = "auto",
@@ -427,6 +433,7 @@ class Trellis:
         t.line(x="year", y="life_expect", group="country", width=1)
         t.line(x="time", y="state", step="post")    # each value holds until the next
         t.line(x="year", y="pop", color="scenario", dash="scenario")  # a dash each
+        t.line(x="year", y="gdp", color="country", label="end")  # names, not a legend
         ```
 
         Args:
@@ -444,6 +451,11 @@ class Trellis:
                 dotted, dot-dash, long dash, two-dash, then again), or one dash as dash and
                 gap lengths in px (``(4, 3)``, as ``rule``'s). The same column as
                 ``color``: one legend shows both.
+            label: ``"end"``: each series' name (its colour's category, else its groups')
+                at the end of its line, in its colour, in place of a legend (best for up to
+                about seven lines). Each name once in the plot, in the panel where its line
+                ends rightmost; at the last point in view as you zoom. Hovering a name shows
+                its line in every panel, and a click selects it, as its legend entry would.
             width: Line width in CSS pixels.
             opacity: 0 to 1.
             facet: ``"auto"`` (each row in its panel; every panel when the data has no facet
@@ -454,11 +466,13 @@ class Trellis:
         """
         if step not in (None, *STEPS):
             raise ValueError(f"step must be one of {STEPS} or None, got {step!r}")
+        if label not in (None, "end"):
+            raise ValueError(f'label must be "end" or None, got {label!r}')
         by = dash if isinstance(dash, str) else None
         pattern = [] if dash is None or isinstance(dash, str) else dash_units(dash, width)
         layer = Layer("line", name or self._name("line"), data, x, y, color, _names(group),
                       facet, width=width, opacity=opacity, tooltip=list(tooltip),
-                      step=step, dash=pattern, dash_by=by)  # fmt: skip
+                      step=step, dash=pattern, dash_by=by, label=label)  # fmt: skip
         return self._add(layer)
 
     def points(
@@ -794,6 +808,7 @@ class Trellis:
         align: str = "center",
         dx: float = 0.0,
         dy: float = 0.0,
+        repel: bool = False,
         opacity: float = 1.0,
         facet: FacetMode = "auto",
         name: str | None = None,
@@ -802,6 +817,7 @@ class Trellis:
 
         ```python
         t.text(x="fertility", y="life_expect", text="country", align="left", dx=6)
+        t.text(x="fertility", y="life_expect", text="country", repel=True)  # none overlap
         ```
 
         Args:
@@ -814,6 +830,11 @@ class Trellis:
             align: ``"left"``, ``"center"`` or ``"right"`` of the point.
             dx: Offset to the right, in CSS pixels.
             dy: Offset down, in CSS pixels.
+            repel: Place each label where it covers no other label, nor a point labelled:
+                beside its point, above, below or at a corner, farther out (with a line
+                back) when those are taken. A label with no room is left out until zooming
+                in makes room; the rows first in the table are placed first. ``dx``/``dy``:
+                the distance from the point (``align`` is not used).
             opacity: 0 to 1.
             facet: As for ``line``.
             name: The layer's name.
@@ -822,7 +843,7 @@ class Trellis:
             raise ValueError(f"align must be 'left', 'center' or 'right', got {align!r}")
         layer = Layer("text", name or self._name("text"), data, x, y, color, (), facet,
                       size=size, opacity=opacity, text=text, align=align,
-                      dx=dx, dy=dy)  # fmt: skip
+                      dx=dx, dy=dy, repel=bool(repel))  # fmt: skip
         return self._add(layer)
 
     def hist(
@@ -1284,6 +1305,92 @@ class Trellis:
                       color=color, width=width, dash=list(dash))  # fmt: skip
         return self._add(layer)
 
+    def annotate(
+        self,
+        text: str,
+        *,
+        x: Any = None,
+        y: Any = None,
+        panel: str | Sequence[str] | None = None,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        align: str | None = None,
+        color: str | None = None,
+        size: float | None = None,
+    ) -> Self:
+        """A note at a data position, in one panel or some (or every one), moved from the
+        position by ``dx``, ``dy`` px with a line back to it: an event, a peak, an outlier,
+        said where it is.
+
+        ```python
+        t = Trellis(weather, wrap="weather").line(x="date", y="temp_max")
+        t.annotate("Heat wave", x="2015-06-27", y=32, panel="sun", dx=30, dy=-20)
+        t.rule(x="2014-01-01").annotate("New sensor", x="2014-01-01")  # at the top
+        ```
+
+        Args:
+            text: The note (``"\\n"``: a new line).
+            x: Where, on x: a number, a time (a date or a string as ``"2015-06-27"``) or a
+                category, as the axis holds. None: at the panel's left.
+            y: Where, on y. None: at the panel's top.
+            panel: The panel's name (``panels()``), or several; None: every panel.
+            dx: The text's offset to the right of the position (px).
+            dy: The text's offset down (px).
+            align: ``"left"``, ``"center"`` or ``"right"`` of its place (default: away
+                from the position: ``"left"`` with ``dx`` above 0, ``"right"`` below,
+                else centred; ``"left"`` at the panel's left).
+            color: The text's colour (default: the theme's).
+            size: Font size (px; default: the plot's text size).
+        """
+        if align is None:
+            align = "left" if dx > 0 or x is None else "right" if dx < 0 else "center"
+        if align not in ("left", "center", "right"):
+            raise ValueError(f"align must be 'left', 'center' or 'right', got {align!r}")
+        if color is not None:
+            rgba(color)
+        panels = None if panel is None else [panel] if isinstance(panel, str) else list(panel)
+        self._notes.append({"text": str(text), "x": x, "y": y, "panels": panels,
+                            "dx": float(dx), "dy": float(dy), "align": align, "color": color,
+                            "size": size})  # fmt: skip
+        return self._changed()
+
+    def _note_specs(
+        self,
+        spec: dict[str, Any],
+        kinds: tuple[AxisKind, AxisKind],
+        levels: tuple[list[str] | None, list[str] | None],
+    ) -> list[dict[str, Any]]:
+        """The notes in the spec: their positions in axis units (relative to the origins)
+        and their panels' indices."""
+        names = [_panel_name(p, i) for i, p in enumerate(spec["panels"])]
+        out = []
+        for note in self._notes:
+            pos: dict[str, float | None] = {}
+            for i, axis in enumerate(("x", "y")):
+                value = note[axis]
+                if value is None:
+                    pos[axis] = None
+                    continue
+                try:
+                    at = _scalar(value, kinds[i], levels[i])
+                except (ValueError, TypeError) as e:
+                    raise ValueError(f"annotate({axis}={value!r}): not a place on the {axis} "
+                                     f"axis ({e})") from None  # fmt: skip
+                pos[axis] = at - spec[axis]["origin"]
+            panels = None
+            if note["panels"] is not None:
+                missing = [p for p in note["panels"] if p not in names]
+                if missing:
+                    shown = ", ".join(repr(n) for n in names[:8]) + \
+                        (", ..." if len(names) > 8 else "")  # fmt: skip
+                    raise ValueError(f"annotate(panel={missing[0]!r}): no such panel; the "
+                                     f"panels are {shown}")  # fmt: skip
+                panels = [names.index(p) for p in note["panels"]]
+            size = note["size"] * self.theme.scale if note["size"] is not None else None
+            color = None if note["color"] is None else list(rgba(note["color"]))
+            out.append({**note, **pos, "panels": panels, "size": size, "color": color})
+        return out
+
     def share(self, x: bool | str | None = None, y: bool | str | None = None) -> Self:
         """Share scales across panels: ``True`` (all), ``"row"``, ``"col"``, ``"page"``,
         ``False`` (each panel its own) or ``"sliced"`` (each its own range, all as wide as the
@@ -1397,6 +1504,11 @@ class Trellis:
         out = [{**lg, "name": lg["title"], "title": self._legend_title(i, lg["title"]),
                 **({"format": self._formats.get("color")} if lg["kind"] == "number" else {})}
                for i, lg in enumerate(shown)]  # fmt: skip
+        for lg in out:  # its levels name the lines at their ends: no legend
+            users = [lr for lr in self._layers if lr.color == lg["name"]]
+            if lg["kind"] == "category" and users and \
+                    all(lr.mark == "line" and lr.label == "end" for lr in users):  # fmt: skip
+                lg["direct"] = True
         if colors.channels is not None:
             by_name: dict[str, dict[str, Any]] = {str(lg["name"]): lg for lg in out}
             more = colors.channels.legends(
@@ -2935,6 +3047,9 @@ class Trellis:
         if shown and all(lr.stat == "horizon" for lr in shown):  # the bands' height, unpadded
             top = float(np.nanmax(extents["y"].hi, initial=0.0)) or 1.0
             yd = [(0.0, top)] * len(yd)
+        if x_kind != "band" and "x" not in self._limits:
+            room = self._end_room(shown, table_of, colors, grid.cols)
+            xd = [(lo, hi + room * (hi - lo)) for lo, hi in xd]
         xd = _limited(xd, self._limits.get("x"), x_kind, x_levels, "x")
         yd = _limited(yd, self._limits.get("y"), y_kind, y_levels, "y")
         x_origin = _origin(xd, x_kind)
@@ -3006,6 +3121,7 @@ class Trellis:
             "pages": pages,
             "theme": self.theme.spec(),
         }
+        spec["notes"] = self._note_specs(spec, (x_kind, y_kind), (x_levels, y_levels))
         # dense points' cells: over each panel's domain, sized for the panel's pixels
         cell_details = [(i, dt) for i, dt in details if isinstance(dt, PointDetail)]
         if cell_details:
@@ -3141,7 +3257,60 @@ class Trellis:
         )
         if part is not None:
             spec_layer.update(_inline_tips(layer, table, geom, buffers, self._label))
+        spec_layer["end_labels"] = self._end_labels(layer, table, geom, buffers)
         return spec_layer
+
+    def _end_room(self, shown: list[Layer], table_of: Callable[[int], Table],
+                  colors: _ColorScales, cols: int) -> float:  # fmt: skip
+        """The room for the names at the lines' ends, past the data on x: a share of the x
+        range, from the longest name (estimated: 0.55 em a character) and the panels' width
+        (estimated: as the plot's starting width splits)."""
+        longest = 0
+        for lr in shown:
+            if lr.mark != "line" or lr.label != "end":
+                continue
+            table = table_of(id(lr))
+            names: Iterable[str]
+            if lr.color is not None and lr.color in colors.levels:
+                names = [str(v) for v in colors.levels[lr.color]]
+            elif groups := [g for g in lr.group if g in table]:
+                names = {" · ".join(_text(v) for v in row)
+                         for row in zip(*(table.raw(g) for g in groups), strict=True)}  # fmt: skip
+            else:
+                names = [self._label(lr.y or "")]
+            longest = max(longest, max((len(n) for n in names), default=0))
+        if not longest:
+            return 0.0
+        text = 0.55 * 12 * self.theme.scale * longest + END_GAP + 4
+        panel = max(START_WIDTH / max(cols, 1) - 50, 2 * text)
+        return min(0.6, text / (panel - text))
+
+    def _end_labels(self, layer: Layer, table: Table, geom: Geometry,
+                    buffers: Buffers) -> dict[str, Any] | None:  # fmt: skip
+        """A line labelled at its ends: its series' names (its colour's categories, else its
+        groups', else its y column's label), each instance's series, and the colour legend
+        the names are levels of."""
+        if layer.mark != "line" or layer.label != "end":
+            return None
+        colors = self._colors
+        name = layer.color
+        if name is not None and name in table and table.column(name).kind == "category" \
+                and geom.codes is not None:  # fmt: skip
+            return {"names": list(colors.levels[name]),
+                    "series": buffers.add(geom.codes.astype(np.uint16), "uint16"),
+                    "legend": colors.order.index(name)}  # fmt: skip
+        groups = [g for g in layer.group if g in table]
+        if not groups:
+            return {"names": [self._label(layer.y or "")],
+                    "series": buffers.add(np.zeros(geom.count, np.uint16), "uint16"),
+                    "legend": None}  # fmt: skip
+        raw = [table.raw(g) for g in groups]
+        rows, inverse = np.unique(geom.rows, return_inverse=True)
+        keys = [" · ".join(_text(col[r]) for col in raw) for r in rows.tolist()]
+        names, codes = np.unique(np.array(keys, dtype=object), return_inverse=True)
+        return {"names": [str(n) for n in names],
+                "series": buffers.add(codes[inverse].astype(np.uint16), "uint16"),
+                "legend": None}  # fmt: skip
 
     def _cell_colors(self, layer: Layer, table: Table) -> Any:
         """RGBA of a points layer's cells, from their colour levels and mean numbers."""
@@ -3527,7 +3696,8 @@ def _buffer_ids(spec_layer: dict[str, Any]) -> list[str]:
     color = spec_layer.get("color")
     if isinstance(color, dict):
         refs += [color.get("rgba"), color.get("codes"), color.get("values")]
-    for channel, names in (("marker", ("shapes", "sizes")), ("dash", ("codes",))):
+    for channel, names in (("marker", ("shapes", "sizes")), ("dash", ("codes",)),
+                           ("end_labels", ("series",))):  # fmt: skip
         given = spec_layer.get(channel)
         if isinstance(given, dict):
             refs += [given.get(n) for n in names]
@@ -4178,6 +4348,7 @@ def _text_spec(
         "dy": layer.dy,
         "opacity": layer.opacity,
         "context": layer.facet == "exclude",
+        "repel": layer.repel,
     }
 
 

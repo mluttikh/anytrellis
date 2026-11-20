@@ -20,6 +20,9 @@ redo well-known figures of both.
 | `stat_ecdf()` | `.ecdf()` |
 | `geom_area()`, `geom_ribbon()`, `geom_tile()`, `geom_text()` | `.area()`, `.band()`, `.rect()`, `.text()` |
 | `geom_hline()`, `geom_vline()` | `.rule(y=...)`, `.rule(x=...)` |
+| `ggrepel::geom_text_repel()` | `.text(..., repel=True)` |
+| `directlabels::geom_dl(method = "last.points")`, `ggrepel` at the lines' ends | `.line(..., label="end")` |
+| `annotate("text", x =, y =, label =)` | `.annotate("label", x=, y=)` (a panel, or every one) |
 | `geom_histogram()`, `geom_boxplot()`, `geom_violin()`, `geom_density()` | `.hist()`, `.box()`, `.violin()`, `.density()` |
 | `geom_errorbar()`, `geom_pointrange()`, `stat_summary()` | `.errorbar()` |
 | `geom_step()` | `.line(step="post")` |

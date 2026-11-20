@@ -72,8 +72,11 @@ class Layer:
     shape: str | None = None
     size_by: str | None = None
     size_range: tuple[float, float] = (2.0, 14.0)
-    # lines: a dash column (``dash``: one dash, in px)
+    # lines: a dash column (``dash``: one dash, in px); labels at their ends ("end")
     dash_by: str | None = None
+    label: str | None = None
+    # text: labels kept out of each other's way (those with no room left out)
+    repel: bool = False
     # rules: constant positions, or (with data) a column's, in each row's panel
     values: list[Any] = field(default_factory=list)
     axis: Literal["x", "y"] = "y"
