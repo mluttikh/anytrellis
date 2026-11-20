@@ -19,8 +19,12 @@ shortcuts don't also act on them.
 | Hover | lines coloured by category | every series at the nearest x, top to bottom |
 | Click | a panel, with a tooltip shown | pin the tooltip: it stays, to compare with the next one and to copy from |
 | Double-click | a panel | see it alone |
+| Hover | a legend entry | its marks stand out in every panel, the others fade |
 | Click | a legend entry | select that colour's marks |
 | Shift, Cmd or Ctrl+click | a legend entry | add or remove a colour |
+| Double-click | a legend entry | show that colour alone, the others hidden (again, or ++esc++: all) |
+| Drag | a number colour's legend (its gradient) | select the marks of the values in that range (a click clears it) |
+| Click | a stepped colour scale's entry | select its range of values (Shift: widen the range) |
 
 Zoom and pan apply to every panel that shares the scale. An axis stands for its whole
 scale: with `share_y="row"`, zooming the left axis of a row zooms that row. With
@@ -56,7 +60,7 @@ its text. A click away from the marks, ++esc++ or its
 | ++z++ | drag draws a zoom box, and back (Shift+drag always does) |
 | ++y++ | fit y to the data in view, and keep fitting it as x changes; again to stop |
 | ++s++ | drag draws a selection brush, and back |
-| ++esc++ | unpin the tooltip; with none, clear the selection; with none, back to all panels |
+| ++esc++ | unpin the tooltip; with none, show every legend entry again; then clear the selection; then back to all panels |
 | ++enter++ | open the panel under the pointer |
 | ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom; with none opened, the previous / next page of a paged wrap |
 | ++backspace++ | back to all panels |
@@ -102,8 +106,12 @@ both. It selects the marks it meets in every panel, and the rest fade.
 | a histogram bin | it overlaps the brush |
 | grey context (`facet="exclude"`), text, rules | never |
 
-Drag the brush to move it; a click or ++esc++ clears it. With a legend colour chosen too,
-a mark must meet both.
+Drag the brush to move it; a click or ++esc++ clears it. With a legend colour (or a range
+of a number colour) chosen too, a mark must meet both.
+
+A colour shown alone (a double-click on its legend entry) is a way of looking, not a
+selection: Python's `selection` doesn't change, and images saved from Python show every
+colour.
 
 ## Export
 

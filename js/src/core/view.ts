@@ -38,7 +38,7 @@ import { Pager } from "./pager";
 import { pageLabels, pageList, panelOrder } from "./pages";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
-import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
+import { type Brush, type Highlight, type LegendChoice, type Selection, chooses, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
 
 export type { Highlight } from "./selection";
 import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
@@ -139,6 +139,8 @@ const ZOOM_SPEED = 0.0015;
 const HOVER_RADIUS = 10;
 /** The most series a tooltip lists at one x (then "n more"). */
 const SERIES_ROWS = 20;
+/** The most entries a legend shows at once (then a search for the rest). */
+const LEGEND_ROWS = 20;
 
 /** A tooltip's title line: the panel, the position (its axis title and value), the layer. */
 interface TipHead {
@@ -257,6 +259,15 @@ export class TrellisView {
   private highlight: Highlight | null = null;
   /** The category legends' entries (spec.legends index, level, element). */
   private legendItems: { index: number; level: number; el: HTMLElement }[] = [];
+  /** Number legends' gradients, and the window of a range chosen on them. */
+  private gradients: { index: number; bar: HTMLElement; window: HTMLElement; lo: number; hi: number }[] = [];
+  /** The legend entry hovered: its marks stand out (not a selection). */
+  private preview: LegendChoice | null = null;
+  /** The legend entry shown alone (a double-click), and its layers' instances as drawn. */
+  private isolated: { index: number; level: number } | null = null;
+  private isolatedSets: (InstanceSet | null)[] = [];
+  /** The selection before a legend entry's click (a double-click puts it back). */
+  private beforeClick: Brush | null = null;
   /** Every y group follows its data in view as x changes. */
   private fitY = false;
   private needFit = false;
@@ -437,6 +448,9 @@ export class TrellisView {
     this.spec = spec;
     this.detail.clear(); // Python sends them again for the view shown
     this.unpin();
+    this.isolated = null;
+    this.isolatedSets = [];
+    this.preview = null;
     this.scene = buildScene(spec, this.opts.source);
     this.renderer?.retain(new Set(this.scene.layers.map((l) => l.set.key)));
     // keep the zoom when only the layers changed (same domains)
@@ -758,26 +772,31 @@ export class TrellisView {
 
   private computeSelection(): void {
     const scene = this.scene;
-    const shared = !this.brush && this.highlight ? highlighted(scene, this.highlight) : null;
-    if (!scene || (!this.brush && !shared)) {
+    const b = this.brush;
+    const shared = !b && this.highlight ? highlighted(scene, this.highlight) : null;
+    if (!scene || (!b && !shared && !this.preview)) {
       this.selection = null;
       this.selectionSets = []; // drawn as they are again, not faded
       return;
     }
-    this.selection = shared?.selection ?? select(scene, this.brush!);
+    // what is selected (counted in the header), and what is drawn so: with a legend entry
+    // hovered, its marks (in the range brushed)
+    this.selection = b ? select(scene, b) : (shared?.selection ?? null);
+    const shown = this.preview ? select(scene, { x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend: this.preview }) : this.selection!;
     const old = this.selectionSets;
     this.selectionSets = scene.layers.map((layer, i) => {
-      const mask = this.selection!.masks[i];
+      const mask = shown.masks[i];
       if (!mask) return null;
-      const prev = old[i]?.dim.key === `${layer.set.key}:dim` ? old[i] : null;
-      const { dim, hi } = selectionColors(layer, mask, prev?.dim.colors ?? null);
+      const set = this.shownSet(i);
+      const prev = old[i]?.dim.key === `${set.key}:dim` ? old[i] : null;
+      const { dim, hi } = selectionColors({ ...layer, set }, mask, prev?.dim.colors ?? null);
       // a bar's selected share (a linked plot's highlight): the faded bar whole, the share
       // filled from its base on top
-      const fraction = shared?.fractions[i];
-      const coords = fraction ? filled(layer.set.coords, fraction) : layer.set.coords;
+      const fraction = this.preview ? undefined : shared?.fractions[i];
+      const coords = fraction ? filled(set.coords, fraction) : set.coords;
       return {
-        dim: prev?.dim ?? { key: `${layer.set.key}:dim`, version: layer.set.version, count: layer.set.count, coords: layer.set.coords, colors: dim, base: layer.set.base },
-        hi: { key: `${layer.set.key}:hi`, version: ++selectionVersion, count: layer.set.count, coords, colors: hi, base: layer.set.base },
+        dim: prev?.dim ?? { key: `${set.key}:dim`, version: set.version, count: set.count, coords: set.coords, colors: dim, base: set.base },
+        hi: { key: `${set.key}:hi`, version: ++selectionVersion, count: set.count, coords, colors: hi, base: set.base },
       };
     });
   }
@@ -1323,7 +1342,10 @@ export class TrellisView {
         ["Hover", "the values there; lines by colour: every one at that x"],
         ["Click", "pin the tooltip, to compare (Esc: unpin)"],
         ["Double-click", "open a panel (an axis: reset it)"],
+        ["Hover a legend entry", "its marks stand out"],
         ["Click a legend entry", "select its colour (Shift: add one)"],
+        ["Double-click one", "show it alone (Esc: all)"],
+        ["Drag on a gradient", "select a range of its values"],
       ]),
       table("Keys", [
         ["z  s", "box zoom, select (again: pan)"],
@@ -1362,8 +1384,8 @@ export class TrellisView {
     const draws: Draw[] = [];
     // with a selection: every layer faded, then the selected marks on top
     const passes: { layer: LayerData; set: InstanceSet }[] = [];
-    scene.layers.forEach((layer, i) => passes.push({ layer, set: this.selectionSets[i]?.dim ?? layer.set }));
-    if (this.selection) scene.layers.forEach((layer, i) => this.selectionSets[i] && passes.push({ layer, set: this.selectionSets[i]!.hi }));
+    scene.layers.forEach((layer, i) => passes.push({ layer, set: this.selectionSets[i]?.dim ?? this.shownSet(i) }));
+    scene.layers.forEach((layer, i) => this.selectionSets[i] && passes.push({ layer, set: this.selectionSets[i]!.hi }));
     for (const { layer, set } of passes) {
       for (const v of views) {
         const p = v.panel;
@@ -1686,6 +1708,10 @@ export class TrellisView {
           this.unpin();
           return true;
         }
+        if (this.isolated) {
+          this.isolate(null);
+          return true;
+        }
         if (this.brush) {
           this.setBrush(null, true);
           return true;
@@ -1733,7 +1759,8 @@ export class TrellisView {
     this.front_.crossGroup = spec.panels[p].xg;
     this.front_.readout = { panel: p, x: spec.x.kind === "band" ? null : ux, y: spec.y.kind === "band" ? null : uy };
     this.front_.hoverPanel = p;
-    const hit = pick(this.scene, p, v.map, x, y, HOVER_RADIUS);
+    const picked = pick(this.scene, p, v.map, x, y, HOVER_RADIUS);
+    const hit = picked && this.hidden(picked.layer, picked.instance) ? null : picked;
     // lines coloured by category: every series at the nearest x
     const across = this.seriesAt(p, v, ux, y, hit);
     if (across) {
@@ -1811,7 +1838,7 @@ export class TrellisView {
         const ay = c[i * 4 + 1];
         const bx = c[i * 4 + 2];
         const by = c[i * 4 + 3];
-        if (!(Number.isFinite(ay) && Number.isFinite(by))) continue;
+        if (!(Number.isFinite(ay) && Number.isFinite(by)) || this.hidden(l, i)) continue;
         let y: number;
         let rank: number;
         if (Math.abs(ax - at) <= tol) {
@@ -2035,71 +2062,255 @@ export class TrellisView {
     }
     lg.classList.remove("atr-inset", "atr-inset-rows");
     Object.assign(lg.style, { left: "", top: "", width: "", height: "" });
-    if (lg.parentElement !== this.root || lg.nextSibling !== this.caption) this.root.insertBefore(lg, this.caption);
+    // under the plot, or (legend("top")) over it
+    const before = this.spec?.legend_position === "top" ? this.stage : this.caption;
+    if (lg.parentElement !== this.root || lg.nextSibling !== before) this.root.insertBefore(lg, before);
+    lg.classList.toggle("atr-legend-top", before === this.stage);
     return false;
   }
 
   private renderLegend(legends: LegendSpec[]): void {
     this.legend.replaceChildren();
     this.legendItems = [];
-    // a category's entries select its marks: alone, or added with Shift, Cmd or Ctrl
+    this.gradients = [];
+    // a category's entries select its marks: alone, or added with Shift, Cmd or Ctrl; a
+    // stepped scale's bins and a gradient select a range of its values
     const selectable = this.scene?.layers.some((l) => l.codes && !l.spec.context) ?? false;
+    const ranged = this.scene?.layers.some((l) => l.values && !l.spec.context) ?? false;
     legends.forEach((lg, index) => {
-      // categories and a stepped scale's bins: an entry each (only categories select)
       const box = el("div", lg.kind === "number" ? "atr-legend-group" : "atr-legend-group atr-legend-cat");
       box.append(el("span", "atr-legend-title", lg.title));
-      if (lg.kind !== "number") {
-        (lg.labels ?? []).forEach((label, i) => {
-          const item = el("span", "atr-legend-item");
-          const sw = el("span", "atr-swatch");
-          sw.style.background = lg.colors[i];
-          item.append(sw, document.createTextNode(label));
-          box.append(item);
-          if (!selectable || lg.kind !== "category") return;
-          item.classList.add("atr-legend-pick");
-          item.tabIndex = 0;
-          item.setAttribute("role", "button");
-          item.setAttribute("aria-pressed", "false");
-          item.title = "Click: select its marks (Shift+click: add or remove)";
-          const pick = (add: boolean): void => this.pickLegend(index, i, add);
-          item.addEventListener("click", (e) => pick(e.shiftKey || e.metaKey || e.ctrlKey));
-          item.addEventListener("keydown", (e) => {
-            if (e.key !== "Enter" && e.key !== " ") return;
-            e.preventDefault();
-            e.stopPropagation();
-            pick(e.shiftKey || e.metaKey || e.ctrlKey);
-          });
-          this.legendItems.push({ index, level: i, el: item });
-        });
-      } else {
-        const bar = el("span", "atr-gradient");
-        bar.style.background = `linear-gradient(to right, ${lg.colors.join(", ")})`;
-        const end = lg.format ? numberFormat(lg.format) : fmt;
-        box.append(el("span", "atr-legend-item", end(lg.lo ?? 0)), bar, el("span", "atr-legend-item", end(lg.hi ?? 1)));
+      if (lg.kind === "number") {
+        box.append(...this.gradient(lg, index, ranged));
+        this.legend.append(box);
+        return;
       }
+      const items: HTMLElement[] = [];
+      (lg.labels ?? []).forEach((label, i) => {
+        const item = el("span", "atr-legend-item");
+        const sw = el("span", "atr-swatch");
+        sw.style.background = lg.colors[i];
+        item.append(sw, document.createTextNode(label));
+        item.dataset.label = label.toLowerCase();
+        items.push(item);
+        box.append(item);
+        const bins = lg.kind === "bins" && ranged && (lg.breaks?.length ?? 0) > i + 1;
+        if (!(lg.kind === "category" && selectable) && !bins) return;
+        item.classList.add("atr-legend-pick");
+        item.tabIndex = 0;
+        item.setAttribute("role", "button");
+        item.setAttribute("aria-pressed", "false");
+        item.title = bins ? "Click: select its range (Shift+click: widen the range)" : "Click: select its marks (Shift+click: add or remove). Double-click: show it alone";
+        const pick = (add: boolean): void => (bins ? this.pickBin(index, i, add) : this.pickLegend(index, i, add));
+        item.addEventListener("click", (e) => {
+          if (e.detail > 1) return; // a double-click's second click
+          this.beforeClick = this.brush;
+          pick(e.shiftKey || e.metaKey || e.ctrlKey);
+        });
+        item.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          e.stopPropagation();
+          pick(e.shiftKey || e.metaKey || e.ctrlKey);
+        });
+        if (!bins) {
+          // hovering an entry shows its marks in every panel; a double-click shows it alone
+          item.addEventListener("pointerenter", () => this.previewLegend({ index, levels: [i] }));
+          item.addEventListener("pointerleave", () => this.previewLegend(null));
+          item.addEventListener("focus", () => this.previewLegend({ index, levels: [i] }));
+          item.addEventListener("blur", () => this.previewLegend(null));
+          item.addEventListener("dblclick", (e) => {
+            e.preventDefault();
+            // the double-click's first click chose it: as before it
+            if (this.brush !== this.beforeClick) this.setBrush(this.beforeClick, true);
+            this.isolate(this.isolated?.index === index && this.isolated.level === i ? null : { index, level: i });
+          });
+        }
+        this.legendItems.push({ index, level: i, el: item });
+      });
+      // many entries: the first ones, and a search for the rest
+      if (items.length > LEGEND_ROWS) box.append(...this.legendSearch(items));
       this.legend.append(box);
     });
     this.legend.style.display = legends.length && this.spec?.legend_position !== "none" ? "flex" : "none";
     this.updateLegend();
   }
 
+  /** A number colour's gradient, between its ends; dragging on it selects a range of its
+   * values (a click clears it). */
+  private gradient(lg: LegendSpec, index: number, ranged: boolean): HTMLElement[] {
+    const bar = el("span", "atr-gradient");
+    bar.style.background = `linear-gradient(to right, ${lg.colors.join(", ")})`;
+    const end = lg.format ? numberFormat(lg.format) : fmt;
+    const parts = [el("span", "atr-legend-item", end(lg.lo ?? 0)), bar, el("span", "atr-legend-item", end(lg.hi ?? 1))];
+    const lo = lg.lo ?? 0;
+    const hi = lg.hi ?? 1;
+    const window_ = el("span", "atr-gradient-window");
+    bar.append(window_);
+    this.gradients.push({ index, bar, window: window_, lo, hi });
+    if (!ranged) return parts;
+    bar.classList.add("atr-gradient-pick");
+    bar.title = "Drag: select a range of values (click: clear it)";
+    const valueAt = (clientX: number): number => {
+      const r = bar.getBoundingClientRect();
+      const f = Math.max(0, Math.min(1, (clientX - r.left) / Math.max(1, r.width)));
+      return lo + f * (hi - lo);
+    };
+    let from: number | null = null;
+    let moved = false;
+    bar.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      bar.setPointerCapture(e.pointerId);
+      from = valueAt(e.clientX);
+      moved = false;
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (from === null) return;
+      moved = true;
+      this.showRange(index, [from, valueAt(e.clientX)]);
+    });
+    const done = (e: PointerEvent): void => {
+      if (from === null) return;
+      const start = from;
+      from = null;
+      const b = this.brush;
+      const range: [number, number] | null = moved && e.type === "pointerup" ? ([start, valueAt(e.clientX)].sort((a, c) => a - c) as [number, number]) : null;
+      const legend = range && range[1] > range[0] ? { index, levels: [], range } : null;
+      this.setBrush({ x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend }, true);
+    };
+    bar.addEventListener("pointerup", done);
+    bar.addEventListener("pointercancel", done);
+    return parts;
+  }
+
+  /** A search over a long legend's entries: the first LEGEND_ROWS shown, those matching
+   * what is typed, and how many more there are. */
+  private legendSearch(items: HTMLElement[]): HTMLElement[] {
+    const input = el("input", "atr-legend-search");
+    input.type = "search";
+    input.placeholder = `Find (${items.length})`;
+    input.setAttribute("aria-label", "Find a legend entry");
+    const more = el("span", "atr-legend-more");
+    const show = (): void => {
+      const q = input.value.trim().toLowerCase();
+      let shown = 0;
+      let matched = 0;
+      for (const item of items) {
+        const match = !q || (item.dataset.label ?? "").includes(q);
+        if (match) matched++;
+        const on = match && shown < LEGEND_ROWS;
+        if (on) shown++;
+        item.hidden = !on;
+      }
+      more.textContent = matched > shown ? `${matched - shown} more` : matched === 0 ? "none" : "";
+    };
+    input.addEventListener("input", show);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && input.value) {
+        input.value = "";
+        show();
+        e.stopPropagation();
+      }
+    });
+    show();
+    return [more, input];
+  }
+
   /** A click on legend entry `level` of legend `index`: select its colour (with `add`: add
    * it to those chosen, or take it away). A range brushed stays: both must hold. */
   private pickLegend(index: number, level: number, add: boolean): void {
     const b = this.brush;
-    const legend = toggleLegend(b?.legend ?? null, index, level, add);
+    const current = b?.legend && !b.legend.range ? b.legend : null;
+    const legend = toggleLegend(current, index, level, add);
     this.setBrush({ x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend }, true);
   }
 
-  /** The chosen legend entries stand out; the others fade while some are chosen. */
+  /** A click on a stepped scale's bin: select its range of values (again: none; with
+   * `add`: the range widened to it). */
+  private pickBin(index: number, bin: number, add: boolean): void {
+    const breaks = this.spec?.legends[index]?.breaks;
+    if (!breaks) return;
+    const b = this.brush;
+    const have = b?.legend?.index === index ? (b.legend.range ?? null) : null;
+    let range: [number, number] | null = [breaks[bin], breaks[bin + 1]];
+    if (add && have) range = [Math.min(have[0], range[0]), Math.max(have[1], range[1])];
+    else if (have && have[0] === range[0] && have[1] === range[1]) range = null;
+    const legend = range ? { index, levels: [], range } : null;
+    this.setBrush({ x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend }, true);
+  }
+
+  /** Hovering a legend entry: its marks stand out in every panel, the others fade, until
+   * the pointer leaves it (the selection is as it was). */
+  private previewLegend(choice: LegendChoice | null): void {
+    if (choice && this.isolated && (this.isolated.index !== choice.index || !choice.levels.includes(this.isolated.level))) choice = null;
+    if (JSON.stringify(choice) === JSON.stringify(this.preview)) return;
+    this.preview = choice;
+    this.needSelect = true;
+    this.request();
+  }
+
+  /** Show one legend entry's marks alone (null: all of them again), as a double-click on
+   * it does: the others are hidden, not selected; Esc or a double-click again shows all. */
+  private isolate(choice: { index: number; level: number } | null): void {
+    this.isolated = choice;
+    this.isolatedSets = [];
+    this.preview = null;
+    this.needSelect = true;
+    this.updateLegend();
+    this.request();
+  }
+
+  /** A layer's instances as drawn: with an entry shown alone, the others' transparent. */
+  private shownSet(i: number): InstanceSet {
+    const layer = this.scene!.layers[i];
+    const iso = this.isolated;
+    if (!iso || layer.spec.color.legend !== iso.index || !layer.codes) return layer.set;
+    const had = this.isolatedSets[i];
+    if (had && had.key === `${layer.set.key}:iso${iso.level}` && had.count === layer.set.count) return had;
+    const colors = layer.set.colors.slice();
+    for (let k = 0; k < layer.set.count; k++) if (layer.codes[k] !== iso.level) colors[k * 4 + 3] = 0;
+    const set = { ...layer.set, key: `${layer.set.key}:iso${iso.level}`, version: ++selectionVersion, colors };
+    this.isolatedSets[i] = set;
+    return set;
+  }
+
+  /** Whether an instance is hidden: another entry is shown alone. */
+  private hidden(layer: LayerData, i: number): boolean {
+    const iso = this.isolated;
+    return !!iso && layer.spec.color.legend === iso.index && !!layer.codes && layer.codes[i] !== iso.level;
+  }
+
+  /** A range of a gradient's values, shown on it (null: none). */
+  private showRange(index: number, range: [number, number] | null): void {
+    for (const g of this.gradients) {
+      if (g.index !== index) continue;
+      if (!range || !(g.hi > g.lo)) {
+        g.window.style.display = "none";
+        continue;
+      }
+      const [a, b] = [Math.min(...range), Math.max(...range)].map((v) => Math.max(0, Math.min(1, (v - g.lo) / (g.hi - g.lo))));
+      Object.assign(g.window.style, { display: "block", left: `${a * 100}%`, width: `${(b - a) * 100}%` });
+    }
+  }
+
+  /** The chosen legend entries stand out; the others fade while some are chosen (a range:
+   * the bins in it, and its window on a gradient); an entry shown alone, the others struck. */
   private updateLegend(): void {
     const legend = this.brush?.legend ?? null;
+    const iso = this.isolated;
     for (const { index, level, el: item } of this.legendItems) {
-      const on = legend?.index === index && legend.levels.includes(level);
+      const lg = this.spec?.legends[index];
+      const mine = legend?.index === index;
+      let on = mine && legend!.levels.includes(level);
+      if (mine && legend!.range && lg?.breaks) on = lg.breaks[level] < legend!.range[1] && lg.breaks[level + 1] > legend!.range[0];
+      const chosen = mine && chooses(legend);
       item.classList.toggle("atr-legend-on", on);
-      item.classList.toggle("atr-legend-off", !!legend && legend.index === index && !on);
+      item.classList.toggle("atr-legend-off", chosen && !on);
+      item.classList.toggle("atr-legend-hidden", !!iso && iso.index === index && iso.level !== level);
       item.setAttribute("aria-pressed", String(on));
     }
+    for (const g of this.gradients) this.showRange(g.index, legend?.index === g.index ? (legend.range ?? null) : null);
   }
 
   get rendererKind(): string | null {

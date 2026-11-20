@@ -159,6 +159,15 @@ def test_selected_rows_are_a_query_of_every_panel(kind: str) -> None:
     assert rows_of(paged.selected()) == 0
 
 
+@pytest.mark.parametrize("kind", list(LAZY))
+def test_selected_by_a_range_of_a_number_colour(kind: str) -> None:
+    paged, eager = plots(kind, "points", x="t")
+    for p in (paged, eager):
+        p.select(color=(1.0, 3.0))  # rain: as a drag on the gradient
+    assert rows_of(paged.selected()) == len(eager.selected()) > 0
+    assert paged.selection == eager.selection
+
+
 def test_selected_by_a_time_range_and_a_category_axis() -> None:
     paged, eager = plots("duckdb", "points", x="time")
     for p in (paged, eager):

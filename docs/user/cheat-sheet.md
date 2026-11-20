@@ -131,7 +131,8 @@ Trellis(cars, wrap="cylinders", palette={"USA": "#1f77b4", "Japan": "#d62728"}).
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg", color="horsepower")
 t.colormap("cividis")  # number colours: viridis, magma, Blues, RdBu, PuOr, "_r" reversed
 t.colormap(scale="diverging", midpoint=100)  # also "binned" and "quantile", bins=5
-t.legend("right", title="Power (hp)")  # "auto", "bottom", "right", "none"
+t.legend("right", title="Power (hp)")  # "auto", "top", "bottom", "right", "none"
+t.select(color=(100, 150))  # a number colour's range: as dragging on its gradient
 Trellis(cars, wrap="origin", legend="none")
 ```
 

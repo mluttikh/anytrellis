@@ -109,6 +109,43 @@ def test_a_selection_fades_the_other_marks(temps: Trellis) -> None:
     assert 'stroke-opacity="0.8"' in figure_svg(temps)
 
 
+def text_y(svg: str, word: str) -> float:
+    """Where a text is, down the image (in the plot's group: its offset added)."""
+    root = parse(svg)
+    for g in root.iter(f"{NS}g"):
+        shift = re.fullmatch(r"translate\(0 ([\d.]+)\)", g.get("transform", ""))
+        for e in g.iter(f"{NS}text"):
+            if e.text == word:
+                return float(e.get("y", 0)) + (float(shift.group(1)) if shift else 0.0)
+    for e in root.iter(f"{NS}text"):
+        if e.text == word:
+            return float(e.get("y", 0))
+    raise AssertionError(word)
+
+
+def test_a_legend_over_the_panels(temps: Trellis) -> None:
+    under = figure_svg(temps.legend("bottom"))
+    over = figure_svg(temps.legend("top"))
+    assert size(over) == size(under)  # as high: the legend moved, not added
+    assert text_y(under, "sensor") > text_y(under, "station 1")
+    assert text_y(over, "Temperatures") < text_y(over, "sensor") < text_y(over, "station 1")
+
+
+def test_a_range_of_a_number_colour_fades_the_rest() -> None:
+    t = Trellis(sensors(stations=2, hours=48)).points(x="time", y="temp", color="temp")
+    plain = figure_svg(t)
+    t.select(color=(10, 15))
+    assert opacities(figure_svg(t)) - opacities(plain)  # the points out of it fade
+
+
+def test_a_long_legend_shows_its_first_entries() -> None:
+    data = {"x": list(range(30)), "y": list(range(30)), "k": [f"k{i:02}" for i in range(30)]}
+    words = texts(figure_svg(Trellis(data).points(x="x", y="y", color="k")))
+    assert "k19" in words
+    assert "k20" not in words
+    assert "10 more" in words  # as the page: the first 20, and a search for the rest
+
+
 def test_a_linked_plot_shows_what_the_other_selects() -> None:
     data = sensors(stations=2, hours=48)
     lines = Trellis(data, wrap="station").line(x="time", y="temp", color="sensor")

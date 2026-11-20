@@ -4,7 +4,7 @@ import { crowdedRight, gridAxes, labelEnd } from "../src/core/drawing";
 import { layout, wrapLabel, xLabelMode } from "../src/core/layout";
 import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
-import { type Scene, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
+import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
 import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
@@ -459,6 +459,18 @@ describe("legend entries", () => {
     expect([...both.masks[0]!]).toEqual([0, 0, 1]);
   });
 
+  it("a number colour's range: the marks of values in it", () => {
+    const scene = coloured();
+    const points = scene.layers[0] as unknown as { values: Float64Array | null; codes: Uint16Array | null };
+    points.values = new Float64Array([0.5, 1.5, 2.5]);
+    points.codes = null;
+    const s = select(scene, { x: null, y: null, legend: { index: 0, levels: [], range: [2, 1] } });
+    expect([...s.masks[0]!]).toEqual([0, 1, 0]); // either way round
+    expect([...s.masks[1]!]).toEqual([0]); // no colour column: faded
+    expect([...s.masks[2]!]).toEqual([0]); // another legend's colours: faded
+    expect(selects({ x: null, y: null, legend: { index: 0, levels: [], range: [1, 2] } })).toBe(true);
+  });
+
   it("toggle: a click picks one (again: none), Shift adds and takes away", () => {
     expect(toggleLegend(null, 0, 2, false)).toEqual({ index: 0, levels: [2] });
     expect(toggleLegend({ index: 0, levels: [2] }, 0, 2, false)).toBeNull();
@@ -894,5 +906,27 @@ describe("category labels", () => {
   it("wrap at the space nearest the middle", () => {
     expect(wrapLabel("University Farm")).toEqual(["University", "Farm"]);
     expect(wrapLabel("Velvet")).toEqual(["Velvet"]);
+  });
+});
+
+describe("buffers asked for", () => {
+  // the browser asks Python (in a notebook) for the buffers it lacks: every one a layer
+  // refers to, wherever it is in it (a number colour's values too), or it cannot draw
+  const ref = (id: string) => ({ id, dtype: "float64", count: 1, components: 1, byteLength: 8 });
+  const refs = (node: unknown): string[] => {
+    if (Array.isArray(node)) return node.flatMap(refs);
+    if (!node || typeof node !== "object") return [];
+    const o = node as Record<string, unknown>;
+    return "id" in o && "dtype" in o ? [String(o.id)] : Object.values(o).flatMap(refs);
+  };
+  it("are every buffer the layers refer to", () => {
+    const mark = {
+      type: "points", name: "p", count: 1, coords: ref("coords"), starts: ref("starts"), base: ref("base"),
+      link: ref("link"), groups: ref("groups"), tip_rows: ref("tips"),
+      color: { rgba: ref("rgba"), solid: null, codes: ref("codes"), legend: 0, values: ref("values") },
+    };
+    const text = { type: "text", coords: ref("tc"), starts: ref("ts"), labels: ref("tl"), offsets: ref("to"), colors: ref("tcol") };
+    const spec = { layers: [mark, text] } as unknown as Parameters<typeof bufferIds>[0];
+    expect(bufferIds(spec).sort()).toEqual(refs(spec.layers).sort());
   });
 });

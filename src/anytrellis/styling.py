@@ -287,7 +287,12 @@ class NumberScale:
         mids = [(a + b) / 2 for a, b in pairwise(breaks)]
         colors = [hex_of(c) for c in self.rgba(np.array(mids), lo, hi, breaks)]
         labels = [_span(fmt(a), fmt(b)) for a, b in pairwise(breaks)]
-        return {"kind": "bins", "labels": labels, "colors": colors}
+        return {
+            "kind": "bins",
+            "labels": labels,
+            "colors": colors,
+            "breaks": [float(b) for b in breaks],
+        }
 
 
 def _span(a: str, b: str) -> str:

@@ -326,3 +326,32 @@ def test_a_plot_rebuilt_starts_over(mark: str):
     spec, _ = plot._scene()
     assert plot._detail_buffers.data == {}
     assert plot._shown_layers == spec["layers"]
+
+
+def _refs(node: Any) -> set[str]:
+    """Every buffer a spec layer refers to, wherever it is in it."""
+    if isinstance(node, dict):
+        if "id" in node and "dtype" in node:
+            return {node["id"]}
+        return set().union(*(_refs(v) for v in node.values())) if node else set()
+    if isinstance(node, list):
+        return set().union(*(_refs(v) for v in node)) if node else set()
+    return set()
+
+
+def test_every_buffer_a_layer_refers_to_is_kept():
+    # a number colour sends its values (a legend's range selects by them): kept with the
+    # layer's other buffers, or the browser cannot draw it
+    data = walk()
+    data["c"] = np.arange(len(data["t"]), dtype=np.float64)
+    plot = Trellis(data, wrap="s").points(x="t", y="v", color="c", tooltip=["c"])
+    spec, _ = plot._scene()
+    for layer in spec["layers"]:
+        assert _refs(layer) == _ids(layer)
+    plot._detail(view(plot, (1000, 2000)))
+    for layer in plot._shown_layers:
+        if layer is not None:
+            assert _refs(layer) == _ids(layer)
+            assert _refs(layer) <= set(plot._detail_buffers.data) | {
+                r for lr in spec["layers"] for r in _refs(lr)
+            }

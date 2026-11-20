@@ -167,9 +167,24 @@ barley example in [Coming from Altair or lattice](from-altair-lattice.md#clevela
 
 ## The legend
 
-The legend lists each colour column's categories, or its range. Clicking an entry selects
-that colour's marks; Shift+click adds or removes more (see
-[Select data](../tutorials/select.md)).
+The legend lists each colour column's categories, or its range. Hovering an entry makes
+its marks stand out in every panel. Clicking an entry selects that colour's marks;
+Shift+click adds or removes more (see [Select data](../tutorials/select.md)). A
+double-click shows that colour alone, the others hidden, until you double-click it again
+or press Esc.
+
+A number colour's legend is a gradient: drag on it to select the marks whose values are in
+that range, or from Python, `select(color=(low, high))`. A binned scale's entries each
+select their range, and Shift+click widens it.
+
+```python
+t = Trellis(cars, wrap="origin").points(x="weight", y="mpg", color="horsepower")
+t.select(color=(100, 150))  # as dragging on the gradient from 100 to 150
+t.selection["color"]        # (100.0, 150.0)
+```
+
+With more than 20 entries, the legend shows the first 20, how many more there are, and a
+search box that finds the rest. Images show the first 20.
 
 In a wrap whose last row is not full, the legend goes in the empty cells when it fits;
 `legend()` puts it elsewhere or renames it (see [Layout](layout.md#the-legends-place)).
