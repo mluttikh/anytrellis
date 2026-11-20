@@ -302,6 +302,16 @@ export class SvgContext {
   }
 
   fillText(text: string, x: number, y: number): void {
+    this.text(text, x, y, this.fillPaint());
+  }
+  /** A text's outline (a halo under it, its line joins round). */
+  strokeText(text: string, x: number, y: number): void {
+    this.text(text, x, y, `${this.strokePaint()} stroke-linejoin="round"`);
+  }
+  // `lineJoin` is taken (round, as strokeText draws it)
+  lineJoin = "round";
+
+  private text(text: string, x: number, y: number, paintAttrs: string): void {
     if (!text) return;
     const size = parseFloat(/([\d.]+)px/.exec(this.s.font)?.[1] ?? "12");
     // baselines as offsets (dominant-baseline is not read everywhere): about where a canvas
@@ -310,7 +320,7 @@ export class SvgContext {
     const anchor = { center: "middle", right: "end", end: "end", left: "start", start: "start" }[this.s.align];
     const [a, b, c, d, e, f] = this.s.m;
     const place = b === 0 && c === 0 && a === 1 && d === 1 ? `x="${n(x + e)}" y="${n(y + f + shift * size)}"` : `transform="matrix(${[a, b, c, d, e, f].map(n).join(" ")})" x="${n(x)}" y="${n(y + shift * size)}"`;
-    this.emit(`<text ${place} ${fontAttributes(this.s.font)}${anchor !== "start" ? ` text-anchor="${anchor}"` : ""} ${this.fillPaint()}>${esc(text)}</text>`);
+    this.emit(`<text ${place} ${fontAttributes(this.s.font)}${anchor !== "start" ? ` text-anchor="${anchor}"` : ""} ${paintAttrs}>${esc(text)}</text>`);
   }
 
   /** The image: what was drawn, on `background` (none: transparent). */

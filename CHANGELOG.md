@@ -48,6 +48,21 @@ All notable changes to anytrellis. The format follows
   (`stat="proportion"`, `"percent"` or `"count"`; `complementary=True` for survival).
 - Both come from the database with `load="pages"`: the bars as a grouped query, the ECDF
   counted in 1,024 bins.
+- **Names at the ends of lines**: `line(color="country", label="end")` writes each
+  series' name at the end of its line, in its colour, in place of the legend: once in the
+  plot, in the panel where the line ends rightmost, moved apart where lines end close
+  together (a name too far from its line is left out until you zoom in), at the last
+  point in view as you zoom. Hovering a name shows its line in every panel; a click
+  selects it, as its legend entry would. The x axis leaves room for the names.
+- **Text labels that keep apart**: `text(..., repel=True)` places each label at the first
+  spot around its point (right, left, above, below, the corners, then farther out with a
+  line back) where it covers no other label nor a point, inside the panel; one with no
+  room is left out until zooming in makes room.
+- **`annotate()`**: a note at a data position (a number, a time, a category), in one
+  panel, several or every one: `t.annotate("Heat wave", x="2015-06-27", y=32,
+  panel="sun", dx=30, dy=-20)`, with a line back to the position when moved. With x
+  alone it sits at the panel's top, with y alone at its left. Notes and names have a
+  halo of the panel's colour, and saved images draw them alike.
 - **Shape, size and dash from columns**: `points(shape="species")` gives each category a
   shape (circle, square, triangle, diamond, plus, cross, triangle down), `points(size="pop")`
   sizes points by a number column, by area (`size_range=(2, 14)`, the largest drawn

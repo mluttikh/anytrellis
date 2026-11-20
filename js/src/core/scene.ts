@@ -32,6 +32,8 @@ export interface LayerData {
   radii: Float32Array | null;
   /** A dashed line: its patterns (line widths) and each segment's (null: the first). */
   dash: { patterns: number[][]; codes: Uint8Array | null } | null;
+  /** A line labelled at its ends: each instance's series. */
+  endSeries: Uint16Array | null;
 }
 
 /** A text layer: its labels decoded, at points (axis units, relative to the origins). */
@@ -73,6 +75,7 @@ export function bufferIds(spec: TrellisSpec): string[] {
     if (l.marker?.shapes) ids.push(l.marker.shapes.id);
     if (l.marker?.sizes) ids.push(l.marker.sizes.id);
     if (l.dash?.codes) ids.push(l.dash.codes.id);
+    if (l.end_labels) ids.push(l.end_labels.series.id);
   }
   return ids;
 }
@@ -177,6 +180,7 @@ export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Sce
       kind,
       halfWidth,
       radii,
+      endSeries: l.end_labels ? (view(source, l.end_labels.series) as Uint16Array) : null,
       dash: l.dash ? { patterns: l.dash.patterns, codes: l.dash.codes ? (view(source, l.dash.codes) as Uint8Array) : null } : null,
     });
   });

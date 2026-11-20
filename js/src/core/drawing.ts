@@ -7,9 +7,10 @@
 
 import { ANGLE_MAX, type Layout, type PanelBox, type Rect, STRIP_PAD, type Strip, type XLabels, wrapLabel } from "./layout";
 import { type Look, lookOf } from "./look";
+import { type EndLabel, repel } from "./labels";
 import type { PanelMap, TextData } from "./scene";
 import { type Tick, formatValue, minorTicks, ticks, yTickCount } from "./ticks";
-import type { RuleLayerSpec, TrellisSpec } from "./types";
+import type { NoteSpec, RuleLayerSpec, TrellisSpec } from "./types";
 
 export interface Theme {
   bg: string;
@@ -158,6 +159,8 @@ export interface FrontState {
   brushes: Rect[];
   /** Text layers, drawn over the marks. */
   texts: TextData[];
+  /** Labels at the ends of lines (labels.ts: endLabels). */
+  ends: EndLabel[];
 }
 
 /** A ring around a hovered mark: its centre (px), its radius, in its colour. */
@@ -242,6 +245,9 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.clip();
     for (const l of spec.layers) if (l.type === "rule") drawRule(ctx, l, v);
     for (const t of state.texts) drawText(ctx, t, v, theme);
+    const halo = look.panel_fill ? theme.panel : theme.bg;
+    for (const e of state.ends) if (e.panel === v.panel) drawEndLabel(ctx, e, halo);
+    for (const n of spec.notes ?? []) if (!n.panels || n.panels.includes(v.panel)) drawNote(ctx, n, v, theme, halo);
     if (state.crossX !== null && spec.panels[v.panel].xg === state.crossGroup) {
       const x = Math.round(v.map.ox + state.crossX * v.map.sx) + 0.5;
       ctx.strokeStyle = theme.axis;
@@ -440,6 +446,59 @@ export function crowdedRight(layout: Layout, box: PanelBox): boolean {
   return layout.panels.some((b) => b !== box && b.showX && Math.abs(b.rect.y + b.rect.h - (r.y + r.h)) < 1 && b.rect.x > r.x && b.rect.x - (r.x + r.w) <= 8);
 }
 
+/** Text with a halo of the panel's colour round it, so it reads over the marks. */
+function haloText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, halo: string): void {
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = halo;
+  ctx.strokeText(text, x, y);
+  ctx.restore();
+  ctx.fillText(text, x, y);
+}
+
+function drawEndLabel(ctx: CanvasRenderingContext2D, e: EndLabel, halo: string): void {
+  ctx.save();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = e.color;
+  haloText(ctx, e.text, e.x, e.y, halo);
+  ctx.restore();
+}
+
+/** A note (`annotate()`): its text at a data position (x alone: at the panel's top; y
+ * alone: at its left), moved by dx, dy, with a line back to the position when moved. */
+function drawNote(ctx: CanvasRenderingContext2D, n: NoteSpec, v: PanelView, theme: Theme, halo: string): void {
+  const r = v.rect;
+  const size = n.size ?? theme.fontSize;
+  const lines = n.text.split("\n");
+  const lh = size * 1.2;
+  const px = n.x !== null ? v.map.ox + n.x * v.map.sx : r.x + 4;
+  const py = n.y !== null ? v.map.oy + n.y * v.map.sy : r.y + 4 + (lh * lines.length) / 2;
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+  const tx = px + n.dx;
+  const ty = py + n.dy;
+  ctx.save();
+  if (n.x !== null && n.y !== null && (n.dx || n.dy)) {
+    ctx.strokeStyle = theme.muted;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.fillStyle = theme.muted;
+    ctx.beginPath();
+    ctx.arc(px, py, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.font = `${size}px ${theme.font}`;
+  ctx.textAlign = n.align;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = n.color ? `rgba(${n.color[0]},${n.color[1]},${n.color[2]},${n.color[3] / 255})` : theme.text;
+  lines.forEach((line, k) => haloText(ctx, line, tx, ty + (k - (lines.length - 1) / 2) * lh, halo));
+  ctx.restore();
+}
+
 function drawText(ctx: CanvasRenderingContext2D, t: TextData, v: PanelView, theme: Theme): void {
   const l = t.spec;
   const r = v.rect;
@@ -451,6 +510,36 @@ function drawText(ctx: CanvasRenderingContext2D, t: TextData, v: PanelView, them
   ctx.globalAlpha = l.opacity * (l.context ? 0.35 : 1);
   const solid = l.color ? `rgba(${l.color[0]},${l.color[1]},${l.color[2]},${l.color[3] / 255})` : theme.text;
   ctx.fillStyle = solid;
+  const colorOf = (i: number): string => {
+    if (!t.colors) return solid;
+    const k = i * 4;
+    return `rgba(${t.colors[k]},${t.colors[k + 1]},${t.colors[k + 2]},${t.colors[k + 3] / 255})`;
+  };
+  if (l.repel) {
+    // each label where it covers no other, nor a point labelled; else left out
+    const points: { index: number; x: number; y: number; w: number }[] = [];
+    for (let i = t.starts[v.panel]; i < t.starts[v.panel + 1]; i++) {
+      const x = v.map.ox + c[i * 2] * v.map.sx;
+      const y = v.map.oy + c[i * 2 + 1] * v.map.sy;
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) points.push({ index: i, x, y, w: ctx.measureText(t.labels[i]).width });
+    }
+    ctx.textAlign = "left";
+    for (const p of repel(points, l.size, r, Math.max(4, Math.abs(l.dx), Math.abs(l.dy)))) {
+      ctx.fillStyle = colorOf(p.index);
+      if (p.leader) {
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.globalAlpha = l.opacity * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(p.leader.x, p.leader.y);
+        ctx.lineTo(Math.min(Math.max(p.leader.x, p.x), p.x + ctx.measureText(t.labels[p.index]).width), p.y);
+        ctx.stroke();
+        ctx.globalAlpha = l.opacity * (l.context ? 0.35 : 1);
+      }
+      ctx.fillText(t.labels[p.index], p.x, p.y);
+    }
+    ctx.restore();
+    return;
+  }
   const margin = 200;
   for (let i = t.starts[v.panel]; i < t.starts[v.panel + 1]; i++) {
     const x = v.map.ox + c[i * 2] * v.map.sx + l.dx;

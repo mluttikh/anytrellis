@@ -50,15 +50,16 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 
 | method | draws |
 |---|---|
-| `line(x, y, color, group, step=None\|"post"\|"pre"\|"mid", dash)` | a line per group (and colour, and dash), or steps |
+| `line(x, y, color, group, step=None\|"post"\|"pre"\|"mid", dash, label="end")` | a line per group (and colour, and dash), or steps; `label="end"` names each at its end |
 | `points(x, y, color, shape, size)` | a point per row; `shape` a category column, `size` a number column or px |
 | `bars(x, y, color, position="stack"\|"dodge"\|"identity")` | a bar per row, from zero |
 | `bars(x, stat="count")` / `bars(x, y, stat="sum"\|"mean"\|"median")` | a bar per position (and colour): its rows counted, or its values summarised |
 | `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |
 | `band(x, ymin, ymax, color, group)` | a band between two lines (a range, an interval) |
 | `rect(x, y, color, width=1, height=1)` / `rect(x, y, x2=, y2=)` | a cell per row (a heatmap), or a box between two corners |
-| `text(x, y, text, color, size, align, dx, dy)` | a label per row |
+| `text(x, y, text, color, size, align, dx, dy, repel=False)` | a label per row; `repel=True` keeps them apart |
 | `rule(x=..., y=...)` | reference lines across every panel |
+| `annotate(text, x=, y=, panel=, dx=, dy=)` | a note at a data position, in one panel or every one |
 | `hist(x, color, bins=30 \| binwidth=, stat="count"\|"percent"\|"density")` | a histogram per panel, stacked by colour |
 | `box(x, y, color, whis=1.5)` | box plots per position (and colour, side by side); sideways when y is the category |
 | `violin(x, y, color, scale="area"\|"count"\|"width", inner="quartiles")` | violins per position, placed like boxes |
@@ -71,7 +72,10 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 A number column as `color` gets a continuous scale (and a gradient legend); text gets a
 palette. On a category axis a rect is one band wide by default. A text label's `dx`/`dy`
 are pixels, so labels keep their distance while zooming, and a label that would run past
-the panel's edge goes to the other side of its point. `tooltip=[...]` adds columns to
+the panel's edge goes to the other side of its point; with `repel=True` each label takes
+the first spot around its point where it covers no other, and one with no room waits for
+a zoom. `line(label="end")` writes each series' name at its line's end in place of a
+legend. `tooltip=[...]` adds columns to
 what hovering shows (a box: to its outliers'); every mark but `text` and `rule` can be
 selected.
 

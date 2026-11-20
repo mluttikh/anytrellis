@@ -130,6 +130,10 @@ export interface MarkLayerSpec {
   /** A dashed line: dash and gap lengths in line widths, a pattern each, and each segment's
    * pattern (uint8; null: the first). Absent: solid. */
   dash?: { patterns: number[][]; codes: BufferRef | null } | null;
+  /** Labels at the ends of the line's series (`label="end"`): each series' name, each
+   * instance's series (uint16), and the colour legend the series are levels of (null:
+   * none). */
+  end_labels?: { names: string[]; series: BufferRef; legend: number | null } | null;
 }
 
 export interface RuleLayerSpec {
@@ -167,6 +171,23 @@ export interface TextLayerSpec {
   context: boolean;
   /** As a mark layer's: the panels whose labels it has (absent: every panel's). */
   panels?: number[] | null;
+  /** Labels placed so none covers another (labels.ts: repel); those with no room left out. */
+  repel?: boolean;
+}
+
+/** A note (`annotate()`): text at a data position (axis units, relative to the origins;
+ * null: x at the panel's left, y at its top), in some panels (null: every one), moved by
+ * dx, dy px (a line goes back to the position). */
+export interface NoteSpec {
+  text: string;
+  x: number | null;
+  y: number | null;
+  panels: number[] | null;
+  dx: number;
+  dy: number;
+  align: "left" | "center" | "right";
+  color: [number, number, number, number] | null;
+  size: number | null;
 }
 
 export type LayerSpec = MarkLayerSpec | RuleLayerSpec | TextLayerSpec;
@@ -194,6 +215,8 @@ export interface LegendSpec {
   dashes?: number[][];
   line_width?: number;
   sizes?: number[];
+  /** Its levels are labelled at the ends of the lines instead (not shown). */
+  direct?: boolean;
 }
 
 export interface TrellisSpec {
@@ -211,6 +234,8 @@ export interface TrellisSpec {
   y: AxisSpec;
   layers: LayerSpec[];
   legends: LegendSpec[];
+  /** Notes at data positions (`annotate()`). */
+  notes?: NoteSpec[];
   height: number | null;
   panel_height: number | null;
   /** Each panel's height as a multiple of its width (unless height or panel_height). */

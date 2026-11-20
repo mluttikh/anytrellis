@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import itertools
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Any
@@ -955,6 +956,9 @@ class _Marks:
     dash: list[list[float]] | None = None
     """A dashed line's patterns (line widths), and each segment's (None: the first)."""
     dash_codes: np.ndarray | None = None
+    ends: dict[str, Any] | None = None
+    """A line labelled at its ends: its series' names and colour legend (labels.ts)."""
+    end_series: np.ndarray | None = None
 
 
 @dataclass
@@ -1016,6 +1020,8 @@ def _scene(spec: dict[str, Any], buffers: Buffers) -> tuple[list[_Marks], list[_
             values=opt(color.get("values")),
             dash=None if not dash else dash["patterns"],
             dash_codes=None if not dash else opt(dash.get("codes")),
+            ends=lr.get("end_labels"),
+            end_series=opt((lr.get("end_labels") or {}).get("series")),
         ))  # fmt: skip
     return marks, texts
 
@@ -1342,6 +1348,134 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
         svg.close()
 
 
+# ---- text by the data (labels.ts) ------------------------------------------------------------
+
+END_GAP = 5.0
+"""Room between a line's end and its name (px)."""
+
+
+@dataclass
+class EndLabel:
+    """A line's series name at its last point in view (labels.ts: EndLabel)."""
+
+    panel: int
+    x: float
+    y: float
+    text: str
+    color: str
+    w: float
+
+
+def end_labels(marks: list[_Marks], views: list[_View], measure: Callable[[str], float],
+               fs: float) -> list[EndLabel]:  # fmt: skip
+    """The names at the ends of the lines labelled so: each series once, in the panel where
+    its line ends rightmost (then the top one), moved apart up or down in each panel; those
+    too far from their lines left out."""
+    out: list[EndLabel] = []
+    for layer in marks:
+        if layer.ends is None or layer.end_series is None:
+            continue
+        best: dict[int, tuple[_View, float, float, int]] = {}
+        for v in views:
+            r = v.rect
+            lo, hi = int(layer.starts[v.panel]), int(layer.starts[v.panel + 1])
+            if hi <= lo:
+                continue
+            c = layer.coords[lo:hi].astype(np.float64)
+            px = v.ox + c[:, [0, 2]] * v.sx
+            py = v.oy + c[:, [1, 3]] * v.sy
+            ok = (px >= r.x - 0.5) & (px <= r.x + r.w + 0.5) & np.isfinite(py)
+            series = layer.end_series[lo:hi]
+            here: dict[int, tuple[float, float, int]] = {}
+            for j, k in zip(*np.nonzero(ok), strict=True):
+                s, x = int(series[j]), float(px[j, k])
+                if s not in here or x > here[s][0]:
+                    here[s] = (x, float(py[j, k]), lo + int(j))
+            for s, (x, y, i) in here.items():
+                had = best.get(s)
+                if had is None or r.x > had[0].rect.x + 0.5 or \
+                        (abs(r.x - had[0].rect.x) <= 0.5 and r.y < had[0].rect.y):  # fmt: skip
+                    best[s] = (v, x, y, i)
+        for s, (v, x, y, i) in best.items():
+            r = v.rect
+            text = layer.ends["names"][s] if s < len(layer.ends["names"]) else ""
+            w = measure(text)
+            ay = min(r.y + r.h, max(r.y, y))
+            lx = max(r.x + 2, min(x + END_GAP, r.x + r.w - 2 - w))
+            out.append(EndLabel(v.panel, lx, ay, text, _hex(layer.colors[i]), w))
+    kept: list[EndLabel] = []
+    for v in views:
+        mine = [e for e in out if e.panel == v.panel]
+        r = v.rect
+        kept += [mine[i] for i in spread(mine, r.y + fs / 2, r.y + r.h - fs / 2, fs + 2, 2 * fs)]
+    return kept
+
+
+def spread(ls: Sequence[Any], lo: float, hi: float, gap: float, far: float) -> list[int]:
+    """Labels' ``y`` moved apart to at least ``gap`` inside ``lo``..``hi``; one that would
+    move more than ``far`` left out. The indices kept, by y (labels.ts: spread)."""
+    order = sorted(range(len(ls)), key=lambda i: ls[i].y)
+    want = [lb.y for lb in ls]
+    kept: list[int] = []
+    last = -math.inf
+    for i in order:
+        y = max(want[i], lo, last + gap)
+        if y - want[i] > far or y > hi + far:
+            continue
+        ls[i].y = y
+        last = y
+        kept.append(i)
+    nxt = math.inf
+    for i in reversed(kept):
+        ls[i].y = min(ls[i].y, hi, nxt - gap)
+        nxt = ls[i].y
+    return kept
+
+
+_DIRS = [(1, 0), (-1, 0), (0, -1), (0, 1), (1, -1), (-1, -1), (1, 1), (-1, 1)]
+_SPOTS = [(ring, d) for ring in (0, 1, 2) for d in _DIRS]
+"""The spots tried around a point: ring k at d + 1.2 k label heights."""
+
+
+def repel(points: list[tuple[int, float, float, float]], h: float, r: Rect,
+          d: float) -> list[tuple[int, float, float, tuple[float, float] | None]]:  # fmt: skip
+    """Each label (index, x, y, width) at the first spot around its point where it covers
+    no label placed before it nor a point, inside the panel; none: left out. Returns
+    (index, the text's left, its middle, the point when a leader line goes back)
+    (labels.ts: repel)."""
+    boxes: dict[tuple[int, int], list[tuple[float, float, float, float]]] = {}
+    size = 32.0
+
+    def keys(x: float, y: float, w: float, hh: float) -> list[tuple[int, int]]:
+        return [(i, j) for i in range(math.floor(x / size), math.floor((x + w) / size) + 1)
+                for j in range(math.floor(y / size), math.floor((y + hh) / size) + 1)]  # fmt: skip
+
+    def add(x: float, y: float, w: float, hh: float) -> None:
+        for k in keys(x, y, w, hh):
+            boxes.setdefault(k, []).append((x, y, w, hh))
+
+    def hits(x: float, y: float, w: float, hh: float) -> bool:
+        return any(x < bx + bw and bx < x + w and y < by + bh and by < y + hh
+                   for k in keys(x, y, w, hh) for bx, by, bw, bh in boxes.get(k, ()))  # fmt: skip
+
+    for _, x, y, _ in points:
+        add(x - 2, y - 2, 4, 4)
+    out: list[tuple[int, float, float, tuple[float, float] | None]] = []
+    for i, x, y, w in points:
+        for ring, (dx, dy) in _SPOTS:
+            far = d + ring * 1.2 * h
+            left = x + far if dx > 0 else x - far - w if dx < 0 else x - w / 2
+            top = y + far if dy > 0 else y - far - h if dy < 0 else y - h / 2
+            if left < r.x or left + w > r.x + r.w or top < r.y or top + h > r.y + r.h:
+                continue
+            if hits(left, top, w, h):
+                continue
+            add(left, top, w, h)
+            out.append((i, left, top + h / 2, (x, y) if ring > 0 else None))
+            break
+    return out
+
+
 def _draw_rule(svg: _Svg, lr: dict[str, Any], v: _View) -> None:
     r = v.rect
     d = []
@@ -1374,6 +1508,26 @@ def _draw_text(svg: _Svg, t: _Texts, v: _View, th: dict[str, str]) -> None:
     flip = {"left": "end", "right": "start"}
     opacity = lr["opacity"] * (0.35 if lr.get("context") else 1)
     solid = (_hex(lr["color"]), lr["color"][3] / 255) if lr.get("color") else (th["text"], 1.0)
+    if lr.get("repel"):  # each label where it covers no other, nor a point; else left out
+        points = []
+        for i in range(int(t.starts[v.panel]), int(t.starts[v.panel + 1])):
+            x = v.ox + float(t.coords[i, 0]) * v.sx
+            y = v.oy + float(t.coords[i, 1]) * v.sy
+            if r.x <= x <= r.x + r.w and r.y <= y <= r.y + r.h:
+                points.append((i, x, y, text_width(t.labels[i], size)))
+        far = max(4.0, abs(lr["dx"]), abs(lr["dy"]))
+        for i, x, y, leader in repel(points, size, r, far):
+            fill, a = solid
+            if t.colors is not None:
+                fill, a = _hex(t.colors[i]), t.colors[i][3] / 255
+            if leader is not None:
+                to = min(max(leader[0], x), x + text_width(t.labels[i], size))
+                faint = _alpha("stroke-opacity", a * opacity * 0.5)
+                svg.add(f'<path d="M{_n(leader[0])} {_n(leader[1])}L{_n(to)} {_n(y)}" '
+                        f'fill="none" stroke="{fill}"{faint}/>')  # fmt: skip
+            svg.text(x, y, t.labels[i], fill, size=size,
+                     extra=_alpha("fill-opacity", a * opacity))  # fmt: skip
+        return
     margin = 200
     for i in range(int(t.starts[v.panel]), int(t.starts[v.panel + 1])):
         x = v.ox + float(t.coords[i, 0]) * v.sx + lr["dx"]
@@ -1396,19 +1550,61 @@ def _draw_text(svg: _Svg, t: _Texts, v: _View, th: dict[str, str]) -> None:
         svg.text(x, y, label, fill, size=size, anchor=anchor[align], extra=extra)
 
 
+def _halo(color: str) -> str:
+    """A text's halo, of the panel's colour, so it reads over the marks."""
+    return (f' stroke="{color}" stroke-width="3" stroke-linejoin="round" '
+            'paint-order="stroke"')  # fmt: skip
+
+
+def _draw_note(svg: _Svg, n: dict[str, Any], v: _View, th: dict[str, str], fs: float,
+               halo: str) -> None:  # fmt: skip
+    """A note (``annotate()``), as drawing.ts draws it."""
+    r = v.rect
+    size = n["size"] if n.get("size") is not None else fs
+    lines = n["text"].split("\n")
+    lh = size * 1.2
+    px = v.ox + n["x"] * v.sx if n["x"] is not None else r.x + 4
+    py = v.oy + n["y"] * v.sy if n["y"] is not None else r.y + 4 + lh * len(lines) / 2
+    if not (math.isfinite(px) and math.isfinite(py)):
+        return
+    tx, ty = px + n["dx"], py + n["dy"]
+    if n["x"] is not None and n["y"] is not None and (n["dx"] or n["dy"]):
+        svg.add(f'<path d="M{_n(px)} {_n(py)}L{_n(tx)} {_n(ty)}" fill="none" '
+                f'stroke="{th["muted"]}"/>')  # fmt: skip
+        svg.add(f'<circle cx="{_n(px)}" cy="{_n(py)}" r="2" fill="{th["muted"]}"/>')
+    color = n.get("color")
+    fill = th["text"] if color is None else _hex(color)
+    extra = _halo(halo) + ("" if color is None else _alpha("fill-opacity", color[3] / 255))
+    anchor = {"left": "start", "center": "middle", "right": "end"}[n["align"]]
+    for k, line in enumerate(lines):
+        svg.text(tx, ty + (k - (len(lines) - 1) / 2) * lh, line, fill, size=size,
+                 anchor=anchor, extra=extra)  # fmt: skip
+
+
 def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View],
-                th: dict[str, str], texts: list[_Texts], brushes: list[Rect]) -> None:  # fmt: skip
+                th: dict[str, str], texts: list[_Texts], brushes: list[Rect],
+                marks: list[_Marks] | None = None) -> None:  # fmt: skip
     fs = lay.font_size
     look = look_of(spec)
     rules = [lr for lr in spec["layers"] if lr["type"] == "rule"]
+    notes = spec.get("notes") or []
+    ends = end_labels(marks or [], views, lambda s: text_width(s, fs), fs)
+    halo = th["panel"] if look["panel_fill"] else th["bg"]
     for v in views:
-        if not rules and not any(t.starts[v.panel + 1] > t.starts[v.panel] for t in texts):
+        here = [n for n in notes if n["panels"] is None or v.panel in n["panels"]]
+        mine = [e for e in ends if e.panel == v.panel]
+        if not rules and not here and not mine and \
+                not any(t.starts[v.panel + 1] > t.starts[v.panel] for t in texts):  # fmt: skip
             continue
         svg.open(svg.clip(v.rect))
         for lr in rules:
             _draw_rule(svg, lr, v)
         for t in texts:
             _draw_text(svg, t, v, th)
+        for e in mine:
+            svg.text(e.x, e.y, e.text, e.color, size=fs, extra=_halo(halo))
+        for n in here:
+            _draw_note(svg, n, v, th, fs, halo)
         svg.close()
 
     if look["frame"]:  # just outside the panels (where axis lines go)
@@ -1681,6 +1877,8 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
     size = look_of(spec)["font_size"]
     groups = []
     for index, lg in enumerate(spec["legends"]):
+        if lg.get("direct"):  # its levels name the lines at their ends instead
+            continue
         entries = [_Entry("title", lg["title"], size=size)]
         if lg["kind"] != "number":  # an entry each (a stepped scale's ranges; shapes, sizes)
             labels = lg["labels"]
@@ -2026,7 +2224,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         _draw_marks(svg, layer, coords, colors, views, base_x, base_y)
 
     rects = [b for v in views if (b := _brush_rect(brush, v)) is not None]
-    _draw_front(svg, spec, lay, views, th, texts, rects)
+    _draw_front(svg, spec, lay, views, th, texts, rects, marks)
     if inset_legend:
         _draw_legend(svg, placed, 0, th)
     svg.close()
