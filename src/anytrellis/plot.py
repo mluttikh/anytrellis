@@ -106,6 +106,7 @@ if TYPE_CHECKING:
 SPEC_VERSION = 1
 RENDERERS = ("auto", "webgpu", "webgl2", "canvas2d")
 LEGENDS = ("auto", "top", "bottom", "right", "none")
+BAR_STATS = ("identity", "count", "sum", "mean", "median")
 STRIPS = ("nested", "joined")
 EMPTY = ("draw", "blank")
 MARGINS = (False, True, "row", "col")
@@ -498,10 +499,11 @@ class Trellis:
         self,
         data: Any = None,
         *,
-        x: str,
-        y: str,
+        x: str | None = None,
+        y: str | None = None,
+        stat: str = "identity",
         color: str | None = None,
-        position: Position = "stack",
+        position: Position | None = None,
         width: float = 0.8,
         opacity: float = 1.0,
         facet: FacetMode = "auto",
@@ -509,36 +511,71 @@ class Trellis:
         name: str | None = None,
     ) -> Self:
         """Bars from 0 to y at each x (categories, numbers or times); with a category y and
-        x not, horizontal bars from 0 to x at each y.
+        x not, horizontal bars from 0 to x at each y. Or bars that summarise the rows at
+        each position (``stat``): how many there are, or their values' sum, mean or median.
 
         ```python
         Trellis(barley, wrap="site").bars(x="variety", y="yield", color="year", position="dodge")
         Trellis(barley, wrap="site").bars(x="yield", y="variety", color="year")  # horizontal
         Trellis(barley, wrap="site").bars(x="variety", y="yield", color="year", position="fill")
+        Trellis(cars, wrap="origin").bars(x="cylinders", stat="count")  # rows at each x
+        Trellis(cars).bars(x="origin", y="mpg", stat="mean", color="cylinders")
         ```
 
         Args:
             data: The layer's table (default: the plot's).
             x: The x column (horizontal bars: their lengths).
             y: The bar heights (horizontal bars: a category column, their positions).
-            color: A colour column or one colour.
-            position: With a category colour: ``"stack"`` (default), ``"fill"`` (stacked as
-                shares of each stack, every stack as tall as 1: the composition, whatever
-                the totals), ``"dodge"`` (side by side) or ``"identity"`` (overlapping).
+            stat: ``"identity"`` (default: each row a bar, its height y), or a summary of
+                the rows at each position (and colour): ``"count"`` (give x, or y for
+                horizontal bars: how many rows), ``"sum"``, ``"mean"`` or ``"median"`` (of
+                y, or of x along a category y). ``load="pages"``: the database's.
+            color: A colour column or one colour (a summary: a category column, or one
+                colour).
+            position: With a category colour: ``"stack"`` (the default, but for a mean or
+                a median), ``"fill"`` (stacked as shares of each stack, every stack as tall
+                as 1: the composition, whatever the totals), ``"dodge"`` (side by side: a
+                mean's or a median's default) or ``"identity"`` (overlapping).
             width: Bar width as a fraction of the step between positions.
             opacity: 0 to 1.
             facet: As for ``line``.
-            tooltip: Columns shown on hover, besides x and y.
+            tooltip: Columns shown on hover, besides x and y (not with a summary: its bars
+                show their position, value and count).
             name: The layer's name.
         """
+        if stat not in BAR_STATS:
+            raise ValueError(f"stat must be one of {BAR_STATS}, got {stat!r}")
+        averaged = stat in ("mean", "median")
+        if position is None:
+            position = "dodge" if averaged else "stack"
         if position not in ("stack", "fill", "dodge", "identity"):
             raise ValueError("position must be 'stack', 'fill', 'dodge' or 'identity', got "
                              f"{position!r}")  # fmt: skip
+        if averaged and position in ("stack", "fill"):
+            raise ValueError(f'bars(stat="{stat}"): {stat}s don\'t add up when stacked; '
+                             'use position="dodge" (the default) or "identity"')  # fmt: skip
         if not 0 < width <= 1:
             raise ValueError("width must be in (0, 1]")
-        return self._add(Layer("bars", name or self._name("bars"), data, x, y, color, (),
+        if stat == "identity":
+            if x is None or y is None:
+                raise ValueError('bars() needs x and y; to count the rows at each x, '
+                                 'bars(x=..., stat="count")')  # fmt: skip
+            return self._add(Layer("bars", name or self._name("bars"), data, x, y, color, (),
+                                   facet, opacity=opacity, position=position,
+                                   bar_width=width, tooltip=list(tooltip)))  # fmt: skip
+        if stat == "count" and (x is None) == (y is None):
+            raise ValueError('bars(stat="count") counts the rows at each position: give x '
+                             "(or y, for horizontal bars), not both")  # fmt: skip
+        if stat != "count" and (x is None or y is None):
+            raise ValueError(f'bars(stat="{stat}") needs x and y: the positions and the '
+                             "values")  # fmt: skip
+        if tooltip:
+            raise ValueError(f'bars(stat="{stat}"): its bars show their position, value and '
+                             "count; tooltip= is for bars of rows")  # fmt: skip
+        args = {"stat": stat, "width": width}
+        return self._add(Layer("barstat", name or self._name("bars"), data, x, y, color, (),
                                facet, opacity=opacity, position=position, bar_width=width,
-                               tooltip=list(tooltip)))  # fmt: skip
+                               stat_args=args))  # fmt: skip
 
     def area(
         self,
@@ -808,6 +845,50 @@ class Trellis:
         args = {"bins": bins, "binwidth": binwidth, "stat": stat, "width": width}
         return self._add(Layer("hist", name or self._name("hist"), data, x, None, color, (),
                                facet, opacity=opacity, position=position,
+                               stat_args=args))  # fmt: skip
+
+    def ecdf(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        color: str | None = None,
+        stat: str = "proportion",
+        complementary: bool = False,
+        width: float = 1.5,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        name: str | None = None,
+    ) -> Self:
+        """The empirical cumulative distribution in each panel (and of each colour): a step
+        line rising at each value, to the share of the rows at or below it. Distributions
+        compare across panels without choosing bins, and medians and tails read off the
+        y axis.
+
+        ```python
+        Trellis(penguins, wrap="island").ecdf(x="body_mass_g", color="species")
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The column (numbers or times).
+            color: A category column (a line each) or one colour.
+            stat: ``"proportion"`` (0 to 1), ``"percent"`` or ``"count"`` (of rows).
+            complementary: The share above each value instead (1 − the ECDF): survival.
+            width: Line width in CSS pixels.
+            opacity: 0 to 1.
+            facet: As for ``line``; ``"exclude"``: the other panels' rows, in grey.
+            name: The layer's name.
+
+        A group with more than 1,000 distinct values steps at 1,000 of them, evenly spaced
+        by rank. ``load="pages"``: the database counts the rows in 1,024 bins over the
+        values, and the steps are at the bins' ends.
+        """
+        if stat not in ("proportion", "percent", "count"):
+            raise ValueError(f"stat must be 'proportion', 'percent' or 'count', got {stat!r}")
+        args = {"stat": stat, "complementary": bool(complementary)}
+        return self._add(Layer("ecdf", name or self._name("ecdf"), data, x, None, color, (),
+                               facet, width=width, opacity=opacity,
                                stat_args=args))  # fmt: skip
 
     def box(
@@ -2501,7 +2582,7 @@ class Trellis:
         whole = self._data
         assert whole is not None
         _check_log(layer, scales)
-        found = queried_parts(layer, whole, grid, _input_scales(layer, scales))
+        found = queried_parts(layer, whole, grid, _input_scales(layer, scales, whole))
         if found is None:
             names = tuple(n for n in dict.fromkeys([*grid.columns, *_layer_columns(layer)])
                           if n is not None and n in whole)  # fmt: skip
@@ -2737,8 +2818,12 @@ class Trellis:
                     self._made[id(layer)] = (table, geom, made_for)
             # a mark drawn from zero on a sqrt or symlog axis: stacked or counted in values,
             # then transformed (a summary's parts: a histogram's or a density's, on y)
-            value = _value_axis(d.user, table) if d.part is None else \
-                "y" if d.user.mark in FROM_ZERO else None  # fmt: skip
+            if d.part is None:
+                value = _value_axis(d.user, table)
+            elif d.user.mark == "barstat":  # its bars' values: along y, or x when horizontal
+                value = _value_axis(layer, table)
+            else:
+                value = "y" if d.user.mark in FROM_ZERO else None
             if value is not None and scales.get(value) in ("sqrt", "symlog"):
                 geom = _transformed(geom, value, scales[value])
             extents["x"].add(geom.panel, geom.x0)
@@ -3220,7 +3305,7 @@ class Trellis:
 
 # ---- helpers ------------------------------------------------------------------------------
 
-FROM_ZERO = ("bars", "area", "hist", "density")
+FROM_ZERO = ("bars", "area", "hist", "density", "barstat", "ecdf")
 """Marks drawn from zero up, which a log y axis has no place for; on a sqrt or symlog
 one their heights are stacked or counted as values, then transformed (``_transformed``)."""
 
@@ -3242,10 +3327,11 @@ def _scale(value: str | Sequence[str]) -> tuple[str, bool]:
 
 
 def _check_log(layer: Layer, scales: Mapping[str, str]) -> None:
-    """A layer drawn from zero has no log y axis."""
+    """A layer drawn from zero has no log y axis (nor does an ECDF, from 0 to 1)."""
     if scales.get("y") == "log" and layer.mark in FROM_ZERO:
+        called = "bars" if layer.mark == "barstat" else layer.mark
         raise ValueError(
-            f"{layer.mark}() draws from zero, which a log y axis has no place for; use "
+            f"{called}() draws from zero, which a log y axis has no place for; use "
             "points or lines, or a linear, sqrt or symlog y"
         )
 
@@ -3258,7 +3344,24 @@ def _value_axis(layer: Layer, table: Table) -> str | None:
     if layer.mark == "bars" and layer.y is not None and layer.y in table and \
             table.kind(layer.y) == "category":  # fmt: skip
         return "x"
+    if layer.mark == "barstat" and _summed_along_x(layer, table):
+        return "x"
     return "y"
+
+
+def _summed_along_x(layer: Layer, table: Table) -> bool:
+    """Summarising bars along y (horizontal): counted at each y, or of x's values at each
+    category of y."""
+    if layer.stat_args.get("stat") == "count":
+        return layer.x is None
+    return (
+        layer.y is not None
+        and layer.y in table
+        and table.kind(layer.y) == "category"
+        and layer.x is not None
+        and layer.x in table
+        and table.kind(layer.x) != "category"
+    )
 
 
 def _transformed(geom: Geometry, axis: str, scale: str) -> Geometry:
@@ -3300,10 +3403,10 @@ def _scaled(layer: Layer, table: Table, scales: Mapping[str, str]) -> Table:
     return table.scaled(names) if names else table
 
 
-def _input_scales(layer: Layer, scales: Mapping[str, str]) -> dict[str, str]:
+def _input_scales(layer: Layer, scales: Mapping[str, str], table: Table) -> dict[str, str]:
     """The scales a summary's input is transformed by: not a histogram's or a density's
-    y, whose counts are transformed once counted."""
-    value = "y" if layer.mark in FROM_ZERO else None
+    y (a summarising bar's values), whose counts are transformed once counted."""
+    value = _value_axis(layer, table)
     return {axis: s for axis, s in scales.items() if axis != value or s == "log"}
 
 

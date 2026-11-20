@@ -21,9 +21,11 @@ from anytrellis.data import Column, Table
 
 Mark = Literal[
     "line", "points", "bars", "area", "band", "rect", "text", "rule", "hist", "box", "density",
-    "smooth", "violin", "errorbar", "horizon",
+    "smooth", "violin", "errorbar", "horizon", "barstat", "ecdf",
 ]  # fmt: skip
-SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar", "horizon")
+SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar", "horizon", "barstat",
+             "ecdf")  # fmt: skip
+"""Marks drawn from a summary of their rows ("barstat": ``bars(stat=...)``)."""
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "fill", "dodge", "identity"]
 STACKED = ("stack", "fill")

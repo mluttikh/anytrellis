@@ -16,6 +16,8 @@ redo well-known figures of both.
 | `facet_grid(a ~ b, margins = TRUE)` | `Trellis(df, row="a", col="b", margins=True)` |
 | `scales = "free_y"` / `"free"` | `share_y=False` / `share_x=False, share_y=False` |
 | `geom_point()`, `geom_line()`, `geom_col()` | `.points()`, `.line()`, `.bars()` |
+| `geom_bar()`, `stat_summary(geom = "bar")` | `.bars(x=..., stat="count")`, `.bars(stat="mean")` |
+| `stat_ecdf()` | `.ecdf()` |
 | `geom_area()`, `geom_ribbon()`, `geom_tile()`, `geom_text()` | `.area()`, `.band()`, `.rect()`, `.text()` |
 | `geom_hline()`, `geom_vline()` | `.rule(y=...)`, `.rule(x=...)` |
 | `geom_histogram()`, `geom_boxplot()`, `geom_violin()`, `geom_density()` | `.hist()`, `.box()`, `.violin()`, `.density()` |
@@ -62,8 +64,9 @@ What differs:
 
 - **Columns by name**, not `aes()`: each mark takes `x=`, `y=` and `color=` as column
   names.
-- **No stats on plain marks.** `bars()` draws the heights you give it; `hist()` counts.
-  Summarise with your table library first, as for `geom_col()`.
+- **Stats by name.** `bars()` draws the heights you give it, as `geom_col()`; with
+  `stat="count"`, `"sum"`, `"mean"` or `"median"` it summarises the rows itself, as
+  `geom_bar()` and `stat_summary()`. `hist()` counts in bins.
 - **Two looks, no theme objects.** `theme="minimal"` (the default, close to
   `theme_minimal()`) or `theme="classic"` (close to `theme_grey()`); colours come from
   `palette=` and `color=`; the plot follows the notebook's light or dark theme.
@@ -82,7 +85,9 @@ seaborn's `relplot`, `displot`, `catplot`, `lmplot` and `FacetGrid` take `col=`,
 | `facet_kws={"sharey": False}` | `share_y=False` |
 | `relplot(kind="scatter")`, `relplot(kind="line")` | `.points()`, `.line()` |
 | `displot(kind="hist")`, `displot(kind="kde")` | `.hist()`, `.density()` |
-| `catplot(kind="box")`, `catplot(kind="bar")` | `.box()`, `.bars()` (of means you compute) |
+| `catplot(kind="box")`, `catplot(kind="bar")` | `.box()`, `.bars(stat="mean")` |
+| `countplot()` | `.bars(x=..., stat="count")` |
+| `ecdfplot()`, `displot(kind="ecdf")` | `.ecdf()` |
 | `catplot(kind="violin")` | `.violin()` |
 | `catplot(kind="point")`, `pointplot(errorbar="ci")` | `.errorbar()`, `.errorbar(extent="ci")` |
 | `lineplot(drawstyle="steps-post")` | `.line(step="post")` |
@@ -105,5 +110,5 @@ plot
 print(plot._embed_html())  # markdown-exec: hide
 ```
 
-`catplot(kind="bar")` computes means and confidence intervals itself; with anytrellis,
-compute the means with Polars or pandas and draw them with `bars()`.
+`catplot(kind="bar")` draws means with confidence intervals; with anytrellis, that is
+two layers: `bars(x=..., y=..., stat="mean")` and `errorbar(x=..., y=...)` over them.

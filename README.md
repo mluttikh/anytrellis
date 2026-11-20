@@ -53,6 +53,7 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `line(x, y, color, group, step=None\|"post"\|"pre"\|"mid")` | a line per group (and colour), or steps |
 | `points(x, y, color, size)` | a point per row |
 | `bars(x, y, color, position="stack"\|"dodge"\|"identity")` | a bar per row, from zero |
+| `bars(x, stat="count")` / `bars(x, y, stat="sum"\|"mean"\|"median")` | a bar per position (and colour): its rows counted, or its values summarised |
 | `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |
 | `band(x, ymin, ymax, color, group)` | a band between two lines (a range, an interval) |
 | `rect(x, y, color, width=1, height=1)` / `rect(x, y, x2=, y2=)` | a cell per row (a heatmap), or a box between two corners |
@@ -62,6 +63,7 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `box(x, y, color, whis=1.5)` | box plots per position (and colour, side by side); sideways when y is the category |
 | `violin(x, y, color, scale="area"\|"count"\|"width", inner="quartiles")` | violins per position, placed like boxes |
 | `density(x, color, fill=False, bw_adjust=1)` | a kernel density curve per panel and colour |
+| `ecdf(x, color, stat="proportion"\|"percent"\|"count", complementary=False)` | the cumulative distribution per panel and colour, as steps |
 | `errorbar(x, y, color, extent="ci"\|"se"\|"sd"\|"range")` / `errorbar(x, ymin=, ymax=)` | a mean and its interval per position, or intervals you computed |
 | `smooth(x, y, color, method="loess"\|"linear", se=True)` | a fitted line per panel and colour, with a confidence band |
 | `horizon(x, y, bands=3, origin=0, step=None)` | a horizon chart per panel: a series in bands, for many series in little height |
@@ -73,7 +75,8 @@ the panel's edge goes to the other side of its point. `tooltip=[...]` adds colum
 what hovering shows (a box: to its outliers'); every mark but `text` and `rule` can be
 selected.
 
-`hist`, `box`, `violin`, `density`, `errorbar` and `smooth` summarise each panel's rows in
+`hist`, `box`, `violin`, `density`, `ecdf`, `errorbar`, `smooth` and `bars(stat=...)`
+summarise each panel's rows in
 Python, and are drawn as bars, boxes, violins, lines, bands and points. A histogram's bins are the same in every panel (round widths
 by default), and so are a density's x values, so the panels compare. `stat="percent"`
 and `"density"` scale each panel's counts. With `facet="exclude"` a summary covers the
@@ -111,7 +114,7 @@ A Polars `LazyFrame`, a DuckDB relation or an Ibis table is read in one query, w
 the columns the plot uses. With `load="pages"`, a wrap of many panels reads only the rows
 of the page shown and the pages either side of it, as the pages turn; the panels, their
 statistics, the axes' ranges and the summaries (`hist`, `box`, `violin`, `density`,
-`smooth`, `errorbar`) come from the database, so every page looks as it would with every
+`ecdf`, `smooth`, `errorbar`, `bars(stat=...)`) come from the database, so every page looks as it would with every
 row read. Ten million rows in 1,000 panels from DuckDB draw in 1 s.
 
 ## Facets and scales

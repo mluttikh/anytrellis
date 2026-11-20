@@ -108,8 +108,32 @@ print(plot._embed_html())  # markdown-exec: hide
 `area()` and `hist()` take `position="fill"` too: each region's share of the population
 at each year, each sex's share of each bin.
 
-Bars count nothing themselves: to count rows, use a [histogram](distributions.md), or count
-with your table library first (`df.group_by(...).len()`).
+### Bars that summarise: `stat=`
+
+With `stat=`, bars summarise the rows at each position (and colour) themselves:
+`"count"` counts them (give only x, or only y for bars along y), and `"sum"`, `"mean"` and
+`"median"` summarise y's values at each x (x's along a category y):
+
+```python exec="on" source="above" session="marks" html="true"
+cars = load("cars")
+plot = Trellis(cars, wrap="origin", cols=3, panel_height=140)
+plot.bars(x="cylinders", stat="count")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+```python exec="on" source="above" session="marks" html="true"
+plot = Trellis(barley, panel_height=260, title="Mean yield over the six sites")
+plot.bars(x="yield", y="variety", stat="mean", color="year")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+Counts and sums stack by colour, like other bars; means and medians go side by side
+(`position="dodge"`), as they don't add up. Hovering a bar shows its position, its value
+and how many rows it stands for, and brushing it selects those rows. With
+`load="pages"`, the database counts and averages: no row is read. To count bins of a
+number column instead of its values, use a [histogram](distributions.md).
 
 ## Several layers
 
