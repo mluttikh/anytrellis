@@ -233,12 +233,45 @@ Trellis(cars, wrap="origin", theme=roomy)
 | `row_labels` | a grid's row labels `"level"` at the right, or on their `"side"` |
 | `panel_gap` | pixels between panels |
 | `palette` | category colours: a name (`"petroff10"`, `"observable10"`, `"tab10"`, ...) or a list |
+| `font_size` | the text's size in pixels, or `"auto"` (see below) |
+| `context` | `"paper"`, `"notebook"`, `"talk"` or `"poster"` (see below) |
+
+### Text size, and plots for slides
+
+Text is 12 px. In minimal and framed (`font_size="auto"`), panels under 160 px wide set
+their ticks, strips and axis titles at 11 px, so a wrap of many small panels stays
+legible, and an opened panel sets them at 13 px. `font_size=14` sets a size that doesn't
+step; the title is 1.15 times as big, the caption 11/12.
+
+`context=` scales the text, the lines and the points together, for where the plot is
+shown, as seaborn's contexts do:
+
+| `context=` | Scale | For |
+| --- | --- | --- |
+| `"paper"` | 0.8 | a figure in a document |
+| `"notebook"` (the default) | 1 | a notebook |
+| `"talk"` | 1.5 | slides |
+| `"poster"` | 2 | a poster |
+
+```python exec="on" source="above" session="layout" html="true"
+import anytrellis as at
+
+plot = Trellis(cars, wrap="origin", theme=at.Theme(context="talk"),
+               title="Heavier cars use more fuel")
+plot.points(x="weight", y="mpg", color="cylinders")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+Line widths and point sizes you give are scaled too, so `width=2` draws 3 px lines in
+talk. Images saved from Python (`save_png`, `save_svg`) are drawn the same way.
 
 `set_theme` makes a theme the default of every plot made after it in the session, so a
 notebook sets it once at the top:
 
 ```python
 at.set_theme("framed", palette="tab10")
+at.set_theme(context="talk")              # minimal, for slides
 at.set_theme()                            # back to minimal
 ```
 

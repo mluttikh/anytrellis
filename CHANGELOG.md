@@ -14,6 +14,18 @@ All notable changes to anytrellis. The format follows
   `llms.txt` maps the pages with what each holds, `llms-full.txt` has them all in one file,
   and every page is also Markdown at its address with `.md` for `.html`, the API reference
   written out from the docstrings.
+- **Text size and contexts** in `Theme`: `font_size=` sets the text's size in pixels, and
+  `context="paper"`, `"notebook"`, `"talk"` or `"poster"` scales the text, line widths
+  and point sizes together (0.8, 1, 1.5, 2), for a figure in a paper or a plot on slides:
+  `set_theme(context="talk")`. The header, legend and caption follow the size, and images
+  saved from Python draw it the same.
+
+### Changed
+
+- **Text steps with the panels' size** in the minimal and framed themes
+  (`font_size="auto"`): ticks, strips and axis titles are 11 px in panels under 160 px
+  wide and 13 px in an opened panel, 12 px otherwise. classic keeps 12 px. Category labels
+  thin out by the text's size, so they fit as the text grows or shrinks.
 
 ## [0.6.0] - 2026-11-17
 

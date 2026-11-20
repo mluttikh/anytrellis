@@ -18,6 +18,10 @@ The image is the plot as you see it: zoom in, select, open a panel or switch to 
 theme first, and the image shows that. The toolbar, the tooltip and the crosshair are left
 out. A PNG is twice the plot's size on screen, so it stays sharp on slides.
 
+For slides, make the plot with `theme=at.Theme(context="talk")` (or `set_theme(context=
+"talk")` once): its text, lines and points are 1.5 times as big, so they read from the back
+of the room ([Text size, and plots for slides](layout.md#text-size-and-plots-for-slides)).
+
 An SVG keeps every mark as a vector element, so a plot of many thousands of marks makes a
 large file that slides draw slowly; the plot says how large it is. Use a PNG for those.
 

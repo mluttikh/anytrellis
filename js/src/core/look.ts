@@ -27,6 +27,13 @@ export interface Look {
   row_labels: "level" | "side";
   /** Pixels between panels. */
   panel_gap: number;
+  /** The text's size (px), the context applied: the page's (header, legend) and, unless it
+   * steps, the panels'. */
+  font_size: number;
+  /** The panels' text steps with their width (layout.ts: layout). */
+  font_step: boolean;
+  /** How much the context scaled line widths and point sizes (Python applied it). */
+  mark_scale: number;
 }
 
 export type LookName = "minimal" | "framed" | "classic";
@@ -45,6 +52,9 @@ export const LOOKS: Record<LookName, Look> = {
     x_title: "center",
     row_labels: "level",
     panel_gap: 6,
+    font_size: 12,
+    font_step: true,
+    mark_scale: 1,
   },
   framed: {
     panel_fill: false,
@@ -59,6 +69,9 @@ export const LOOKS: Record<LookName, Look> = {
     x_title: "end",
     row_labels: "level",
     panel_gap: 10,
+    font_size: 12,
+    font_step: true,
+    mark_scale: 1,
   },
   classic: {
     panel_fill: true,
@@ -73,6 +86,9 @@ export const LOOKS: Record<LookName, Look> = {
     x_title: "center",
     row_labels: "side",
     panel_gap: 6,
+    font_size: 12,
+    font_step: false,
+    mark_scale: 1,
   },
 };
 

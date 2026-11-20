@@ -261,7 +261,7 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 .atr-caption {
   padding: 2px 8px 6px;
   color: var(--atr-muted);
-  font-size: 11px;
+  font-size: calc(11em / 12); /* 11 px at the default 12 */
 }
 .atr-subtitle[hidden],
 .atr-caption[hidden] {
