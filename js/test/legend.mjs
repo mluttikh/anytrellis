@@ -97,7 +97,7 @@ await items.nth(1).click();
 // the left half of the first panel (in every panel: the same range)
 const box = await plot.boundingBox();
 const r = await page.evaluate(() => window.anytrellisViews[0].views[0].rect);
-await page.mouse.click(box.x + r.x + r.w * 0.5, box.y + r.y + r.h * 0.5);
+await page.focus(".atr-root"); // the keys (a click on a mark would pin its tooltip)
 await page.keyboard.press("s");
 await page.mouse.move(box.x + r.x + 2, box.y + r.y + 2);
 await page.mouse.down();

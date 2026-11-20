@@ -26,6 +26,10 @@ All notable changes to anytrellis. The format follows
   `y_scale=("log", "reverse")`. Bars, areas, histograms and densities go on a sqrt or
   symlog y (stacked or counted first, then drawn on the scale). Summaries, selections,
   limits, rules, `load="pages"` queries and saved images all follow the scale.
+- **Tooltips that compare**: over lines coloured by a category, the tooltip lists every
+  series at the x nearest the pointer, top to bottom, with a ring on each. A click pins a
+  tooltip, so you can compare it with the next one and copy from it (Esc or its ×
+  unpins it). The crosshair's x and y are written on the axes.
 
 ### Changed
 
@@ -33,6 +37,9 @@ All notable changes to anytrellis. The format follows
   (`font_size="auto"`): ticks, strips and axis titles are 11 px in panels under 160 px
   wide and 13 px in an opened panel, 12 px otherwise. classic keeps 12 px. Category labels
   thin out by the text's size, so they fit as the text grows or shrinks.
+- **Tooltips have a title line** (the panel and the x value), then a row a value: the
+  mark's, with a swatch of its colour, its colour column and the `tooltip=` columns.
+  Values lose the zeros that only pad them (1975, not 1975.00).
 
 ## [0.6.0] - 2026-11-17
 

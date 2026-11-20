@@ -102,7 +102,7 @@ export function formatValue(kind: AxisKind, v: number, origin: number, span: num
     const value = Math.pow(10, v + origin);
     const step = value * (Math.pow(10, span / 200) - 1) || value * 1e-6;
     const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
-    return formatNumber(value, step, Math.min(decimals, 12));
+    return trimZeros(formatNumber(value, step, Math.min(decimals, 12)));
   }
   if (kind === "sqrt" || kind === "symlog") {
     // the value, as precise as a 200th of the view's span (in its units) there
@@ -112,7 +112,13 @@ export function formatValue(kind: AxisKind, v: number, origin: number, span: num
   }
   const step = span / 1000 || 1;
   const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
-  return formatNumber(v + origin, step, Math.min(decimals, 6));
+  return trimZeros(formatNumber(v + origin, step, Math.min(decimals, 6)));
+}
+
+/** A value as written in a tooltip or on an axis readout: to the view's precision, without
+ * the zeros that only pad it ("1975", not "1975.00"); ticks keep theirs, to line up. */
+function trimZeros(text: string): string {
+  return text.replace(/\.(\d*?)0+([kMGT]?)$/, (_, kept: string, suffix: string) => (kept ? `.${kept}` : "") + suffix);
 }
 
 /** A bar's or a stacked area's own value, from `base` to `top` (axis units): on a
@@ -130,7 +136,7 @@ export function formatHeight(kind: AxisKind, top: number, base: number, origin: 
 export function formatAmount(value: number, step: number): string {
   const s = step > 0 && Number.isFinite(step) ? step : Math.abs(value) * 1e-6 || 1e-6;
   const decimals = Math.max(0, -Math.floor(Math.log10(s) + 1e-9));
-  return formatNumber(value, s, Math.min(decimals, 12));
+  return trimZeros(formatNumber(value, s, Math.min(decimals, 12)));
 }
 
 /** Ticks of a sqrt or symlog axis over [lo, hi] (its units), none closer than 0.4 of an

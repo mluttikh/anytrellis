@@ -1,6 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs)."""
+many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs)."""
 
 from __future__ import annotations
 
@@ -49,6 +49,14 @@ def main(out: Path) -> None:
                      title="Fertility and life expectancy, 1955-2005")  # fmt: skip
     linked.points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])
     linked.save_html(out / "gap-link.html")
+    # tooltips (tooltip.mjs): every series at one x; lines grouped within a colour: one
+    some = gapminder.filter(pl.col("country").is_in(
+        ["Japan", "Chile", "Brazil", "India", "Kenya", "Iceland"]))  # fmt: skip
+    series = Trellis(some, labels={"life_expect": "Life expectancy", "year": "Year"})
+    series.line(x="year", y="life_expect", color="country").save_html(out / "series.html")
+    grouped = Trellis(gapminder, wrap="region", cols=3, panel_height=150)
+    grouped.line(x="year", y="life_expect", color="region", group="country", tooltip=["country"])
+    grouped.save_html(out / "grouped.html")
     temps = Trellis(sensors(stations=6), wrap="station", title="Temperature")
     temps.line(x="time", y="temp", color="sensor").save_html(out / "sensors.html")
     cars = load("cars").with_columns(cyl=pl.col("cylinders").cast(pl.String))

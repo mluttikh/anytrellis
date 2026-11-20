@@ -15,7 +15,9 @@ shortcuts don't also act on them.
 | Drag | an axis | pan that axis alone |
 | Double-click | an axis | reset that axis |
 | Shift+drag | a panel | box zoom: sideways zooms x, up or down zooms y, otherwise both |
-| Hover | a mark | its values, and a crosshair in every panel that shares x |
+| Hover | a mark | its values, a crosshair in every panel that shares x, and the pointer's x and y on the axes |
+| Hover | lines coloured by category | every series at the nearest x, top to bottom |
+| Click | a panel, with a tooltip shown | pin the tooltip: it stays, to compare with the next one and to copy from |
 | Double-click | a panel | see it alone |
 | Click | a legend entry | select that colour's marks |
 | Shift, Cmd or Ctrl+click | a legend entry | add or remove a colour |
@@ -23,6 +25,27 @@ shortcuts don't also act on them.
 Zoom and pan apply to every panel that shares the scale. An axis stands for its whole
 scale: with `share_y="row"`, zooming the left axis of a row zooms that row. With
 `share_y="sliced"`, zooming one panel zooms every panel to its width; panning moves one.
+
+## Tooltips
+
+Hovering a mark shows a tooltip. Its first line is the panel and the position along the
+axis: x, or y for bars along y. Then a row for each value: the mark's value, with a swatch
+of its colour, its colour column, and the `tooltip=` columns. Names are as `labels=` gives
+them and values as the axis formats them (`format()`).
+
+Over lines coloured by a category column, the tooltip lists every series at the x nearest
+the pointer, from top to bottom. The series nearest the pointer is in bold, and each one
+gets a ring. Where a colour holds several lines (`group=` within a colour), the tooltip
+shows the line you hover instead.
+
+The crosshair's x and y are written on the axes, so you can read them in every panel along
+the row and column.
+
+A click pins the tooltip: not the first, which gives the plot the keys, and not in select
+mode, where a click clears the selection. It stays
+where it is while you hover on, so you can compare two points, and you can select and copy
+its text. A click away from the marks, ++esc++ or its
+× unpins it, and so does zooming, panning or opening a panel.
 
 ## Keys
 
@@ -33,7 +56,7 @@ scale: with `share_y="row"`, zooming the left axis of a row zooms that row. With
 | ++z++ | drag draws a zoom box, and back (Shift+drag always does) |
 | ++y++ | fit y to the data in view, and keep fitting it as x changes; again to stop |
 | ++s++ | drag draws a selection brush, and back |
-| ++esc++ | clear the selection; with none, back to all panels |
+| ++esc++ | unpin the tooltip; with none, clear the selection; with none, back to all panels |
 | ++enter++ | open the panel under the pointer |
 | ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom; with none opened, the previous / next page of a paged wrap |
 | ++backspace++ | back to all panels |

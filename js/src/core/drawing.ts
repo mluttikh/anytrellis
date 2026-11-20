@@ -8,7 +8,7 @@
 import { ANGLE_MAX, type Layout, type PanelBox, type Rect, STRIP_PAD, type Strip, type XLabels, wrapLabel } from "./layout";
 import { type Look, lookOf } from "./look";
 import type { PanelMap, TextData } from "./scene";
-import { type Tick, minorTicks, ticks, yTickCount } from "./ticks";
+import { type Tick, formatValue, minorTicks, ticks, yTickCount } from "./ticks";
 import type { RuleLayerSpec, TrellisSpec } from "./types";
 
 export interface Theme {
@@ -142,9 +142,15 @@ export interface FrontState {
   /** Data x (axis units) of the pointer, drawn in the panels of `crossGroup`. */
   crossX: number | null;
   crossGroup: number | null;
-  /** The hovered mark: centre (px) and radius, in panel `hoverPanel`. */
-  hover: { x: number; y: number; r: number; color: string } | null;
+  /** The hovered marks (one, or each series' at the hovered x), in panel `hoverPanel`. */
+  hovers: Ring[];
   hoverPanel: number | null;
+  /** The marks of a pinned tooltip, in panel `pinPanel`. */
+  pins: Ring[];
+  pinPanel: number | null;
+  /** The pointer's x and y (axis units) in panel `panel`, written on the axes in its column
+   * and its row; null: not on that axis (a band, or off the panels). */
+  readout: { panel: number; x: number | null; y: number | null } | null;
   /** A zoom box being dragged (px), and where it will zoom the panels linked to it. */
   box: Rect | null;
   ghosts: Rect[];
@@ -152,6 +158,73 @@ export interface FrontState {
   brushes: Rect[];
   /** Text layers, drawn over the marks. */
   texts: TextData[];
+}
+
+/** A ring around a hovered mark: its centre (px), its radius, in its colour. */
+export interface Ring {
+  x: number;
+  y: number;
+  r: number;
+  color: string;
+}
+
+function drawRing(ctx: CanvasRenderingContext2D, ring: Ring, theme: Theme): void {
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = theme.bg;
+  ctx.beginPath();
+  ctx.arc(ring.x, ring.y, ring.r + 2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = ring.color;
+  ctx.beginPath();
+  ctx.arc(ring.x, ring.y, ring.r + 3.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+}
+
+/** The pointer's x and y written on the axes (as Observable Plot's crosshair does): x on
+ * the x axis of the panels in the hovered panel's column, y on the y axis of those in its
+ * row, over the tick labels. */
+function drawReadout(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layout: Layout, views: PanelView[], theme: Theme, readout: NonNullable<FrontState["readout"]>): void {
+  const at = views.findIndex((v) => v.panel === readout.panel);
+  if (at < 0) return;
+  const here = views[at];
+  const fs = theme.fontSize;
+  const h = Math.round(fs + 6);
+  const label = (text: string, x: number, y: number, align: "center" | "right"): void => {
+    const w = Math.ceil(ctx.measureText(text).width) + 8;
+    const left = Math.max(1, align === "center" ? x - w / 2 : x - w); // inside the plot
+    ctx.fillStyle = theme.text;
+    ctx.beginPath();
+    ctx.roundRect?.(left, y - h / 2, w, h, 3);
+    if (!ctx.roundRect) ctx.rect(left, y - h / 2, w, h);
+    ctx.fill();
+    ctx.fillStyle = theme.bg;
+    ctx.textAlign = "center";
+    ctx.fillText(text, left + w / 2, y + 0.5);
+  };
+  ctx.save();
+  views.forEach((v, i) => {
+    const box = layout.panels[i];
+    const r = v.rect;
+    const p = spec.panels[v.panel];
+    const hp = spec.panels[here.panel];
+    if (readout.x !== null && box.showX && Math.abs(r.x - here.rect.x) < 1 && p.xg === hp.xg) {
+      const px = v.map.ox + readout.x * v.map.sx;
+      if (px >= r.x - 0.5 && px <= r.x + r.w + 0.5) {
+        const text = formatValue(spec.x.kind, readout.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format);
+        label(text, px, r.y + r.h + 4 + h / 2, "center");
+      }
+    }
+    if (readout.y !== null && box.showY && Math.abs(r.y - here.rect.y) < 1 && p.yg === hp.yg) {
+      const py = v.map.oy + readout.y * v.map.sy;
+      if (py >= r.y - 0.5 && py <= r.y + r.h + 0.5) {
+        const text = formatValue(spec.y.kind, readout.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format);
+        label(text, r.x - 2, py, "right");
+      }
+    }
+  });
+  ctx.restore();
 }
 
 export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layout: Layout, views: PanelView[], theme: Theme, state: FrontState): void {
@@ -179,19 +252,8 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    if (state.hover && state.hoverPanel === v.panel) {
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = theme.bg;
-      ctx.beginPath();
-      ctx.arc(state.hover.x, state.hover.y, state.hover.r + 2, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = state.hover.color;
-      ctx.beginPath();
-      ctx.arc(state.hover.x, state.hover.y, state.hover.r + 3.5, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.lineWidth = 1;
-    }
+    if (state.pinPanel === v.panel) for (const ring of state.pins) drawRing(ctx, ring, theme);
+    if (state.hoverPanel === v.panel) for (const ring of state.hovers) drawRing(ctx, ring, theme);
     ctx.restore();
   });
 
@@ -342,6 +404,11 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.globalAlpha = 1;
     ctx.strokeStyle = theme.accent;
     ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h);
+  }
+  if (state.readout) {
+    ctx.font = `${fs}px ${theme.font}`;
+    ctx.textBaseline = "middle";
+    drawReadout(ctx, spec, layout, views, theme, state.readout);
   }
 }
 
