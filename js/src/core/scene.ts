@@ -15,6 +15,8 @@ export interface LayerData {
   starts: Uint32Array;
   set: InstanceSet;
   codes: Uint16Array | null;
+  /** Per instance, a number colour's value (null: none). */
+  values: Float64Array | null;
   /** Areas: the base at each end of an instance (axis units, relative to the origin). */
   base: Float64Array | null;
   /** Each instance's link key, or null: the layer is not linked. */
@@ -146,6 +148,7 @@ export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Sce
       // the layer's index too: two layers can draw the same data (a density's fill and line)
       set: { key: `${index}:${l.coords.id}:${l.color.rgba?.id ?? l.color.solid?.join(",")}`, version: nextVersion++, count: n, coords: f32, colors, base },
       codes: l.color.codes ? (view(source, l.color.codes) as Uint16Array) : null,
+      values: l.color.values ? (view(source, l.color.values) as Float64Array) : null,
       link: l.link ? (view(source, l.link) as Uint32Array) : null,
       groups: l.groups ? (view(source, l.groups) as Uint32Array) : null,
       tipRows: l.tip_rows ? (view(source, l.tip_rows) as Uint32Array) : null,

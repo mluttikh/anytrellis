@@ -949,6 +949,8 @@ class _Marks:
     codes: np.ndarray | None
     link: np.ndarray | None
     groups: np.ndarray | None
+    values: np.ndarray | None = None
+    """A number colour's value per instance (a legend's range selects by it)."""
 
 
 @dataclass
@@ -999,6 +1001,7 @@ def _scene(spec: dict[str, Any], buffers: Buffers) -> tuple[list[_Marks], list[_
             codes=opt(color.get("codes")),
             link=opt(lr.get("link")),
             groups=opt(lr.get("groups")),
+            values=opt(color.get("values")),
         ))  # fmt: skip
     return marks, texts
 
@@ -1012,7 +1015,7 @@ def select(marks: list[_Marks], brush: dict[str, Any]) -> list[np.ndarray | None
     x0, x1 = sorted(brush["x"]) if brush.get("x") else (-np.inf, np.inf)
     y0, y1 = sorted(brush["y"]) if brush.get("y") else (-np.inf, np.inf)
     legend = brush.get("legend")
-    if not legend or not legend.get("levels"):
+    if not legend or not (legend.get("levels") or legend.get("range")):
         legend = None
     panel = brush.get("panel")
     masks: list[np.ndarray | None] = []
@@ -1025,9 +1028,12 @@ def select(marks: list[_Marks], brush: dict[str, Any]) -> list[np.ndarray | None
         mask = np.zeros(n, dtype=bool)
         lo = 0 if panel is None else int(layer.starts[panel])
         hi = n if panel is None else int(layer.starts[panel + 1])
-        codes = (layer.codes if legend and layer.spec["color"].get("legend") == legend["index"]
-                 else None)  # fmt: skip
-        if legend and codes is None:
+        # legend entries chosen: only the marks of their colours (a number colour's range:
+        # of the values in it); none in another legend's colours
+        mine = legend is not None and layer.spec["color"].get("legend") == legend["index"]
+        codes = layer.codes if mine and legend is not None and legend.get("levels") else None
+        values = layer.values if mine and legend is not None and legend.get("range") else None
+        if legend and codes is None and values is None:
             hi = lo
         c = layer.coords[lo:hi]
         ax, ay, bx, by = c[:, 0], c[:, 1], c[:, 2], c[:, 3]
@@ -1045,6 +1051,10 @@ def select(marks: list[_Marks], brush: dict[str, Any]) -> list[np.ndarray | None
                 (bx >= x0) & (bx <= x1) & (by >= y0) & (by <= y1))  # fmt: skip
         if codes is not None and legend is not None:
             hit &= np.isin(codes[lo:hi], legend["levels"])
+        if values is not None and legend is not None:
+            a, b = sorted(legend["range"])
+            v = values[lo:hi]
+            hit &= (v >= a) & (v <= b)
         mask[lo:hi] = hit
         if layer.link is not None:
             keys.append(layer.link[mask])
@@ -1623,6 +1633,10 @@ def _legend_label(v: float) -> str:
     return _js(_round(v * 100) / 100)
 
 
+LEGEND_ROWS = 20
+"""The most entries a legend shows (the page: then a search for the rest)."""
+
+
 def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[list[_Entry]]:
     chosen = (brush or {}).get("legend") or None
     size = look_of(spec)["font_size"]
@@ -1630,11 +1644,24 @@ def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[l
     for index, lg in enumerate(spec["legends"]):
         entries = [_Entry("title", lg["title"], size=size)]
         if lg["kind"] in ("category", "bins"):  # an entry each (a stepped scale's ranges)
-            for i, (label, color) in enumerate(zip(lg["labels"], lg["colors"], strict=False)):
+            labels = lg["labels"]
+            for i, (label, color) in enumerate(zip(labels[:LEGEND_ROWS], lg["colors"],
+                                                   strict=False)):  # fmt: skip
                 state = ""
                 if chosen and chosen.get("index") == index and chosen.get("levels"):
                     state = "on" if i in chosen["levels"] else "off"
+                elif (
+                    chosen
+                    and chosen.get("index") == index
+                    and chosen.get("range")
+                    and lg.get("breaks")
+                ):  # a stepped scale's bins: those in the range
+                    a, b = sorted(chosen["range"])
+                    inside = lg["breaks"][i] < b and lg["breaks"][i + 1] > a
+                    state = "on" if inside else "off"
                 entries.append(_Entry("item", label, color, state=state, size=size))
+            if len(labels) > LEGEND_ROWS:  # as the page shows a long legend: the first ones
+                entries.append(_Entry("text", f"{len(labels) - LEGEND_ROWS} more", size=size))
         else:
             end = number_format(lg["format"]) if lg.get("format") else _legend_label
             entries += [_Entry("text", end(lg.get("lo", 0)), size=size),
@@ -1847,13 +1874,19 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         return layout(spec, w, None if stage_h is None else stage_h - legend_h, page=page)
 
     right = None
-    if position == "right" and groups:
+    above = position == "top" and bool(groups)
+    if above:  # over the panels, under the title, as wide as the plot
+        placed, legend_h = _legend_below(groups, width)
+        lay = plot_layout(width, legend_h)
+    elif position == "right" and groups:
         # a column right of the plot, the plot narrowed for it (layout as wide as the rest)
         lw = legend_width(groups, width * RIGHT_MOST)
         lay = plot_layout(width - lw, 0.0)
         right = _legend_inset(groups, Rect(width - lw, 0, lw, lay.height))
         placed = right or []
-    if right is None and focused is None:
+    if above or right is not None:
+        pass  # placed
+    elif focused is None:
         lay = layout(spec, width, stage_h, page=page)
         spare = lay.spare if position == "auto" else None
         inset = _legend_inset(groups, spare) if groups and spare is not None else None
@@ -1863,7 +1896,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
             placed, legend_h = _legend_below(groups, width)
             if stage_h is not None:
                 lay = layout(spec, width, stage_h - legend_h, page=page)
-    elif right is None:
+    else:
         if groups:
             placed, legend_h = _legend_below(groups, width)
         lay = plot_layout(width, legend_h)
@@ -1879,7 +1912,8 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
                  size=title_size, bold=True)  # fmt: skip
     for k, line in enumerate(subtitle):
         svg.text(8, header + (k + 0.5) * size * LINE, line, th["muted"], size=size)
-    svg.open(f'transform="translate(0 {_n(top)})"' if top else 'class="plot"')
+    plot_top = top + legend_h if above else top
+    svg.open(f'transform="translate(0 {_n(plot_top)})"' if plot_top else 'class="plot"')
 
     views = _views(spec, lay, shown)
     marks, texts = _scene(spec, buffers)
@@ -1920,7 +1954,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         _draw_legend(svg, placed, 0, th)
     svg.close()
     if placed and not inset_legend:
-        _draw_legend(svg, placed, top + lay.height, th)
+        _draw_legend(svg, placed, top if above else top + lay.height, th)
     for k, line in enumerate(caption):
         y = top + lay.height + legend_h + 2 + (k + 0.5) * cap_line
         svg.text(8, y, line, th["muted"], size=size * CAPTION)

@@ -78,6 +78,9 @@ export interface ColorSpec {
   /** Per instance, the level of a category colour column (legend `legend`). */
   codes: BufferRef | null;
   legend: number | null;
+  /** Per instance, the value of a number colour column (float64): a range of the legend
+   * selects by it. */
+  values?: BufferRef | null;
 }
 
 export interface MarkLayerSpec {
@@ -174,6 +177,8 @@ export interface LegendSpec {
   colors: string[];
   lo?: number;
   hi?: number;
+  /** bins: the edges of the ranges (one more than the labels). */
+  breaks?: number[];
   /** A number legend's ends: a d3-format string. */
   format?: string | null;
 }
@@ -199,7 +204,7 @@ export interface TrellisSpec {
   aspect?: number | null;
   /** auto: in a wrap's empty cells when it fits, else under the plot; bottom: under it;
    * right: a column right of the plot (under it when too tall); none: no legend. */
-  legend_position?: "auto" | "bottom" | "right" | "none";
+  legend_position?: "auto" | "top" | "bottom" | "right" | "none";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
   /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */

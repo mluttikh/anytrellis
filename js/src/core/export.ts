@@ -422,6 +422,7 @@ function gradientColors(image: string): string[] {
  * top left on the page.
  */
 export function paintHtml(ctx: CanvasRenderingContext2D, el: Element, origin: DOMRect, opacity = 1): void {
+  if (el.tagName === "INPUT") return; // a field (a legend's search) is not part of the image
   const cs = getComputedStyle(el);
   if (cs.display === "none" || cs.visibility === "hidden") return;
   const alpha = opacity * (parseFloat(cs.opacity) || 0);

@@ -151,9 +151,43 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   flex: none;
 }
 .atr-gradient {
+  position: relative;
   width: 90px;
   height: 8px;
   border-radius: 2px;
+}
+/* a number colour's legend: dragging on it selects a range of its values */
+.atr-gradient-pick {
+  cursor: col-resize;
+  touch-action: none;
+}
+.atr-gradient-window {
+  display: none;
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  box-sizing: border-box;
+  border: 2px solid var(--atr-text);
+  border-radius: 2px;
+  pointer-events: none;
+}
+/* an entry shown alone (a double-click): the others struck through */
+.atr-legend-hidden {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+.atr-legend-item[hidden] {
+  display: none;
+}
+/* a long legend: the first entries, how many more, and a search for them */
+.atr-legend-search {
+  width: 110px;
+  padding: 1px 6px;
+  font: inherit;
+  color: var(--atr-text);
+  background: var(--atr-bg);
+  border: 1px solid var(--atr-border);
+  border-radius: 3px;
 }
 
 .atr-tip {

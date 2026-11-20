@@ -285,7 +285,8 @@ plot.legend("right", title="Cylinders")
 ```
 
 `"auto"` (the default) puts it in a wrap's empty cells when it fits, and under the plot
-otherwise; `"bottom"` always puts it under the plot; `"right"` in a column right of the
+otherwise; `"top"` puts it over the panels, under the title; `"bottom"` always puts it
+under the plot; `"right"` in a column right of the
 plot, the panels narrowed to make room (under the plot when it is too tall for that);
 `"none"` leaves it out. `Trellis(legend=...)` takes the same. `title=` names it, by
 default the colour column's label; with several colour columns, give a dict by column.

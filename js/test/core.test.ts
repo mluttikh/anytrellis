@@ -459,6 +459,18 @@ describe("legend entries", () => {
     expect([...both.masks[0]!]).toEqual([0, 0, 1]);
   });
 
+  it("a number colour's range: the marks of values in it", () => {
+    const scene = coloured();
+    const points = scene.layers[0] as unknown as { values: Float64Array | null; codes: Uint16Array | null };
+    points.values = new Float64Array([0.5, 1.5, 2.5]);
+    points.codes = null;
+    const s = select(scene, { x: null, y: null, legend: { index: 0, levels: [], range: [2, 1] } });
+    expect([...s.masks[0]!]).toEqual([0, 1, 0]); // either way round
+    expect([...s.masks[1]!]).toEqual([0]); // no colour column: faded
+    expect([...s.masks[2]!]).toEqual([0]); // another legend's colours: faded
+    expect(selects({ x: null, y: null, legend: { index: 0, levels: [], range: [1, 2] } })).toBe(true);
+  });
+
   it("toggle: a click picks one (again: none), Shift adds and takes away", () => {
     expect(toggleLegend(null, 0, 2, false)).toEqual({ index: 0, levels: [2] });
     expect(toggleLegend({ index: 0, levels: [2] }, 0, 2, false)).toBeNull();

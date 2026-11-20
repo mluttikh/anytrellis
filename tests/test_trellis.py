@@ -495,6 +495,8 @@ def test_legend_position():
     b = Trellis(SMALL, wrap="g", legend="bottom").points(x="t", y="v", color="h")
     assert b._scene()[0]["legend_position"] == "bottom"
     assert '"legend_position": "bottom"' in b.to_html()
+    top = Trellis(SMALL, wrap="g").points(x="t", y="v", color="h").legend("top")
+    assert top._scene()[0]["legend_position"] == "top"
     with pytest.raises(ValueError, match="legend must be one of"):
         Trellis(SMALL, legend="left")
 
@@ -1248,8 +1250,40 @@ def test_legend_selects_a_stacked_histograms_rows() -> None:
     assert sorted(t.selected()["v"].tolist()) == [1.2, 2.7, 3.1]
 
 
+def test_select_a_range_of_a_number_colour() -> None:
+    t = Trellis(SMALL).points(x="t", y="v", color="v").line(x="t", y="v", name="plain")
+    spec, _ = t._scene()
+    points = spec["layers"][0]["color"]
+    assert points["values"] is not None  # each mark's value: the browser selects by it
+    assert spec["layers"][1]["color"].get("values") is None
+    t.select(color=(15, 150))
+    assert t.selected()["v"].tolist() == [20.0, 100.0]
+    assert t.selection == {"x": None, "y": None, "color": (15.0, 150.0), "panel": None}
+    assert t.selected("plain")["v"].tolist() == []  # not coloured by v: none of its marks
+    t.select(x=(0.5, 1.5), color=(150, 15))  # both; the range either way round
+    assert t.selected()["v"].tolist() == [20.0]
+    brush = t._current_selection()
+    assert brush is not None
+    assert brush["legend"] == {"index": 0, "levels": [], "range": [15.0, 150.0]}
+    # from the browser: a drag on the gradient
+    t.widget.selection = {"x": None, "y": None, "panel": None,
+                          "legend": {"index": 0, "levels": [], "range": [1.5, 10]}}  # fmt: skip
+    assert t.selected()["v"].tolist() == [2.0, 10.0]
+
+
+def test_a_stepped_legend_sends_its_breaks() -> None:
+    t = Trellis(SMALL).points(x="t", y="v", color="v").colormap(scale="binned", bins=4)
+    lg = t._scene()[0]["legends"][0]
+    assert lg["kind"] == "bins"
+    assert len(lg["breaks"]) == len(lg["labels"]) + 1
+    t.select(color=(lg["breaks"][0], lg["breaks"][1]))  # a bin's range, as clicking it
+    assert len(t.selected()) > 0
+
+
 def test_select_color_errors() -> None:
     with pytest.raises(ValueError, match="no colour legend"):
         Trellis(SMALL).points(x="t", y="v", color="h").select(color="nope")
     with pytest.raises(ValueError, match="needs a category colour"):
         Trellis(SMALL).points(x="t", y="v").select(color="x")
+    with pytest.raises(ValueError, match="needs a number colour"):
+        Trellis(SMALL).points(x="t", y="v", color="h").select(color=(1, 2))

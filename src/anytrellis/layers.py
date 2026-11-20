@@ -95,6 +95,8 @@ class Geometry:
     base0: np.ndarray | None = None
     base1: np.ndarray | None = None
     """An area's base at each end of a segment (its top is y0, y1); None otherwise."""
+    values: np.ndarray | None = None
+    """Per instance value of a number colour column (a legend's range selects by it)."""
 
     @property
     def count(self) -> int:
@@ -113,6 +115,7 @@ class Geometry:
             None if self.rows_end is None else self.rows_end[order],
             None if self.base0 is None else self.base0[order],
             None if self.base1 is None else self.base1[order],
+            None if self.values is None else self.values[order],
         )  # fmt: skip
 
 

@@ -30,6 +30,15 @@ All notable changes to anytrellis. The format follows
   series at the x nearest the pointer, top to bottom, with a ring on each. A click pins a
   tooltip, so you can compare it with the next one and copy from it (Esc or its ×
   unpins it). The crosshair's x and y are written on the axes.
+- **A legend to explore with**: hovering an entry makes its marks stand out in every
+  panel, and a double-click shows that colour alone (again, or Esc: all of them). Dragging
+  on a number colour's gradient selects the marks of the values in that range, and a
+  binned scale's entries each select their range; from Python, `select(color=(low,
+  high))`, and `selection["color"]` gives the range back. `selected()` follows, in a
+  `load="pages"` query too.
+- **Long legends** show their first 20 entries, how many more there are, and a search box
+  for the rest.
+- **`legend("top")`** puts the legend over the panels, under the title.
 
 ### Changed
 

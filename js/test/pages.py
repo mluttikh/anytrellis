@@ -1,6 +1,6 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
-many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs)."""
+many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs)."""
 
 from __future__ import annotations
 
@@ -45,6 +45,19 @@ def main(out: Path) -> None:
     right.points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])
     right.legend("right").format(y=".0f").limits(y=(20, 90))
     right.save_html(out / "legend-right.html")
+    # legends (legends.mjs): a number colour's gradient, a stepped scale's bins, and a long
+    # legend over the panels
+    number = Trellis(gapminder, wrap="year", cols=4, panel_height=150)
+    number.points(x="fertility", y="life_expect", color="life_expect", size=6)
+    number.save_html(out / "legend-number.html")
+    bins = Trellis(gapminder, wrap="year", cols=4, panel_height=150)
+    bins.points(x="fertility", y="life_expect", color="life_expect", size=6)
+    bins.colormap(scale="binned", bins=5).save_html(out / "legend-bins.html")
+    countries = gapminder["country"].unique(maintain_order=True).head(30).to_list()
+    many = Trellis(gapminder.filter(pl.col("country").is_in(countries)), wrap="region", cols=3,
+                   panel_height=150, title="Life expectancy")  # fmt: skip
+    many.line(x="year", y="life_expect", color="country").legend("top")
+    many.save_html(out / "legend-many.html")
     linked = Trellis(gapminder, wrap="year", cols=4, panel_height=150, link="country",
                      title="Fertility and life expectancy, 1955-2005")  # fmt: skip
     linked.points(x="fertility", y="life_expect", color="region", size=6, tooltip=["country"])
