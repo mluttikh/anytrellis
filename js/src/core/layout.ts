@@ -72,10 +72,13 @@ export interface Layout {
   /** How a band x axis sets its labels (others: flat). */
   xLabels: XLabels;
   yAxisWidth: number[];
+  /** The panels' text size (px): the look's, or stepped with the panels' width. */
+  fontSize: number;
 }
 
 export interface LayoutOptions {
   width: number;
+  /** The text's size (px), as `measure` measures it. */
   fontSize: number;
   measure: (text: string) => number;
   /** The plot's height (px), overriding the spec's (full screen, an opened panel). */
@@ -122,7 +125,7 @@ export function wrapLabel(label: string): string[] {
 }
 
 /** How a band x axis `panelW` px wide sets its labels, and the axis's height. Side by side
- * when the longest fits its band (estimated as the ticks thin them: 7.2 px a character);
+ * when the longest fits its band (estimated as the ticks thin them: 0.6 em a character);
  * else on two lines when each fits its band, measured; else at 45 degrees. */
 export function xLabelMode(spec: TrellisSpec, panelW: number, opts: Pick<LayoutOptions, "fontSize" | "measure">): { mode: XLabels; height: number } {
   const fs = opts.fontSize;
@@ -131,7 +134,7 @@ export function xLabelMode(spec: TrellisSpec, panelW: number, opts: Pick<LayoutO
   if (!levels?.length) return { mode: "flat", height: flat };
   const per = panelW / levels.length;
   const longest = Math.max(...levels.map((l) => l.length));
-  if (longest * 7.2 + 10 <= per) return { mode: "flat", height: flat };
+  if (longest * 0.6 * fs + 10 <= per) return { mode: "flat", height: flat };
   const fits = (t: string): boolean => opts.measure(t) + 4 <= per;
   if (levels.every((l) => fits(l) || wrapLabel(l).every(fits))) return { mode: "wrap", height: flat + Math.round(fs * 1.2) };
   const widest = Math.min(ANGLE_MAX, Math.max(...levels.map((l) => opts.measure(l))));
@@ -151,8 +154,30 @@ export function panelShape(spec: TrellisSpec): number | null {
   return spec.aspect && !spec.height && !spec.panel_height ? spec.aspect : null;
 }
 
+/** Under this width (px, at 12 px text) panels step their text down a pixel. */
+export const NARROW = 160;
+
+/** The plot's layout. With the look's `font_step` ("auto" text), the panels' text steps
+ * from the page's size (12 px, the context applied): to 11/12 of it when panels would be
+ * under `NARROW` px wide (a paged wrap's: those of its first page, so every page, even an
+ * empty one, has the same), to 13/12 in an opened panel. */
 export function layout(spec: TrellisSpec, opts: LayoutOptions): Layout {
-  if (opts.focused !== null && opts.focused !== undefined && spec.panels[opts.focused]) return focusLayout(spec, opts, opts.focused);
+  const focused = opts.focused !== null && opts.focused !== undefined && !!spec.panels[opts.focused];
+  const at = (fs: number, page = opts.page): Layout => {
+    const measure = fs === opts.fontSize ? opts.measure : (t: string) => (opts.measure(t) * fs) / opts.fontSize;
+    const o = { ...opts, fontSize: fs, measure, page };
+    return { ...(focused ? focusLayout(spec, o, opts.focused!) : layoutAt(spec, o)), fontSize: fs };
+  };
+  const base = opts.fontSize;
+  if (!lookOf(spec).font_step) return at(base);
+  if (focused) return at((base * 13) / 12);
+  const lay = at(base);
+  const probe = opts.page ? at(base, null) : lay;
+  const narrowest = Math.min(...probe.panels.map((b) => b.rect.w));
+  return narrowest < (NARROW * base) / 12 ? at((base * 11) / 12) : lay;
+}
+
+function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSize"> {
   const { grid } = spec;
   // a paged wrap: the page's panels, placed in turn on a grid of the page's size (the same
   // on every page, so turning pages does not move the plot)
@@ -400,7 +425,7 @@ function yLabelsWidth(spec: TrellisSpec, domain: [number, number], opts: LayoutO
 }
 
 /** One panel on the whole width, with both its axes and a strip naming it. */
-function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Layout {
+function focusLayout(spec: TrellisSpec, opts: LayoutOptions, index: number): Omit<Layout, "fontSize"> {
   const fs = opts.fontSize;
   const p = spec.panels[index];
   const stripH = Math.round(fs * 1.5 + 4);

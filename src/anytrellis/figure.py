@@ -25,7 +25,7 @@ import numpy as np
 from anytrellis.codec import DTYPES, Buffers
 from anytrellis.formats import axis_format, number_format
 from anytrellis.pages import page_list
-from anytrellis.theme import PRESETS
+from anytrellis.theme import CONTEXTS, NARROW, PRESETS
 
 if TYPE_CHECKING:
     from anytrellis.pages import Paging
@@ -52,6 +52,7 @@ BOLD = 1.06
 
 FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, 'DejaVu Sans', sans-serif"
 FONT_SIZE = 12.0
+"""The text's size (px) unless the theme sets another (look ``font_size``)."""
 DEFAULT_WIDTH = 800
 """The width of a plot never shown (CSS pixels)."""
 PNG_SCALE = 2.0
@@ -61,10 +62,11 @@ STRIP_PAD = 4
 """A strip's room at either end, and between a name and its value."""
 MIN_PANEL = 24
 HEADER = 26
-"""The header over the plot (its title), when there is a title."""
-TITLE_SIZE = FONT_SIZE * 1.15
-CAPTION_SIZE = 11
-"""The caption's font size (widget.css .atr-caption)."""
+"""The header over the plot (its title), when there is a title: at least this high."""
+TITLE = 1.15
+"""The title's size, in the page's text size (widget.css .atr-title)."""
+CAPTION = 11 / 12
+"""The caption's size, in the page's text size (widget.css .atr-caption)."""
 FOCUS_MIN = 320
 RIGHT_MOST = 0.35
 """A legend right of the plot takes at most this share of its width."""
@@ -72,8 +74,8 @@ FOCUS_MAX = 720
 """An opened panel's plot is about the grid's height, within these (px)."""
 FADED = 0.15
 """How much of its opacity an unselected mark keeps."""
-LINE = FONT_SIZE * 1.35
-"""A legend line's height."""
+LINE = 1.35
+"""A line's height, in its text size (widget.css .atr-root)."""
 
 KIND_CAPSULE, KIND_RECT, KIND_TRAP = 0, 1, 2
 
@@ -458,7 +460,8 @@ class Layout:
     x_axis_h: float = 0
     x_labels: str = "flat"
     """How a band x axis sets its labels: ``"flat"``, ``"wrap"`` or ``"angle"``."""
-    """An x axis's height, its tick labels included."""
+    font_size: float = FONT_SIZE
+    """The panels' text size (px): the look's, or stepped with the panels' width."""
 
 
 def panel_name(spec: dict[str, Any], index: int) -> str:
@@ -466,23 +469,32 @@ def panel_name(spec: dict[str, Any], index: int) -> str:
     return " · ".join(p["keys"]) or p["label"] or f"panel {index + 1}"
 
 
-def _y_labels_width(spec: dict[str, Any], domain: list[float], h: float | None) -> float:
+def _y_labels_width(spec: dict[str, Any], domain: list[float], h: float | None,
+                    fs: float) -> float:  # fmt: skip
     y = spec["y"]
     count = (1000 if y["kind"] == "band" else 5 if h is None
              else y_tick_count(y["kind"], domain[0], domain[1], h))  # fmt: skip
     labels = ticks(y["kind"], domain[0], domain[1], y["origin"], count, y["levels"],
                    y.get("format"))  # fmt: skip
-    return math.ceil(max([0.0, *(text_width(s) for _, s in labels)])) + TICK + 4
+    return math.ceil(max([0.0, *(text_width(s, fs) for _, s in labels)])) + TICK + 4
 
 
 def look_of(spec: dict[str, Any]) -> dict[str, Any]:
-    """The spec's look (theme.py, look.ts): a preset's, with what the spec sets over it."""
+    """The spec's look (theme.py, look.ts): a preset's, with what the spec sets over it;
+    its text size in pixels, the context applied (as ``Theme.spec`` sends it)."""
     t = spec.get("theme")
     if not t:
-        return PRESETS["minimal"]
-    if isinstance(t, str):
-        return PRESETS.get(t, PRESETS["minimal"])
-    return {**PRESETS[t.get("base") or "minimal"], **t}
+        look = PRESETS["minimal"]
+    elif isinstance(t, str):
+        look = PRESETS.get(t, PRESETS["minimal"])
+    else:
+        look = {**PRESETS[t.get("base") or "minimal"], **t}
+    if "font_step" not in look:  # a preset's: "auto" or pixels, and a context
+        size, k = look["font_size"], CONTEXTS[look.get("context") or "notebook"]
+        auto = size == "auto"
+        look = {**look, "font_size": (FONT_SIZE if auto else float(size)) * k,
+                "font_step": auto, "mark_scale": k}  # fmt: skip
+    return look
 
 
 ANGLE_MAX = 90
@@ -511,7 +523,7 @@ def x_label_mode(spec: dict[str, Any], panel_w: float, fs: float = FONT_SIZE) ->
     if not levels:
         return "flat", flat
     per = panel_w / len(levels)
-    if max(len(lv) for lv in levels) * 7.2 + 10 <= per:
+    if max(len(lv) for lv in levels) * 0.6 * fs + 10 <= per:
         return "flat", flat
 
     def fits(t: str) -> bool:
@@ -552,9 +564,34 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
            focused: int | None = None, page: list[int] | None = None) -> Layout:  # fmt: skip
     """Where the panels, strips and titles sit, ``width`` px wide; ``height``: the plot's
     height, overriding the spec's; ``focused``: that panel alone; ``page``: a paged wrap's
-    panels on the page shown (default: the first page's)."""
-    if focused is not None and 0 <= focused < len(spec["panels"]):
-        return _focus_layout(spec, width, height, focused)
+    panels on the page shown (default: the first page's).
+
+    The panels' text is the look's size; ``"auto"`` text (``font_step``) steps from it, to
+    11/12 of it when the panels would be under ``NARROW`` px wide (a paged wrap's: those of
+    its first page, so every page, even an empty one, has the same) and to 13/12 in an
+    opened panel (layout.ts: layout)."""
+    look = look_of(spec)
+    base = look["font_size"]
+    one = focused is not None and 0 <= focused < len(spec["panels"])
+
+    def at(fs: float, page: list[int] | None = page) -> Layout:
+        if one:
+            assert focused is not None
+            return _focus_layout(spec, width, height, focused, fs)
+        return _layout_at(spec, width, height, page, fs)
+
+    if not look["font_step"]:
+        return at(base)
+    if one:
+        return at(base * 13 / 12)
+    lay = at(base)
+    probe = at(base, None) if page is not None else lay
+    narrowest = min([b.rect.w for b in probe.panels], default=math.inf)
+    return at(base * 11 / 12) if narrowest < NARROW * base / 12 else lay
+
+
+def _layout_at(spec: dict[str, Any], width: float, height: float | None,
+               page: list[int] | None, fs: float) -> Layout:  # fmt: skip
     grid = spec["grid"]
     pages = spec.get("pages")
     shown: list[int] | None = None
@@ -568,7 +605,6 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         else:
             panels = [{**spec["panels"][index], "row": k // pages["cols"],
                        "col": k % pages["cols"]} for k, index in enumerate(shown)]  # fmt: skip
-    fs = FONT_SIZE
     look = look_of(spec)
     GAP = look["panel_gap"]
     rows = max(1, pages["rows"] if pages else grid["rows"])
@@ -583,7 +619,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         left_cell = at.get((p["row"], p["col"] - 1))
         show_y.append(left_cell is None or panels[left_cell]["yg"] != p["yg"])
 
-    y_label = [_y_labels_width(spec, p["y"], None) if show_y[i] else 0.0
+    y_label = [_y_labels_width(spec, p["y"], None, fs) if show_y[i] else 0.0
                for i, p in enumerate(panels)]  # fmt: skip
     y_axis = [0.0] * cols
 
@@ -629,7 +665,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
             row_w.append(strip_h)
             continue
         labels = grid["row_labels"] if row_depth == 1 else [keys[k] for keys in grid["row_keys"]]
-        widest = max([0.0, *(text_width(label) for label in labels)])
+        widest = max([0.0, *(text_width(label, fs) for label in labels)])
         bold = BOLD if look["strip_bold"] else 1
         row_w.append(min(ROW_LABEL_MAX, math.ceil(widest * bold) + 2 * STRIP_PAD + 4))
     right_strip = sum(row_w)
@@ -670,7 +706,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
     pw, ph = panel_size()
     for i, p in enumerate(panels):
         if show_y[i]:
-            y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], ph))
+            y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], ph, fs))
     gutters()
     pw, ph = panel_size()
     # categories that don't fit side by side: on two lines or angled, the axis that high
@@ -769,6 +805,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         spare=spare,
         x_axis_h=x_axis_h,
         x_labels=x_labels,
+        font_size=fs,
     )
 
 
@@ -787,8 +824,7 @@ def nest(keys: list[list[str]], depth: int) -> list[tuple[int, int, int]]:
 
 
 def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
-                  index: int) -> Layout:  # fmt: skip
-    fs = FONT_SIZE
+                  index: int, fs: float) -> Layout:  # fmt: skip
     p = spec["panels"][index]
     strip_h = _round(fs * 1.5 + 4)
     x_title_h = _round(fs * 1.4 + 4) if spec["x"]["title"] else 0
@@ -796,11 +832,11 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
     left, right, top, bottom = 4 + y_title_w, 10, 6 + y_title_h, 4 + x_title_h
     total = height if height is not None else 360
     x_labels, x_axis_h = x_label_mode(
-        spec, width - left - right - _y_labels_width(spec, p["y"], None), fs
+        spec, width - left - right - _y_labels_width(spec, p["y"], None, fs), fs
     )
     most = max(MIN_PANEL, math.floor(total - top - strip_h - x_axis_h - bottom - 2))
     h = most
-    yw = _y_labels_width(spec, p["y"], h)
+    yw = _y_labels_width(spec, p["y"], h, fs)
     w = max(MIN_PANEL, width - left - yw - right)
     shift = 0
     shape = panel_shape(spec)
@@ -816,7 +852,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
             return w, h, max(0, math.floor((room - w) / 2))
 
         w, h, shift = fit(yw)
-        yw = _y_labels_width(spec, p["y"], h)  # the ticks the panel's height draws
+        yw = _y_labels_width(spec, p["y"], h, fs)  # the ticks the panel's height draws
         w, h, shift = fit(yw)
     rect = Rect(left + shift + yw, top + strip_h, w, h)
     plot_bottom = rect.y + h + x_axis_h
@@ -833,6 +869,7 @@ def _focus_layout(spec: dict[str, Any], width: float, height: float | None,
         spare=None,
         x_axis_h=x_axis_h,
         x_labels=x_labels,
+        font_size=fs,
     )
 
 
@@ -1009,14 +1046,15 @@ def _views(spec: dict[str, Any], lay: Layout, shown: dict[str, Any]) -> list[_Vi
     return out
 
 
-def _x_ticks(spec: dict[str, Any], v: _View, mode: str = "flat") -> list[Tick]:
+def _x_ticks(spec: dict[str, Any], v: _View, mode: str = "flat",
+             fs: float = FONT_SIZE) -> list[Tick]:  # fmt: skip
     ax = spec["x"]
     count = max(3, math.floor(v.rect.w / 80))
     if ax["kind"] == "band" and ax.get("levels"):
         longest = max(len(s) for s in ax["levels"])
         shown = max(1.0, v.x[1] - v.x[0])
         per = v.rect.w / shown
-        room = 0 if mode == "wrap" else FONT_SIZE * 1.5 if mode == "angle" else longest * 7.2 + 10
+        room = 0 if mode == "wrap" else fs * 1.5 if mode == "angle" else longest * 0.6 * fs + 10
         count = math.floor(shown / max(1, math.ceil(room / per)))
     return ticks(ax["kind"], v.x[0], v.x[1], ax["origin"], max(2, count), ax["levels"],
                  ax.get("format"))  # fmt: skip
@@ -1039,9 +1077,11 @@ def _alpha(name: str, a: float) -> str:
 class _Svg:
     """An SVG being written: elements, and clip paths shared by their rectangles."""
 
-    def __init__(self, width: float, height: float) -> None:
+    def __init__(self, width: float, height: float, fs: float = FONT_SIZE) -> None:
         self.width = width
         self.height = height
+        self.fs = fs
+        """The panels' text size, its text's default."""
         self.out: list[str] = []
         self.defs: list[str] = []
         self._clips: dict[tuple[str, ...], str] = {}
@@ -1068,12 +1108,13 @@ class _Svg:
         self.add(f'<rect x="{_n(r.x)}" y="{_n(r.y)}" width="{_n(r.w)}" height="{_n(r.h)}" '
                  f'fill="{fill}"{extra}/>')  # fmt: skip
 
-    def text(self, x: float, y: float, text: str, fill: str, *, size: float = FONT_SIZE,
+    def text(self, x: float, y: float, text: str, fill: str, *, size: float | None = None,
              anchor: str = "start", baseline: str = "middle", bold: bool = False,
              extra: str = "") -> None:  # fmt: skip
+        size = self.fs if size is None else size
         y += {"middle": 0.35, "top": 0.8, "bottom": -0.2}.get(baseline, 0.0) * size
         attrs = f'x="{_n(x)}" y="{_n(y)}"'
-        if size != FONT_SIZE:
+        if size != self.fs:
             attrs += f' font-size="{_n(size)}"'
         if bold:
             attrs += ' font-weight="600"'
@@ -1085,7 +1126,7 @@ class _Svg:
         defs = f"<defs>{''.join(self.defs)}</defs>" if self.defs else ""
         w, h = _n(self.width), _n(self.height)
         return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-                f'viewBox="0 0 {w} {h}" font-family="{FONT}" font-size="{_n(FONT_SIZE)}">'
+                f'viewBox="0 0 {w} {h}" font-family="{FONT}" font-size="{_n(self.fs)}">'
                 f"{defs}{''.join(self.out)}</svg>")  # fmt: skip
 
 
@@ -1111,7 +1152,7 @@ def _draw_back(svg: _Svg, spec: dict[str, Any], views: list[_View], th: dict[str
             svg.rect(r, th["panel"])
         d: list[str] = []
         if grid_x:
-            for value, _ in _x_ticks(spec, v):
+            for value, _ in _x_ticks(spec, v, "flat", svg.fs):
                 x = _round(v.ox + value * v.sx) + 0.5
                 d.append(f"M{_n(x)} {_n(r.y)}V{_n(r.y + r.h)}")
         if grid_y:
@@ -1264,7 +1305,7 @@ def _draw_text(svg: _Svg, t: _Texts, v: _View, th: dict[str, str]) -> None:
 
 def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View],
                 th: dict[str, str], texts: list[_Texts], brushes: list[Rect]) -> None:  # fmt: skip
-    fs = FONT_SIZE
+    fs = lay.font_size
     look = look_of(spec)
     rules = [lr for lr in spec["layers"] if lr["type"] == "rule"]
     for v in views:
@@ -1295,26 +1336,26 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
                 d.append(f"M{_n(r.x)} {_n(r.y + r.h + 0.5)}H{_n(r.x + r.w)}")
             last_right = -math.inf
             per = r.w / max(1.0, v.x[1] - v.x[0])  # a band's width
-            for value, label in _x_ticks(spec, v, lay.x_labels):
+            for value, label in _x_ticks(spec, v, lay.x_labels, fs):
                 x = v.ox + value * v.sx
                 if x < r.x - 0.5 or x > r.x + r.w + 0.5:
                     continue
                 tx = _round(x) + 0.5
                 d.append(f"M{_n(tx)} {_n(r.y + r.h)}V{_n(r.y + r.h + 4)}")
                 if lay.x_labels == "wrap":  # centred in its band, on two lines when it needs
-                    lines = [label] if text_width(label) + 4 <= per else wrap_label(label)
+                    lines = [label] if text_width(label, fs) + 4 <= per else wrap_label(label)
                     for k, line in enumerate(lines):
-                        svg.text(x, r.y + r.h + 4 + fs * (0.75 + 1.2 * k), fit(line, per - 4),
+                        svg.text(x, r.y + r.h + 4 + fs * (0.75 + 1.2 * k), fit(line, per - 4, fs),
                                  th["muted"], anchor="middle")  # fmt: skip
                     continue
                 if lay.x_labels == "angle":  # ending at its tick, cut not to leave the plot
                     svg.open(f'transform="translate({_n(x)} {_n(r.y + r.h + 4 + fs * 0.5)}) '
                              'rotate(-45)"')  # fmt: skip
-                    svg.text(0, 0, fit(label, min(ANGLE_MAX, (x - 2) / SQRT1_2)), th["muted"],
+                    svg.text(0, 0, fit(label, min(ANGLE_MAX, (x - 2) / SQRT1_2), fs), th["muted"],
                              anchor="end")  # fmt: skip
                     svg.close()
                     continue
-                w = text_width(label)
+                w = text_width(label, fs)
                 if x + w / 2 > end:
                     continue  # next to a panel's axis: not up to its labels
                 lx = min(max(x, r.x + w / 2), r.x + r.w - w / 2 + 6)
@@ -1380,21 +1421,22 @@ def _filled_strip(svg: _Svg, th: dict[str, str], look: dict[str, Any], s: Strip,
     cx, cy = rect.x + rect.w / 2, rect.y + rect.h / 2
     if s.vertical:
         svg.open(f'transform="translate({_n(cx)} {_n(cy)}) rotate(90)"')
-        svg.text(0, 0, fit(label, rect.h - 6, bold=bold), th["strip_text"], anchor="middle",
+        svg.text(0, 0, fit(label, rect.h - 6, svg.fs, bold=bold), th["strip_text"], anchor="middle",
                  bold=bold)  # fmt: skip
         svg.close()
     elif note:  # the name at the left, cut to leave the value whole at the right
-        w = text_width(note, bold=bold)
+        w = text_width(note, svg.fs, bold=bold)
         svg.text(rect.x + rect.w - STRIP_PAD, cy + 0.5, note, th["strip_text"], anchor="end",
                  bold=bold)  # fmt: skip
         svg.text(rect.x + STRIP_PAD, cy + 0.5,
-                 fit(label, rect.w - 3 * STRIP_PAD - w, bold=bold), th["strip_text"],
+                 fit(label, rect.w - 3 * STRIP_PAD - w, svg.fs, bold=bold), th["strip_text"],
                  bold=bold)  # fmt: skip
     elif look["strip_align"] == "left" or s.side == "right":
-        svg.text(rect.x + STRIP_PAD, cy + 0.5, fit(label, rect.w - 2 * STRIP_PAD, bold=bold),
-                 th["strip_text"], bold=bold)  # fmt: skip
+        svg.text(rect.x + STRIP_PAD, cy + 0.5,
+                 fit(label, rect.w - 2 * STRIP_PAD, svg.fs, bold=bold), th["strip_text"],
+                 bold=bold)  # fmt: skip
     else:
-        svg.text(cx, cy + 0.5, fit(label, rect.w - 6, bold=bold), th["strip_text"],
+        svg.text(cx, cy + 0.5, fit(label, rect.w - 6, svg.fs, bold=bold), th["strip_text"],
                  anchor="middle", bold=bold)  # fmt: skip
     svg.close()
 
@@ -1416,7 +1458,7 @@ def _flat_strip(svg: _Svg, th: dict[str, str], look: dict[str, Any], s: Strip,
     if s.vertical:
         cx, cy = rect.x + rect.w / 2, rect.y + rect.h / 2
         svg.open(f'transform="translate({_n(cx)} {_n(cy)}) rotate(90)"')
-        svg.text(0, 0, fit(label, rect.h - 6, bold=bold), th["text"], anchor="middle",
+        svg.text(0, 0, fit(label, rect.h - 6, svg.fs, bold=bold), th["text"], anchor="middle",
                  bold=bold)  # fmt: skip
         svg.close()
         svg.close()
@@ -1425,14 +1467,14 @@ def _flat_strip(svg: _Svg, th: dict[str, str], look: dict[str, Any], s: Strip,
     y = rect.y + rect.h / 2 + 0.5
     room = rect.x + rect.w - x - 2
     if note:
-        shown = fit(note, max(0.0, room / 2))
+        shown = fit(note, max(0.0, room / 2), svg.fs)
         svg.text(rect.x + rect.w - 1, y, shown, th["muted"], anchor="end")
-        room -= text_width(shown) + 2 * STRIP_PAD
+        room -= text_width(shown, svg.fs) + 2 * STRIP_PAD
     if look["strip_align"] == "center" and not right and not note:
-        svg.text(rect.x + rect.w / 2, y, fit(label, rect.w - 6, bold=bold), th["text"],
+        svg.text(rect.x + rect.w / 2, y, fit(label, rect.w - 6, svg.fs, bold=bold), th["text"],
                  anchor="middle", bold=bold)  # fmt: skip
     else:
-        svg.text(x, y, fit(label, room, bold=bold), th["text"], bold=bold)
+        svg.text(x, y, fit(label, room, svg.fs, bold=bold), th["text"], bold=bold)
     svg.close()
 
 
@@ -1502,13 +1544,14 @@ class _Entry:
     color: str = ""
     colors: tuple[str, ...] = ()
     state: str = ""  # "on", "off" or ""
+    size: float = FONT_SIZE  # its text's (the page's)
 
     @property
     def width(self) -> float:
         bold = self.kind == "title" or self.state == "on"
         if self.kind == "gradient":
             return 90.0
-        w = text_width(self.label, bold=bold)
+        w = text_width(self.label, self.size, bold=bold)
         return w + 14 if self.kind == "item" else w
 
 
@@ -1522,20 +1565,21 @@ def _legend_label(v: float) -> str:
 
 def _legend_groups(spec: dict[str, Any], brush: dict[str, Any] | None) -> list[list[_Entry]]:
     chosen = (brush or {}).get("legend") or None
+    size = look_of(spec)["font_size"]
     groups = []
     for index, lg in enumerate(spec["legends"]):
-        entries = [_Entry("title", lg["title"])]
+        entries = [_Entry("title", lg["title"], size=size)]
         if lg["kind"] in ("category", "bins"):  # an entry each (a stepped scale's ranges)
             for i, (label, color) in enumerate(zip(lg["labels"], lg["colors"], strict=False)):
                 state = ""
                 if chosen and chosen.get("index") == index and chosen.get("levels"):
                     state = "on" if i in chosen["levels"] else "off"
-                entries.append(_Entry("item", label, color, state=state))
+                entries.append(_Entry("item", label, color, state=state, size=size))
         else:
             end = number_format(lg["format"]) if lg.get("format") else _legend_label
-            entries += [_Entry("text", end(lg.get("lo", 0))),
-                        _Entry("gradient", colors=tuple(lg["colors"])),
-                        _Entry("text", end(lg.get("hi", 1)))]  # fmt: skip
+            entries += [_Entry("text", end(lg.get("lo", 0)), size=size),
+                        _Entry("gradient", colors=tuple(lg["colors"]), size=size),
+                        _Entry("text", end(lg.get("hi", 1)), size=size)]  # fmt: skip
         groups.append(entries)
     return groups
 
@@ -1565,13 +1609,14 @@ class _Placed:
 def _wrapped(entries: list[_Entry], room: float) -> tuple[list[_Placed], float, float]:
     """A group as a flex row that wraps: its pieces, width and height."""
     lines = _flow([e.width for e in entries], room, 10)
+    line_h = entries[0].size * LINE
     placed = []
     width = 0.0
     for n, line in enumerate(lines):
         for i, x in line:
-            placed.append(_Placed(entries[i], x, n * (LINE + 2)))
+            placed.append(_Placed(entries[i], x, n * (line_h + 2)))
             width = max(width, x + entries[i].width)
-    return placed, width, len(lines) * LINE + (len(lines) - 1) * 2
+    return placed, width, len(lines) * line_h + (len(lines) - 1) * 2
 
 
 def _column(entries: list[_Entry]) -> tuple[list[_Placed], float, float]:
@@ -1579,7 +1624,7 @@ def _column(entries: list[_Entry]) -> tuple[list[_Placed], float, float]:
     placed, y = [], 0.0
     for n, e in enumerate(entries):
         placed.append(_Placed(e, 0.0, y))
-        y += LINE + (4 if n == 0 else 3)
+        y += e.size * LINE + (4 if n == 0 else 3)
     return placed, max(e.width for e in entries), y - 3
 
 
@@ -1629,11 +1674,11 @@ def _legend_inset(groups: list[list[_Entry]], spare: Rect) -> list[_Placed] | No
 def _draw_legend(svg: _Svg, placed: list[_Placed], dy: float, th: dict[str, str]) -> None:
     for p in placed:
         e, x, y = p.entry, p.x, p.y + dy
-        mid = y + LINE / 2
+        mid = y + e.size * LINE / 2
         if e.kind == "title":
-            svg.text(x, mid, e.label, th["text"], bold=True)
+            svg.text(x, mid, e.label, th["text"], size=e.size, bold=True)
         elif e.kind == "text":
-            svg.text(x, mid, e.label, th["muted"])
+            svg.text(x, mid, e.label, th["muted"], size=e.size)
         elif e.kind == "gradient":
             gid = f"g{len(svg.defs)}"
             last = max(1, len(e.colors) - 1)
@@ -1649,7 +1694,8 @@ def _draw_legend(svg: _Svg, placed: list[_Placed], dy: float, th: dict[str, str]
             svg.add(f'<rect x="{_n(x)}" y="{_n(mid - 5)}" width="10" height="10" rx="2" '
                     f'fill="{escape(e.color)}"/>')  # fmt: skip
             on = e.state == "on"
-            svg.text(x + 14, mid, e.label, th["text"] if on else th["muted"], bold=on)
+            svg.text(x + 14, mid, e.label, th["text"] if on else th["muted"], size=e.size,
+                     bold=on)  # fmt: skip
             if off:
                 svg.close()
 
@@ -1697,17 +1743,22 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     width = float(width or shown["width"] or DEFAULT_WIDTH)
     if width < 100:
         raise ValueError(f"width must be at least 100 px, got {width}")
-    header = HEADER if spec["title"] else 0
-    # the subtitle under the title, the caption under the plot (widget.css .atr-subtitle,
-    # .atr-caption): wrapped to the width less their padding
-    subtitle = wrap_text(spec.get("subtitle") or "", width - 16) if spec.get("subtitle") else []
+    # the page's text: the header's (its title 1.15 times as big, beside the 24 px buttons),
+    # the subtitle's and the caption's (widget.css .atr-header, .atr-subtitle, .atr-caption,
+    # these wrapped to the width less their padding)
+    size = look_of(spec)["font_size"]
+    title_size = size * TITLE
+    header = max(HEADER, 2 + title_size * LINE) if spec["title"] else 0
+    subtitle = (
+        wrap_text(spec.get("subtitle") or "", width - 16, size) if spec.get("subtitle") else []
+    )
     caption = (
-        wrap_text(spec.get("caption") or "", width - 16, CAPTION_SIZE)
+        wrap_text(spec.get("caption") or "", width - 16, size * CAPTION)
         if spec.get("caption")
         else []
     )
-    sub_h = len(subtitle) * LINE + 4 if subtitle else 0
-    cap_line = CAPTION_SIZE * 1.35
+    sub_h = len(subtitle) * size * LINE + 4 if subtitle else 0
+    cap_line = size * CAPTION * LINE
     cap_h = len(caption) * cap_line + 8 if caption else 0
     top = header + sub_h
     stage_h = None if height is None else height - top - cap_h
@@ -1761,13 +1812,13 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     inset_legend = bool(placed) and legend_h == 0
 
     total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box
-    svg = _Svg(width, total if height is None else float(height))
+    svg = _Svg(width, total if height is None else float(height), lay.font_size)
     svg.add(f'<rect width="100%" height="100%" fill="{th["bg"]}"/>')
     if header:
-        svg.text(8, 14, fit(spec["title"], width - 16, TITLE_SIZE), th["text"], size=TITLE_SIZE,
-                 bold=True)  # fmt: skip
+        svg.text(8, 1 + header / 2, fit(spec["title"], width - 16, title_size), th["text"],
+                 size=title_size, bold=True)  # fmt: skip
     for k, line in enumerate(subtitle):
-        svg.text(8, header + (k + 0.5) * LINE, line, th["muted"])
+        svg.text(8, header + (k + 0.5) * size * LINE, line, th["muted"], size=size)
     svg.open(f'transform="translate(0 {_n(top)})"' if top else 'class="plot"')
 
     views = _views(spec, lay, shown)
@@ -1777,7 +1828,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     _draw_back(svg, spec, views, th)
     if focused is None and page == []:  # as the browser's .atr-empty
         svg.text(width / 2, lay.height * 0.4, "No panel matches the filters", th["muted"],
-                 anchor="middle", baseline="top")  # fmt: skip
+                 size=size, anchor="middle", baseline="top")  # fmt: skip
 
     masks: list[np.ndarray | None] = []
     fractions: list[np.ndarray | None] = [None] * len(marks)
@@ -1812,7 +1863,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         _draw_legend(svg, placed, top + lay.height, th)
     for k, line in enumerate(caption):
         y = top + lay.height + legend_h + 2 + (k + 0.5) * cap_line
-        svg.text(8, y, line, th["muted"], size=CAPTION_SIZE)
+        svg.text(8, y, line, th["muted"], size=size * CAPTION)
     return str(svg)
 
 

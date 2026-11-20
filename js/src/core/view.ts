@@ -33,6 +33,7 @@ import { type FrontState, type PanelView, type Theme, drawBack, drawFront, readT
 import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fileName, NO_DOWNLOADS, PNG_SCALE, pageMeasure, paintHtml, SvgContext, svgMessage } from "./export";
 import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
+import { lookOf } from "./look";
 import { Pager } from "./pager";
 import { pageLabels, pageList, panelOrder } from "./pages";
 import { createRenderer } from "./renderers/select";
@@ -1035,6 +1036,9 @@ export class TrellisView {
     const width = this.steadyWidth(box);
     this.width = width;
     this.dpr = window.devicePixelRatio || 1;
+    // the text's size, its context applied: the header's, the legend's and (unless it steps
+    // with the panels' width) the panels'
+    this.root.style.fontSize = `${lookOf(this.spec).font_size}px`;
     this.theme = readTheme(this.root);
     const ctx = this.front.getContext("2d")!;
     ctx.font = `${this.theme.fontSize}px ${this.theme.font}`;
@@ -1165,14 +1169,14 @@ export class TrellisView {
     const back = this.back.getContext("2d")!;
     back.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     back.clearRect(0, 0, this.width, this.lay.height);
-    drawBack(back, this.spec, views, this.theme);
+    drawBack(back, this.spec, views, this.panelTheme());
     if (this.renderer) this.renderer.render({ draws: this.markDraws(views) });
     const front = this.front.getContext("2d")!;
     front.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     front.clearRect(0, 0, this.width, this.lay.height);
     this.front_.texts = this.scene.texts;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
-    drawFront(front, this.spec, this.lay, views, this.theme, this.front_);
+    drawFront(front, this.spec, this.lay, views, this.panelTheme(), this.front_);
     this.updateChips();
     this.reportView();
   }
@@ -1901,13 +1905,18 @@ export class TrellisView {
     ctx.beginPath();
     ctx.rect(0, 0, stage.width, stage.height);
     ctx.clip();
-    drawBack(ctx, this.spec, views, this.theme);
+    drawBack(ctx, this.spec, views, this.panelTheme());
     drawMarks(ctx, this.markDraws(views));
     const front: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts };
-    drawFront(ctx, this.spec, this.lay, views, this.theme, front);
+    drawFront(ctx, this.spec, this.lay, views, this.panelTheme(), front);
     ctx.restore();
     if (this.spec.legends.length && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);
     paintHtml(ctx, this.caption, origin);
+  }
+
+  /** The theme the panels are drawn in: the page's, in the layout's text size. */
+  private panelTheme(): Theme {
+    return { ...this.theme, fontSize: this.lay?.fontSize ?? this.theme.fontSize };
   }
 
   /** A PNG of the plot as shown, `scale` pixels per CSS pixel. */

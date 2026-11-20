@@ -2844,7 +2844,8 @@ class Trellis:
         for i, (d, (layer, _table, geom)) in enumerate(zip(drawn, built, strict=True)):
             if geom is None:
                 origin = x_origin if layer.axis == "x" else y_origin
-                layers_spec.append(_rule_spec(layer, *rule_values[layer.name], origin))
+                layers_spec.append(self._scaled(_rule_spec(layer, *rule_values[layer.name],
+                                                           origin)))  # fmt: skip
                 self._full.append((layer, _table, None, None))
                 self._sent.append((layer, _table, None, None))
                 continue
@@ -2880,7 +2881,16 @@ class Trellis:
                              self._axes["y"][2])  # fmt: skip
         if panels is not None:
             out["panels"] = sorted(panels)
-        return out
+        return self._scaled(out)
+
+    def _scaled(self, layer: dict[str, Any]) -> dict[str, Any]:
+        """A layer's line width and point or text size, scaled by the theme's context."""
+        k = self.theme.scale
+        if k != 1:
+            for name in ("width", "size"):
+                if isinstance(layer.get(name), int | float):
+                    layer[name] = layer[name] * k
+        return layer
 
     def _wanted(self, spec: dict[str, Any]) -> frozenset[int] | None:
         """The panels whose data a paged plot sends (None: it does not page): those of the

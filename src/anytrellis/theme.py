@@ -6,6 +6,7 @@ import anytrellis as at
 Trellis(cars, wrap="origin", theme="framed")                      # a preset
 Trellis(cars, wrap="origin", theme=at.Theme("minimal", frame=True, panel_gap=12))
 at.set_theme("framed", palette="tab10")                           # every plot from now on
+at.set_theme(context="talk")                                      # bigger, for slides
 ```
 
 The browser (``js/src/core/look.ts``) and the images drawn in Python (``figure.py``) read
@@ -22,25 +23,34 @@ from anytrellis.styling import palette_of
 
 Grid = Literal["auto", "x", "y", "both", "none"]
 Lines = Literal["x", "y", "both", "none"]
+Context = Literal["paper", "notebook", "talk", "poster"]
+
+CONTEXTS: dict[str, float] = {"paper": 0.8, "notebook": 1.0, "talk": 1.5, "poster": 2.0}
+"""How much each context scales text, line widths and point sizes (as seaborn's do)."""
+FONT_SIZE = 12.0
+"""The text's size (px) in the notebook context, and with ``font_size="auto"`` the size
+it steps from: 11 px in panels under ``NARROW`` px wide, 13 px in an opened panel."""
+NARROW = 160
 
 PRESETS: dict[str, dict[str, Any]] = {
     "minimal": {
         "panel_fill": False, "frame": False, "grid": "auto", "grid_opacity": 0.1,
         "axis_lines": "x", "strip_fill": False, "strip_align": "left", "strip_bold": True,
         "y_title": "top", "x_title": "center", "row_labels": "level", "panel_gap": 6,
-        "palette": "petroff10",
+        "palette": "petroff10", "font_size": "auto", "context": "notebook",
     },
     "framed": {
         "panel_fill": False, "frame": True, "grid": "auto", "grid_opacity": 0.1,
         "axis_lines": "none", "strip_fill": False, "strip_align": "center",
         "strip_bold": False, "y_title": "top", "x_title": "end", "row_labels": "level",
-        "panel_gap": 10, "palette": "observable10",
+        "panel_gap": 10, "palette": "observable10", "font_size": "auto",
+        "context": "notebook",
     },
     "classic": {
         "panel_fill": True, "frame": False, "grid": "both", "grid_opacity": 0.12,
         "axis_lines": "both", "strip_fill": True, "strip_align": "center",
         "strip_bold": False, "y_title": "side", "x_title": "center", "row_labels": "side",
-        "panel_gap": 6, "palette": "tab10",
+        "panel_gap": 6, "palette": "tab10", "font_size": 12, "context": "notebook",
     },
 }  # fmt: skip
 """The named themes. minimal (the default): nothing behind the data but a faint grid,
@@ -55,6 +65,7 @@ _CHOICES: dict[str, tuple[Any, ...]] = {
     "y_title": ("top", "side"),
     "x_title": ("center", "end"),
     "row_labels": ("level", "side"),
+    "context": tuple(CONTEXTS),
 }
 
 
@@ -88,6 +99,12 @@ class Theme:
         panel_gap: Pixels between panels.
         palette: Category colours: a name (``"petroff10"``, ``"observable10"``,
             ``"tab10"``, ...) or a list of colours. ``Trellis(palette=)`` overrides it.
+        font_size: The text's size in pixels, or ``"auto"``: 12, stepping to 11 in
+            panels under 160 px wide and to 13 in an opened panel (minimal and framed;
+            classic: 12). The title is 1.15 times as big.
+        context: Where the plot is shown, scaling the text, line widths and point
+            sizes together: ``"paper"`` (0.8), ``"notebook"`` (1), ``"talk"`` (1.5) or
+            ``"poster"`` (2).
     """
 
     base: str = "minimal"
@@ -104,6 +121,8 @@ class Theme:
     row_labels: Literal["level", "side"] | None = None
     panel_gap: int | None = None
     palette: str | Sequence[str] | None = None
+    font_size: float | Literal["auto"] | None = None
+    context: Context | None = None
 
     def __post_init__(self) -> None:
         if self.base not in PRESETS:
@@ -125,6 +144,10 @@ class Theme:
         gap = self.panel_gap
         if not isinstance(gap, int) or isinstance(gap, bool) or not 0 <= gap <= 100:
             raise ValueError(f"panel_gap must be a whole number of pixels, 0 to 100, got {gap!r}")
+        size = self.font_size
+        if size != "auto" and (not isinstance(size, int | float) or isinstance(size, bool)
+                               or not 6 <= size <= 48):  # fmt: skip
+            raise ValueError(f'font_size must be "auto" or pixels from 6 to 48, got {size!r}')
         if not isinstance(self.palette, str):
             object.__setattr__(self, "palette", tuple(self.palette or ()))
         palette_of(self.palette or ())  # an unknown name or colour raises here
@@ -137,10 +160,20 @@ class Theme:
         """Its category colours."""
         return palette_of(self.palette or ())
 
+    @property
+    def scale(self) -> float:
+        """How much the context scales text, line widths and point sizes."""
+        return CONTEXTS[self.context or "notebook"]
+
     def spec(self) -> dict[str, Any]:
-        """The settings the browser draws with (look.ts ``Look``)."""
+        """The settings the browser draws with (look.ts ``Look``): the text's size in
+        pixels, its context applied, and whether it steps with the panels' width."""
         out = asdict(self)
         del out["palette"]
+        size = FONT_SIZE if self.font_size == "auto" else float(self.font_size or FONT_SIZE)
+        out["font_size"] = size * self.scale
+        out["font_step"] = self.font_size == "auto"
+        out["mark_scale"] = self.scale
         return out
 
 

@@ -61,7 +61,7 @@ export function xTicks(spec: TrellisSpec, v: PanelView, mode: XLabels = "flat", 
     const longest = Math.max(...spec.x.levels.map((l) => l.length));
     const shown = Math.max(1, v.x[1] - v.x[0]);
     const per = v.rect.w / shown;
-    const room = mode === "wrap" ? 0 : mode === "angle" ? fs * 1.5 : longest * 7.2 + 10;
+    const room = mode === "wrap" ? 0 : mode === "angle" ? fs * 1.5 : longest * 0.6 * fs + 10;
     count = Math.floor(shown / Math.max(1, Math.ceil(room / per)));
   }
   return ticks(spec.x.kind, v.x[0], v.x[1], spec.x.origin, Math.max(2, count), spec.x.levels, spec.x.format);
@@ -101,7 +101,7 @@ export function drawBack(ctx: CanvasRenderingContext2D, spec: TrellisSpec, views
     ctx.lineWidth = 1;
     ctx.beginPath();
     if (grid.x) {
-      for (const t of xTicks(spec, v)) {
+      for (const t of xTicks(spec, v, "flat", theme.fontSize)) {
         const x = Math.round(v.map.ox + t.value * v.map.sx) + 0.5;
         ctx.moveTo(x, r.y);
         ctx.lineTo(x, r.y + r.h);

@@ -157,6 +157,8 @@ Trellis(cars, wrap="origin", theme="framed")  # "minimal" (the default), "framed
 Trellis(cars, wrap="origin", theme=Theme("minimal", grid="both", panel_gap=16))
 set_theme("framed")  # every plot from now on
 set_theme(strip_fill=True)  # the minimal theme, one setting changed
+set_theme(context="talk")  # text, lines and points 1.5 times: "paper", "notebook", "poster"
+set_theme(font_size=14)  # px; "auto": 12, 11 in narrow panels, 13 in an opened one
 get_theme()
 set_theme()  # back to minimal
 ```

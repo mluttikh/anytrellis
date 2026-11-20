@@ -5,6 +5,7 @@ drawing.ts, layout.ts) and in images drawn in Python (figure.py)."""
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import pytest
 
@@ -190,3 +191,59 @@ def test_set_theme_is_the_default_of_plots_made_after() -> None:
 def test_palette_overrides_the_themes() -> None:
     legend = lines(Theme("framed", palette="tab10"), palette="petroff6")
     assert legend._shown_scene()[0]["legends"][0]["colors"] == PALETTES["petroff6"][:3]
+
+
+def test_font_size_and_context_resolve_to_pixels() -> None:
+    default = Theme().spec()
+    assert (default["font_size"], default["font_step"], default["mark_scale"]) == (12, True, 1)
+    assert Theme("classic").spec()["font_step"] is False  # classic: 12 px, as before
+    talk = Theme(context="talk").spec()
+    assert (talk["font_size"], talk["font_step"], talk["mark_scale"]) == (18.0, True, 1.5)
+    fixed = Theme(font_size=14, context="poster").spec()
+    assert (fixed["font_size"], fixed["font_step"]) == (28.0, False)
+    refused: list[tuple[str, Any]] = [("font_size", 3), ("font_size", "big"),
+                                      ("font_size", True), ("context", "slides")]  # fmt: skip
+    for name, value in refused:
+        with pytest.raises(ValueError, match=name):
+            Theme(**{name: value})
+
+
+def test_auto_text_steps_with_the_panels_width() -> None:
+    gap = load("gapminder")
+    narrow = Trellis(gap, wrap="country", cols=8).line(x="year", y="life_expect", color="region")
+    spec = narrow._shown_scene()[0]
+    assert layout(spec, 900).font_size == 11  # panels under 160 px
+    assert layout(spec, 1600).font_size == 12
+    assert layout(spec, 900, focused=0).font_size == 13  # an opened panel
+    classic = Trellis(gap, wrap="country", cols=8, theme="classic").line(x="year", y="life_expect")
+    spec = classic._shown_scene()[0]
+    assert {layout(spec, 900).font_size, layout(spec, 900, focused=0).font_size} == {12}
+    svg = figure_svg(narrow, width=900)
+    assert 'font-size="11"' in svg.split(">", 1)[0]  # the panels' text
+    assert re.search(r'font-size="12"[^>]*>region<', svg)  # the legend: the page's text
+
+
+def test_a_context_scales_text_lines_and_points(cars) -> None:
+    def plot(theme: Theme) -> Trellis:
+        return (Trellis(cars, wrap="origin", theme=theme, title="Fuel", caption="UCI")
+                .points(x="weight", y="mpg").line(x="weight", y="mpg").rule(y=20)
+                .text(x="weight", y="mpg", text="cylinders"))  # fmt: skip
+
+    def sizes(t: Trellis) -> list[float]:
+        return [lr.get("size") or lr.get("width") for lr in t._shown_scene()[0]["layers"]]
+
+    assert sizes(plot(Theme(context="talk"))) == [k * 1.5 for k in sizes(plot(Theme()))]
+    talk = plot(Theme(context="talk"))
+    svg = figure_svg(talk, width=800)
+    assert 'font-size="18"' in svg.split(">", 1)[0]  # wide panels: no step
+    assert re.search(r'font-size="20.7"[^>]*>Fuel<', svg)  # the title, 1.15 times
+    assert re.search(r'font-size="16.5"[^>]*>UCI<', svg)  # the caption, 11/12
+    assert (
+        layout(talk._shown_scene()[0], 800).height
+        > layout(plot(Theme())._shown_scene()[0], 800).height
+    )
+    try:
+        set_theme(context="paper")
+        assert Trellis(cars).theme.spec()["font_size"] == pytest.approx(9.6)
+    finally:
+        set_theme()
