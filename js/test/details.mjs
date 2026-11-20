@@ -131,7 +131,12 @@ async function hover(page, x, y) {
   await page.mouse.move(at[0] - 3, at[1] - 3);
   await page.mouse.move(at[0], at[1]);
   await page.waitForTimeout(100);
-  return page.$$eval(".atr-tip tr", (rows) => Object.fromEntries(rows.map((r) => [...r.children].map((c) => c.textContent.trim()))));
+  // the rows, and x from the title line
+  return page.$eval(".atr-tip", (t) => {
+    const rows = Object.fromEntries([...t.querySelectorAll("tr")].map((r) => [...r.children].map((c) => c.textContent.trim())));
+    const x = t.querySelector(".atr-tip-x");
+    return x ? { [x.dataset.name]: x.dataset.value, ...rows } : rows;
+  });
 }
 
 {

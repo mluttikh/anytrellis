@@ -170,8 +170,66 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 .atr-tip-head {
-  font-weight: 600;
   margin-bottom: 2px;
+}
+/* the panel, then the position, then the layer: one line, a dot between */
+.atr-tip-head > span + span::before {
+  content: " · ";
+  color: var(--atr-muted);
+  font-weight: normal;
+}
+.atr-tip-panel {
+  font-weight: 600;
+}
+.atr-tip-x {
+  font-variant-numeric: tabular-nums;
+}
+.atr-tip-key,
+.atr-tip-layer {
+  color: var(--atr-muted);
+}
+.atr-tip-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+.atr-root .atr-tip-table tr.atr-tip-strong th,
+.atr-root .atr-tip-table tr.atr-tip-strong td {
+  color: var(--atr-text);
+  font-weight: 600;
+}
+/* pinned by a click: it stays, its text can be selected, × unpins it */
+.atr-tip.atr-tip-pinned {
+  display: block;
+  pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  z-index: 3;
+  padding-right: 22px;
+}
+.atr-tip-close {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--atr-muted);
+  font: inherit;
+  line-height: 16px;
+  cursor: pointer;
+}
+.atr-tip-close:hover,
+.atr-tip-close:focus-visible {
+  color: var(--atr-text);
+  background: var(--atr-border);
 }
 /* the page's own table styles (a docs theme, a notebook's) must not reach it: specific */
 .atr-root .atr-tip table.atr-tip-table {

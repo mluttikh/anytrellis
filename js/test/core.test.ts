@@ -87,10 +87,13 @@ describe("ticks", () => {
     expect(labels("symlog", -0.2, 0.3, 5)).toEqual(["−0.4", "−0.2", "0.0", "0.2", "0.4", "0.6", "0.8"]);
     for (const t of ticks("sqrt", 0, 10, 0, 8)) expect(t.value).toBeCloseTo(Math.sqrt(Number(t.label)));
     expect(ticks("sqrt", 0, 10, 0, 8, null, ".1f")[1].label).toBe("10.0");
-    expect(formatValue("sqrt", 3, 0, 10)).toBe("9.0");
+    expect(formatValue("sqrt", 3, 0, 10)).toBe("9");
     expect(formatValue("symlog", -2, 0, 4)).toBe("−99");
-    expect(formatHeight("sqrt", 4, 3, 0, 10)).toBe("7.0");
-    expect(formatHeight("number", 4, 3, 0, 10)).toBe("1.00");
+    expect(formatHeight("sqrt", 4, 3, 0, 10)).toBe("7");
+    expect(formatHeight("number", 4, 3, 0, 10)).toBe("1");
+    expect(formatValue("number", 1975, 0, 50)).toBe("1975");
+    expect(formatValue("number", 2.5, 0, 10)).toBe("2.5");
+    expect(formatValue("number", 2.5e6, 0, 1e7)).toBe("2.5M");
   });
 
   it("formats values at the precision of the view", () => {

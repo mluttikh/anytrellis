@@ -253,11 +253,12 @@ Click a plot first, then:
 | Scroll, drag | zoom x, pan (Shift+scroll: zoom y; on an axis: that axis alone) |
 | Shift+drag, ++z++ | box zoom |
 | ++s++ | drag selects |
+| Hover, click | the values there (lines by colour: every one at that x); a click pins them |
 | Double-click a panel, ++enter++ | see it alone; ++backspace++ back |
 | ++page-up++ ++page-down++ | previous or next panel, or page |
 | ++y++ | fit y to the data in view |
 | ++r++, ++u++ | reset the zoom, undo it |
-| ++esc++ | clear the selection |
+| ++esc++ | unpin, clear the selection |
 | ++e++, ++f++, ++question++ | export, full screen, help |
 
 See [Mouse and keys](reference/mouse-and-keys.md).

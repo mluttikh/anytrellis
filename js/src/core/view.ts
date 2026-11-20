@@ -114,6 +114,8 @@ interface Drag {
   xr: Range;
   yr: Range;
   moved: boolean;
+  /** The plot had the keys before: a click only giving them to it pins nothing. */
+  focused: boolean;
 }
 
 type Mode = "pan" | "zoom" | "select";
@@ -135,6 +137,37 @@ const FIT_PAD = 0.04;
 
 const ZOOM_SPEED = 0.0015;
 const HOVER_RADIUS = 10;
+/** The most series a tooltip lists at one x (then "n more"). */
+const SERIES_ROWS = 20;
+
+/** A tooltip's title line: the panel, the position (its axis title and value), the layer. */
+interface TipHead {
+  panel: string;
+  x: [string, string] | null;
+  layer: string;
+}
+
+/** A tooltip row: a label and a value, with a swatch of a series' colour; `strong`: the
+ * series nearest the pointer. */
+interface TipRow {
+  label: string;
+  value: string;
+  color?: string;
+  strong?: boolean;
+}
+
+/** The series at one x (``seriesAt``): top to bottom, `near` the one nearest the pointer. */
+interface Across {
+  x: number;
+  rows: { label: string; y: number; py: number; color: string; r: number }[];
+  near: number;
+}
+
+/** An instance's colour, as CSS. */
+function colorOf(layer: LayerData, i: number): string {
+  const c = layer.set.colors;
+  return `rgb(${c[i * 4]},${c[i * 4 + 1]},${c[i * 4 + 2]})`;
+}
 /** An opened panel's height (not full screen): the grid's, within these bounds. */
 const FOCUS_MIN = 320;
 const FOCUS_MAX_SCREEN = 0.85;
@@ -208,7 +241,10 @@ export class TrellisView {
   private views: PanelView[] = [];
   private frameRequested = false;
   private frameId = 0;
-  private front_: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: [], texts: [] };
+  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], texts: [] };
+  /** A tooltip pinned by a click (null: none), and the views it was pinned in. */
+  private pinned: HTMLDivElement | null = null;
+  private pinnedAt = "";
   private drag: Drag | null = null;
   /** What plain drag does: pan, draw a zoom box, or draw a brush. Shift+drag: a zoom box
    * (in zoom mode: pan). */
@@ -400,6 +436,7 @@ export class TrellisView {
     const openName = this.pendingFocus ?? (old && this.focused !== null ? panelName(old, this.focused) : null);
     this.spec = spec;
     this.detail.clear(); // Python sends them again for the view shown
+    this.unpin();
     this.scene = buildScene(spec, this.opts.source);
     this.renderer?.retain(new Set(this.scene.layers.map((l) => l.set.key)));
     // keep the zoom when only the layers changed (same domains)
@@ -1165,6 +1202,8 @@ export class TrellisView {
     this.settleSelection();
     const views = this.panelViews();
     this.views = views;
+    // a pinned tooltip: until the panels move under it
+    if (this.pinned && this.viewsKey() !== this.pinnedAt) this.unpin(false);
     const back = this.back.getContext("2d")!;
     back.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     back.clearRect(0, 0, this.width, this.lay.height);
@@ -1281,6 +1320,8 @@ export class TrellisView {
         ["Scroll", "zoom x (Shift: y; over an axis: that axis)"],
         ["Drag", "pan, draw a zoom box or select, as the mode on the left of the toolbar says"],
         ["Shift+drag", "box zoom"],
+        ["Hover", "the values there; lines by colour: every one at that x"],
+        ["Click", "pin the tooltip, to compare (Esc: unpin)"],
         ["Double-click", "open a panel (an axis: reset it)"],
         ["Click a legend entry", "select its colour (Shift: add one)"],
       ]),
@@ -1288,7 +1329,7 @@ export class TrellisView {
         ["z  s", "box zoom, select (again: pan)"],
         ["y", "fit y to the data in view"],
         ["r  u", "reset the zoom, undo the last"],
-        ["Esc", "clear the selection, close a panel"],
+        ["Esc", "unpin, clear the selection, close a panel"],
         ["Enter", "open the panel under the pointer"],
         ["Page Up / Down", "the previous / next panel or page"],
         ["e  f", "export, full screen"],
@@ -1423,6 +1464,7 @@ export class TrellisView {
       "pointerdown",
       (e) => {
         if (e.button !== 0) return;
+        const focused = this.root.contains(document.activeElement);
         this.root.focus({ preventScroll: true });
         const [x, y] = this.local(e);
         const onAxis = this.axisAt(x, y);
@@ -1438,7 +1480,7 @@ export class TrellisView {
           kind = br && x >= br.x && x <= br.x + br.w && y >= br.y && y <= br.y + br.h ? "move" : "brush";
           this.dragBrush = this.brush;
         } else kind = "pan";
-        this.drag = { kind, view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false };
+        this.drag = { kind, view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false, focused };
         stage.setPointerCapture(e.pointerId);
       },
       { signal },
@@ -1455,17 +1497,18 @@ export class TrellisView {
           if (!d.moved && d.kind !== "box" && d.kind !== "brush" && d.kind !== "move") this.remember();
           d.moved = true;
           this.hideTip();
+          this.front_.readout = null;
           if (d.kind === "box") {
             const b = this.boxOf(d, x, y);
             this.front_.box = b?.rect ?? null;
             this.front_.ghosts = b ? this.ghostsOf(d.view, b.rect, b.along) : [];
             this.front_.crossX = null;
-            this.front_.hover = null;
+            this.front_.hovers = [];
             this.request();
             return;
           }
           if (d.kind === "brush") {
-            this.front_.hover = null;
+            this.front_.hovers = [];
             this.setBrush(this.brushOf(d, x, y), false);
             this.opts.onBrushing?.(this.brush);
             return;
@@ -1474,7 +1517,7 @@ export class TrellisView {
             const b = this.dragBrush;
             const mx = (x - d.x) / v.map.sx;
             const my = (y - d.y) / v.map.sy;
-            this.front_.hover = null;
+            this.front_.hovers = [];
             this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null, legend: b.legend ?? null }, false);
             this.opts.onBrushing?.(this.brush);
             return;
@@ -1498,6 +1541,12 @@ export class TrellisView {
       const d = this.drag;
       if (d) stage.releasePointerCapture?.(e.pointerId);
       this.drag = null;
+      // a click (not a drag) pins the tooltip shown, or unpins one; not the click that gives
+      // the plot the keys
+      if (d && !d.moved && d.focused && e.type === "pointerup" && (d.kind === "pan" || d.kind === "box")) {
+        if (this.tip.style.display === "block") this.pin();
+        else this.unpin();
+      }
       if (d?.kind === "brush" || d?.kind === "move") {
         this.dragBrush = null;
         if (e.type === "pointercancel") return;
@@ -1633,6 +1682,10 @@ export class TrellisView {
           this.pager.toggleMenu(false);
           return true;
         }
+        if (this.pinned) {
+          this.unpin();
+          return true;
+        }
         if (this.brush) {
           this.setBrush(null, true);
           return true;
@@ -1670,67 +1723,189 @@ export class TrellisView {
       this.clearHover();
       return;
     }
+    const spec = this.spec;
     const v = this.views[vi];
     const p = v.panel;
     this.pointerPanel = p;
-    const panel = this.spec.panels[p];
-    this.front_.crossX = this.spec.x.kind === "band" ? null : (x - v.map.ox) / v.map.sx;
-    this.front_.crossGroup = panel.xg;
+    const ux = (x - v.map.ox) / v.map.sx;
+    const uy = (y - v.map.oy) / v.map.sy;
+    this.front_.crossX = spec.x.kind === "band" ? null : ux;
+    this.front_.crossGroup = spec.panels[p].xg;
+    this.front_.readout = { panel: p, x: spec.x.kind === "band" ? null : ux, y: spec.y.kind === "band" ? null : uy };
+    this.front_.hoverPanel = p;
     const hit = pick(this.scene, p, v.map, x, y, HOVER_RADIUS);
+    // lines coloured by category: every series at the nearest x
+    const across = this.seriesAt(p, v, ux, y, hit);
+    if (across) {
+      if (spec.x.kind !== "band") {
+        this.front_.crossX = across.x;
+        this.front_.readout.x = across.x;
+      }
+      this.front_.hovers = across.rows.map((r) => ({ x: v.map.ox + across.x * v.map.sx, y: r.py, r: r.r, color: r.color }));
+      this.showSeriesTip(p, v, across, x, y);
+      this.request();
+      return;
+    }
     if (!hit) {
-      this.front_.hover = null;
-      this.front_.hoverPanel = null;
+      this.front_.hovers = [];
       this.hideTip();
       this.request();
       return;
     }
-    const pt = hitPoint(hit, v.map, x, y, barsAlongY(this.spec));
+    const pt = hitPoint(hit, v.map, x, y, barsAlongY(spec));
     const hx = v.map.ox + pt.x * v.map.sx;
     const hy = v.map.oy + pt.y * v.map.sy;
-    const c = hit.layer.set.colors;
-    const color = `rgb(${c[hit.instance * 4]},${c[hit.instance * 4 + 1]},${c[hit.instance * 4 + 2]})`;
-    this.front_.hover = hit.layer.kind === 0 ? null : { x: hx, y: hy, r: Math.max(3, hit.layer.halfWidth), color };
-    this.front_.hoverPanel = p;
+    const color = colorOf(hit.layer, hit.instance);
+    this.front_.hovers = hit.layer.kind === 0 ? [] : [{ x: hx, y: hy, r: Math.max(3, hit.layer.halfWidth), color }];
     this.showTip(hit, p, pt, x, y, v);
     this.request();
   }
 
   private clearHover(): void {
     this.front_.crossX = null;
-    this.front_.hover = null;
+    this.front_.hovers = [];
     this.front_.hoverPanel = null;
+    this.front_.readout = null;
     this.hideTip();
     this.request();
   }
 
+  /** The lines coloured by category, at the x of the point nearest the pointer: each
+   * series' value there (a step line's level from there), top to bottom; null when the
+   * pointer is on another mark, off the lines' span, or a colour holds several lines
+   * (`group=` within a colour: which one would be ambiguous). */
+  private seriesAt(p: number, v: PanelView, ux: number, py: number, hit: Hit | null): Across | null {
+    const spec = this.spec!;
+    const layers = this.scene!.layers.filter((l) => l.spec.type === "line" && !l.spec.context && l.codes && l.spec.color.legend !== null && l.spec.color.legend !== undefined);
+    if (!layers.length || (hit && !layers.includes(hit.layer))) return null;
+    let at = NaN;
+    let gap = Infinity;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const l of layers) {
+      const c = l.coords;
+      for (let i = l.starts[p]; i < l.starts[p + 1]; i++) {
+        for (const k of [0, 2]) {
+          const u = c[i * 4 + k];
+          if (!Number.isFinite(u)) continue;
+          if (u < lo) lo = u;
+          if (u > hi) hi = u;
+          const d = Math.abs(u - ux);
+          if (d < gap) {
+            gap = d;
+            at = u;
+          }
+        }
+      }
+    }
+    const reach = HOVER_RADIUS / Math.abs(v.map.sx);
+    if (!Number.isFinite(at) || ux < lo - reach || ux > hi + reach) return null;
+    const tol = 1e-9 * Math.max(1, Math.abs(at), Math.abs(v.x[1] - v.x[0]));
+    // per series (a layer's colour): its value at `at`, from the segment starting there, or
+    // passing it, or ending there; two of one kind: two lines of one colour
+    const found = new Map<string, { layer: LayerData; i: number; y: number; rank: number; count: number }>();
+    for (const l of layers) {
+      const c = l.coords;
+      for (let i = l.starts[p]; i < l.starts[p + 1]; i++) {
+        const ax = c[i * 4];
+        const ay = c[i * 4 + 1];
+        const bx = c[i * 4 + 2];
+        const by = c[i * 4 + 3];
+        if (!(Number.isFinite(ay) && Number.isFinite(by))) continue;
+        let y: number;
+        let rank: number;
+        if (Math.abs(ax - at) <= tol) {
+          if (Math.abs(bx - ax) <= tol && ay !== by) continue; // a step's riser
+          y = ay;
+          rank = 2;
+        } else if (Math.min(ax, bx) < at && at < Math.max(ax, bx)) {
+          y = ay + ((by - ay) * (at - ax)) / (bx - ax);
+          rank = 1;
+        } else if (Math.abs(bx - at) <= tol) {
+          y = by;
+          rank = 0;
+        } else continue;
+        const key = `${l.index}:${l.codes![i]}`;
+        const had = found.get(key);
+        if (!had || (rank > had.rank && !(had.rank > 0))) found.set(key, { layer: l, i, y, rank, count: 1 });
+        else if (rank === had.rank || (rank > 0 && had.rank > 0)) had.count++;
+      }
+    }
+    if (!found.size || [...found.values()].some((f) => f.count > 1)) return null;
+    const named = new Set(layers.map((l) => l.spec.name)).size > 1;
+    const rows = [...found.values()].map((f) => {
+      const legend = spec.legends[f.layer.spec.color.legend!];
+      const label = legend?.labels?.[f.layer.codes![f.i]] ?? "";
+      return {
+        label: named ? `${label} (${f.layer.spec.name})` : label,
+        y: f.y,
+        py: v.map.oy + f.y * v.map.sy,
+        color: colorOf(f.layer, f.i),
+        r: Math.max(3, f.layer.halfWidth),
+      };
+    });
+    rows.sort((a, b) => a.py - b.py);
+    let near = 0;
+    rows.forEach((r, k) => {
+      if (Math.abs(r.py - py) < Math.abs(rows[near].py - py)) near = k;
+    });
+    return { x: at, rows, near };
+  }
+
+  private showSeriesTip(p: number, v: PanelView, across: Across, px: number, py: number): void {
+    const spec = this.spec!;
+    const x = formatValue(spec.x.kind, across.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format);
+    const shown = across.rows.slice(0, SERIES_ROWS);
+    const rows: TipRow[] = shown.map((r, k) => ({
+      label: r.label,
+      value: formatValue(spec.y.kind, r.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format),
+      color: r.color,
+      strong: k === across.near,
+    }));
+    if (across.rows.length > shown.length) rows.push({ label: `${across.rows.length - shown.length} more`, value: "" });
+    this.hoverKey = `series:${p}:${across.x}`;
+    this.renderTip({ panel: spec.panels[p].keys.join(" · "), x: [spec.x.title, x], layer: "" }, rows);
+    this.placeTip(px, py);
+  }
+
+  /** One mark's tooltip: its panel and position (x; bars along y: y) on the title line, then
+   * its value with its colour's swatch, its colour column and the tooltip columns. */
   private showTip(hit: Hit, p: number, pt: HitPoint, px: number, py: number, v: PanelView): void {
     const spec = this.spec!;
     const layer = hit.layer;
-    const rows: [string, string][] = [];
-    const keys = spec.panels[p].keys.join(" · ");
+    const along = barsAlongY(spec);
     // a bar's or a stacked area's own value: from its base
     const isBar = layer.spec.type === "bars" || layer.spec.type === "area";
     const hide = layer.spec.hide ?? [];
     const xText = pt.x0 === undefined ? formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format) : formatHeight(spec.x.kind, pt.x, pt.x0, spec.x.origin, v.x[1] - v.x[0], spec.x.format);
     const yText = !isBar ? formatValue(spec.y.kind, pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format) : formatHeight(spec.y.kind, pt.y, pt.y0, spec.y.origin, v.y[1] - v.y[0], spec.y.format);
-    if (!hide.includes("x")) rows.push([spec.x.title || "x", xText]);
-    if (!hide.includes("y")) rows.push([spec.y.title || "y", yText]);
+    const [posAxis, valAxis] = along ? (["y", "x"] as const) : (["x", "y"] as const);
+    const text = { x: xText, y: yText };
+    const head: TipHead = {
+      panel: spec.panels[p].keys.join(" · "),
+      x: hide.includes(posAxis) ? null : [spec[posAxis].title, text[posAxis]],
+      layer: new Set(spec.layers.map((l) => l.name)).size > 1 ? layer.spec.name : "", // a box's parts: one
+    };
+    const rows: TipRow[] = [];
+    const color = colorOf(layer, hit.instance);
+    if (!hide.includes(valAxis)) rows.push({ label: spec[valAxis].title || valAxis, value: text[valAxis], color });
     const legend = layer.spec.color.legend;
     if (layer.codes && legend !== null) {
       const lg = spec.legends[legend];
-      rows.push([lg.title, lg.labels?.[layer.codes[hit.instance]] ?? ""]);
+      rows.push({ label: lg.title, value: lg.labels?.[layer.codes[hit.instance]] ?? "", color: rows.length ? undefined : color });
     }
     const key = `${layer.index}:${layer.spec.coords.id}:${hit.instance}`;
     const tips = layer.spec.tips;
+    const extra = (pairs: string[][]): TipRow[] => pairs.map(([k, val]) => ({ label: k, value: val ?? "" }));
     if (tips && layer.tipRows) {
       // given with the spec: no need to ask Python
       const values = tips.values[layer.tipRows[hit.instance]] ?? [];
-      this.renderTip(keys, layer, rows, tips.names.map((n, k) => [n, values[k] ?? ""]));
+      this.renderTip(head, [...rows, ...extra(tips.names.map((n, k) => [n, values[k] ?? ""]))]);
       this.placeTip(px, py);
       this.hoverKey = key;
       return;
     }
-    this.renderTip(keys, layer, rows, []);
+    this.renderTip(head, rows);
     this.placeTip(px, py);
     if (key === this.hoverKey) return;
     this.hoverKey = key;
@@ -1738,28 +1913,46 @@ export class TrellisView {
       const req = ++this.tipRequest;
       this.opts
         .tooltip(layer.index, hit.instance, layer.spec.coords.id)
-        .then((extra) => {
+        .then((more) => {
           if (req !== this.tipRequest || this.hoverKey !== key) return;
-          this.renderTip(keys, layer, rows, extra);
+          this.renderTip(head, [...rows, ...extra(more)]);
         })
         .catch(() => {});
     }
   }
 
-  private renderTip(title: string, layer: LayerData, rows: [string, string][], extra: string[][]): void {
-    const multi = new Set(this.spec?.layers.map((l) => l.name)).size > 1; // a box's parts: one
-    const head = [title, multi ? layer.spec.name : ""].filter(Boolean).join(" — ");
-    const all = [...rows, ...extra.map(([k, v]) => [k, v] as [string, string])];
+  /** The tooltip: a title line (the panel · x and its value · the layer), then a row a
+   * value, each a label and the value, a series' with its colour's swatch. */
+  private renderTip(head: TipHead, rows: TipRow[]): void {
     this.tip.replaceChildren();
-    if (head) this.tip.append(el("div", "atr-tip-head", head));
+    const top = el("div", "atr-tip-head");
+    if (head.panel) top.append(el("span", "atr-tip-panel", head.panel));
+    if (head.x) {
+      const [name, value] = head.x;
+      const x = el("span", "atr-tip-x");
+      x.dataset.name = name || "x";
+      x.dataset.value = value;
+      if (name) x.append(el("span", "atr-tip-key", name), " ");
+      x.append(value);
+      top.append(x);
+    }
+    if (head.layer) top.append(el("span", "atr-tip-layer", head.layer));
+    if (top.childElementCount) this.tip.append(top);
     // a class: page styles for plain tables (a docs theme's, `table:not([class])`) leave it be
     const table = el("table", "atr-tip-table");
-    for (const [k, val] of all) {
-      const tr = el("tr");
-      tr.append(el("th", "", k), el("td", "", val));
+    for (const row of rows) {
+      const tr = el("tr", row.strong ? "atr-tip-strong" : "");
+      const th = el("th");
+      if (row.color) {
+        const swatch = el("span", "atr-tip-swatch");
+        swatch.style.background = row.color;
+        th.append(swatch);
+      }
+      th.append(row.label);
+      tr.append(th, el("td", "", row.value));
       table.append(tr);
     }
-    this.tip.append(table);
+    if (rows.length) this.tip.append(table);
     this.tip.style.display = "block";
   }
 
@@ -1776,6 +1969,45 @@ export class TrellisView {
     this.tip.style.display = "none";
     this.hoverKey = "";
   }
+
+  /** The tooltip shown, pinned where it is: it stays (its text can be selected and copied)
+   * while the pointer moves on, until a click elsewhere, Esc, its ×, or the panels move. */
+  private pin(): void {
+    this.unpin(false);
+    const t = this.tip.cloneNode(true) as HTMLDivElement;
+    t.classList.add("atr-tip-pinned");
+    const close = el("button", "atr-tip-close", "×");
+    close.type = "button";
+    close.title = "Unpin (Esc)";
+    close.setAttribute("aria-label", "Unpin the tooltip");
+    close.addEventListener("click", () => this.unpin());
+    t.prepend(close);
+    // the plot under it does not zoom, pan or brush from it
+    for (const type of ["pointerdown", "pointermove", "pointerup", "dblclick", "wheel"]) t.addEventListener(type, (e) => e.stopPropagation());
+    this.stage.append(t);
+    this.pinned = t;
+    this.pinnedAt = this.viewsKey();
+    this.front_.pins = this.front_.hovers;
+    this.front_.pinPanel = this.front_.hoverPanel;
+    this.front_.hovers = [];
+    this.hideTip();
+    this.request();
+  }
+
+  private unpin(redraw = true): void {
+    if (!this.pinned) return;
+    this.pinned.remove();
+    this.pinned = null;
+    this.front_.pins = [];
+    this.front_.pinPanel = null;
+    if (redraw) this.request();
+  }
+
+  /** Where the panels are and what they show: a pinned tooltip holds while it is the same. */
+  private viewsKey(): string {
+    return this.views.map((v) => `${v.panel}:${v.x}:${v.y}:${v.rect.x},${v.rect.y},${v.rect.w},${v.rect.h}`).join("|");
+  }
+
 
   /** The legend in `spare` (a wrap's empty cells) if it fits there, as a list or else in
    * rows; under the plot otherwise. True when it went in. */
@@ -1908,7 +2140,7 @@ export class TrellisView {
     ctx.clip();
     drawBack(ctx, this.spec, views, this.panelTheme());
     drawMarks(ctx, this.markDraws(views));
-    const front: FrontState = { crossX: null, crossGroup: null, hover: null, hoverPanel: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts };
+    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts };
     drawFront(ctx, this.spec, this.lay, views, this.panelTheme(), front);
     ctx.restore();
     if (this.spec.legends.length && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);
