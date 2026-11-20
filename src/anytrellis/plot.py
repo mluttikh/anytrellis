@@ -3382,7 +3382,7 @@ def _buffer_ids(spec_layer: dict[str, Any]) -> list[str]:
                                          "tip_rows", "labels", "offsets", "colors")]  # fmt: skip
     color = spec_layer.get("color")
     if isinstance(color, dict):
-        refs += [color.get("rgba"), color.get("codes")]
+        refs += [color.get("rgba"), color.get("codes"), color.get("values")]
     return [r["id"] for r in refs if isinstance(r, dict) and "id" in r]
 
 

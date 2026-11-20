@@ -61,6 +61,7 @@ export function bufferIds(spec: TrellisSpec): string[] {
     ids.push(l.coords.id, l.starts.id);
     if (l.color.rgba) ids.push(l.color.rgba.id);
     if (l.color.codes) ids.push(l.color.codes.id);
+    if (l.color.values) ids.push(l.color.values.id);
     if (l.link) ids.push(l.link.id);
     if (l.base) ids.push(l.base.id);
     if (l.groups) ids.push(l.groups.id);
