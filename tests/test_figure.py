@@ -156,6 +156,39 @@ def test_categories_logs_bars_and_labels() -> None:
     assert {"a", "b", "c", "d"} <= set(words)
 
 
+def test_sqrt_and_symlog_ticks_as_the_browser_writes_them() -> None:
+    # (core.test.ts: "puts sqrt ticks on round values ...")
+    def labels(kind: str, lo: float, hi: float, count: int) -> list[str]:
+        return [t[1] for t in ticks(kind, lo, hi, 0, count)]
+
+    assert labels("sqrt", 0, 10, 8) == [str(v) for v in range(0, 101, 10)]
+    assert labels("sqrt", 0, 10, 4) == ["0", "20", "40", "60", "80", "100"]
+    assert labels("sqrt", -0.4, 10.4, 5) == ["0", "20", "40", "60", "80", "100"]
+    assert labels("symlog", -3.1, 3.1, 8) == ["−1000", "−100", "−10", "0", "10", "100", "1000"]
+    assert labels("symlog", 0, 6.1, 6) == ["0", "100", "10000", "1M"]
+    assert labels("symlog", -0.2, 0.3, 5) == ["−0.4", "−0.2", "0.0", "0.2", "0.4", "0.6", "0.8"]
+    assert ticks("sqrt", 0, 10, 0, 8, None, ".1f")[1][1] == "10.0"
+
+
+def test_a_reversed_axis_runs_from_high_to_low() -> None:
+    data = {"x": np.array([0.0, 10.0]), "y": np.array([0.0, 100.0])}
+
+    def tick_x(svg: str, label: str) -> float:
+        found = re.search(rf'<text x="([-\d.]+)"[^>]*>{label}</text>', svg)
+        assert found is not None, label
+        return float(found.group(1))
+
+    plain = figure_svg(Trellis(data).points(x="x", y="y"))
+    flipped = figure_svg(Trellis(data, x_scale="reverse").points(x="x", y="y"))
+    assert tick_x(plain, "0") < tick_x(plain, "10")
+    assert tick_x(flipped, "0") > tick_x(flipped, "10")
+    assert sorted(texts(flipped)) == sorted(texts(plain))  # every label, either way round
+    upside = figure_svg(Trellis(data, y_scale="reverse").points(x="x", y="y"))
+    assert sorted(texts(upside)) == sorted(texts(plain))
+    rooted = figure_svg(Trellis(data, y_scale="sqrt").points(x="x", y="y"))
+    assert {"0", "20", "40", "100"} <= set(texts(rooted))
+
+
 def test_x_labels_of_neighbouring_panels_do_not_run_together() -> None:
     # two months of hours: ticks at Mar 1, Apr 1 and May 1, the first and last at a panel's
     # edge

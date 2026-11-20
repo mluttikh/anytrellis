@@ -26,6 +26,7 @@ from anytrellis.codec import DTYPES, Buffers
 from anytrellis.formats import axis_format, number_format
 from anytrellis.pages import page_list
 from anytrellis.theme import CONTEXTS, NARROW, PRESETS
+from anytrellis.transforms import TRANSFORMS, forward, inverse
 
 if TYPE_CHECKING:
     from anytrellis.pages import Paging
@@ -192,7 +193,8 @@ def ticks(kind: str, lo: float, hi: float, origin: float, count: int,
     f = axis_format(kind, format)
     if f is None:
         return out
-    return [(v, f(10 ** (v + origin) if kind == "log" else v + origin)) for v, _ in out]
+    return [(v, f(inverse(kind, v + origin) if kind in TRANSFORMS else v + origin))
+            for v, _ in out]  # fmt: skip
 
 
 def _placed_ticks(kind: str, lo: float, hi: float, origin: float, count: int,
@@ -206,6 +208,8 @@ def _placed_ticks(kind: str, lo: float, hi: float, origin: float, count: int,
         return [(v - origin, s) for v, s in _time_ticks(lo + origin, hi + origin, count)]
     if kind == "log":
         return [(v - origin, s) for v, s in _log_ticks(lo + origin, hi + origin, count)]
+    if kind in ("sqrt", "symlog"):
+        return [(v - origin, s) for v, s in _scale_ticks(kind, lo + origin, hi + origin, count)]
     step = nice_step(hi - lo, count)
     first = math.ceil(lo / step - 1e-9)
     last = math.floor(hi / step + 1e-9)
@@ -270,6 +274,56 @@ def _log_ticks(lo: float, hi: float, count: int) -> list[Tick]:
             if lo - 1e-9 <= value <= hi + 1e-9:
                 out.append((value, label(m * 10.0**e)))
     return out
+
+
+def _scale_ticks(kind: str, lo: float, hi: float, count: int) -> list[Tick]:
+    """A sqrt or symlog axis's ticks (ticks.ts: scaleTicks), none closer than 0.4 of an
+    even step: round values, the finest step not crowded; or a symlog axis's decades either
+    side of 0, thinned where they crowd."""
+    found: list[tuple[float, str, int]] = []
+    gap = (hi - lo) / count * 0.4
+
+    def add(v: float, label: str, rank: int) -> None:
+        u = float(forward(kind, v))
+        if lo - 1e-9 <= u <= hi + 1e-9:
+            found.append((u, label, rank))
+
+    if kind == "symlog" and hi - lo >= 1:
+        decades = hi - lo
+        every = max(1, math.ceil(decades / count))
+        mults = [1, 2, 5] if every == 1 and decades * 3 <= count * 1.5 else [1]
+        add(0.0, "0", 0)
+        top = math.ceil(max(abs(lo), abs(hi)))
+        for e in range(top + 1):
+            if len(found) >= 1000:
+                break
+            if e % every:
+                continue
+            for m in mults:
+                v = m * 10.0**e
+                label = format_number(v, v, max(0, -math.floor(math.log10(v) + 1e-9)))
+                add(v, label, 1 if m == 1 else 2)
+                add(-v, "−" + label, 1 if m == 1 else 2)
+    else:
+        a, b = float(inverse(kind, lo)), float(inverse(kind, hi))
+        for c in range(count, 0, -1):
+            found.clear()
+            step = nice_step(b - a, c)
+            decimals = max(0, -math.floor(math.log10(step) + 1e-9))
+            i = math.ceil(a / step - 1e-9)
+            while i * step <= b + step * 1e-9 and len(found) < 1000:
+                v = i * step or 0.0
+                i += 1
+                if kind == "sqrt" and v < 0:
+                    continue
+                add(v, format_number(v, step, decimals), 0 if v == 0 else 2)
+            if all(q[0] - p[0] >= gap - 1e-12 for p, q in itertools.pairwise(found)):
+                break
+    kept: list[tuple[float, str, int]] = []
+    for t in sorted(found, key=lambda t: (t[2], abs(t[0]), t[0])):
+        if all(abs(k[0] - t[0]) >= gap - 1e-12 for k in kept):
+            kept.append(t)
+    return [(u, label) for u, label, _ in sorted(kept)]
 
 
 def minor_ticks(kind: str, lo: float, hi: float, origin: float, major: list[Tick],
@@ -1039,10 +1093,13 @@ def _views(spec: dict[str, Any], lay: Layout, shown: dict[str, Any]) -> list[_Vi
         x = shown.get("x", {}).get(p["xg"], p["x"])
         y = shown.get("y", {}).get(p["yg"], p["y"])
         r = box.rect
-        sx = r.w / ((x[1] - x[0]) or 1)
-        sy = -r.h / ((y[1] - y[0]) or 1)
-        out.append(_View(box.index, r, sx, r.x - x[0] * sx, sy, r.y + r.h - y[0] * sy,
-                         (x[0], x[1]), (y[0], y[1])))  # fmt: skip
+        # (scene.ts panelMap) a reversed x runs right to left, a reversed y top to bottom
+        rx, ry = bool(spec["x"].get("reverse")), bool(spec["y"].get("reverse"))
+        sx = (-r.w if rx else r.w) / ((x[1] - x[0]) or 1)
+        sy = (r.h if ry else -r.h) / ((y[1] - y[0]) or 1)
+        ox = (r.x + r.w if rx else r.x) - x[0] * sx
+        oy = (r.y if ry else r.y + r.h) - y[0] * sy
+        out.append(_View(box.index, r, sx, ox, sy, oy, (x[0], x[1]), (y[0], y[1])))
     return out
 
 
@@ -1336,7 +1393,9 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
                 d.append(f"M{_n(r.x)} {_n(r.y + r.h + 0.5)}H{_n(r.x + r.w)}")
             last_right = -math.inf
             per = r.w / max(1.0, v.x[1] - v.x[0])  # a band's width
-            for value, label in _x_ticks(spec, v, lay.x_labels, fs):
+            # left to right (a reversed x: its ticks from high to low), each after the last
+            xs = _x_ticks(spec, v, lay.x_labels, fs)
+            for value, label in xs[::-1] if v.sx < 0 else xs:
                 x = v.ox + value * v.sx
                 if x < r.x - 0.5 or x > r.x + r.w + 0.5:
                     continue
@@ -1367,7 +1426,8 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
             if line_y:
                 d.append(f"M{_n(r.x - 0.5)} {_n(r.y)}V{_n(r.y + r.h)}")
             last_top = math.inf
-            for value, label in _y_ticks(spec, v):
+            ys = _y_ticks(spec, v)  # bottom to top (a reversed y: from high to low)
+            for value, label in ys[::-1] if v.sy > 0 else ys:
                 y = v.oy + value * v.sy
                 if y < r.y - 0.5 or y > r.y + r.h + 0.5:
                     continue

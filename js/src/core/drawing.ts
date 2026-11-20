@@ -219,7 +219,10 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
       }
       let lastRight = -Infinity;
       const per = v.rect.w / Math.max(1, v.x[1] - v.x[0]); // a band's width
-      for (const t of xTicks(spec, v, layout.xLabels, fs)) {
+      // left to right (a reversed x: its ticks from high to low), each label after the last
+      const xs = xTicks(spec, v, layout.xLabels, fs);
+      if (v.map.sx < 0) xs.reverse();
+      for (const t of xs) {
         const x = v.map.ox + t.value * v.map.sx;
         if (x < r.x - 0.5 || x > r.x + r.w + 0.5) continue;
         ctx.moveTo(Math.round(x) + 0.5, r.y + r.h);
@@ -260,7 +263,10 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
         ctx.lineTo(r.x - 0.5, r.y + r.h);
       }
       let lastTop = Infinity;
-      for (const t of yTicks(spec, v)) {
+      // bottom to top (a reversed y: its ticks from high to low)
+      const ys = yTicks(spec, v);
+      if (v.map.sy > 0) ys.reverse();
+      for (const t of ys) {
         const y = v.map.oy + t.value * v.map.sy;
         if (y < r.y - 0.5 || y > r.y + r.h + 0.5) continue;
         ctx.moveTo(r.x - 4, Math.round(y) + 0.5);

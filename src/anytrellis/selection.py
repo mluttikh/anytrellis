@@ -15,6 +15,7 @@ import numpy as np
 
 from anytrellis.data import Column, Table
 from anytrellis.layers import Geometry
+from anytrellis.transforms import TRANSFORMS, inverse
 
 Brush = dict[str, Any]
 """``{"x": [lo, hi] or None, "y": [lo, hi] or None, "panel": index or None}``, the ranges
@@ -143,6 +144,6 @@ def range_out(r: list[float] | None, kind: str, levels: list[str] | None, origin
         return [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
     if kind == "time":
         return (np.datetime64(round(lo), "ms"), np.datetime64(round(hi), "ms"))
-    if kind == "log":
-        return (10.0**lo, 10.0**hi)
+    if kind in TRANSFORMS:  # a log, sqrt or symlog axis: the values its units stand for
+        return (inverse(kind, lo), inverse(kind, hi))
     return (lo, hi)

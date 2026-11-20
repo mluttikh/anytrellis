@@ -16,7 +16,7 @@ summarises the rows, read.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +48,7 @@ from anytrellis.stats import (
     smooth_parts,
     violin_parts,
 )
+from anytrellis.transforms import expr, forward, on_scale_expr
 
 VALUE = "__anytrellis_v"
 X = "__anytrellis_x"
@@ -84,10 +85,11 @@ class _Unable(Exception):
     """The backend can't run a query (an operation it lacks)."""
 
 
-def parts(layer: Layer, whole: Table, grid: Grid, logs: Sequence[str]) -> list[Part] | None:
+def parts(layer: Layer, whole: Table, grid: Grid,
+          scales: Mapping[str, str]) -> list[Part] | None:  # fmt: skip
     """A summary layer's parts, of every panel, from the database (None: not computed
     there; the caller summarises the rows)."""
-    ask = _Ask(layer, whole, grid, logs)
+    ask = _Ask(layer, whole, grid, scales)
     mark, args = layer.mark, layer.stat_args
     try:
         if mark == "hist":
@@ -114,7 +116,8 @@ class _Ask:
     layer: Layer
     whole: Table
     grid: Grid
-    logs: Sequence[str]
+    scales: Mapping[str, str]
+    """The transformed axes' scales, ``{"x": "log"}``."""
 
     # ---- the marks ---------------------------------------------------------------------
 
@@ -125,7 +128,7 @@ class _Ask:
         color = self._color()
         groups = self._by(color)
         kind = whole.kind(x)
-        log = "x" in self.logs
+        scale = self.scales.get("x", "")
         edges: np.ndarray | None = None
         if kind == "category":
             col = Column(x, "category", np.zeros(0, dtype=object), whole.levels(x))
@@ -134,10 +137,10 @@ class _Ask:
             nbins = len(col.levels)
             b = found.column(x).level_codes()
         else:
-            col = Column(x, kind, self._span(x, log), log=log)
+            col = Column(x, kind, self._span(x, scale), scale=scale)
             edges = bin_edges(col, args["bins"], args["binwidth"])
             nbins = len(edges) - 1
-            v = self._value(x, log)
+            v = self._value(x, scale)
             bins = args["bins"]
             if isinstance(bins, Sequence | np.ndarray) and not isinstance(bins, str):
                 import narwhals as nw  # given edges: the number of them at or below a value
@@ -146,7 +149,7 @@ class _Ask:
             else:  # equal bins: from the first edge, a width at a time
                 width = float(edges[1] - edges[0])
                 bin_of = ((v - float(edges[0])) / width).floor().clip(0, nbins - 1)
-            ok = self._ok(x, log) & (v >= float(edges[0])) & (v <= float(edges[-1]))
+            ok = self._ok(x, scale) & (v >= float(edges[0])) & (v <= float(edges[-1]))
             found = self._read(lambda q: q.filter(ok).with_columns(bin_of.alias(BIN))
                                .group_by(*groups, BIN).agg(_len()))  # fmt: skip
             b = np.nan_to_num(found.column(BIN).values, nan=-1).astype(np.int64)
@@ -240,11 +243,11 @@ class _Ask:
         kind = whole.kind(x)
         if kind == "category":
             raise ValueError(f"density(): x must be numbers or times; {x!r} holds categories")
-        log = "x" in self.logs
+        scale = self.scales.get("x", "")
         color = self._color()
         groups = self._by(color)
         adjust = float(args["bw_adjust"])
-        bins = self._fine_bins(groups, self._ok(x, log), self._value(x, log), adjust,
+        bins = self._fine_bins(groups, self._ok(x, scale), self._value(x, scale), adjust,
                                totals=True)  # fmt: skip
         p = self._panels(bins)
         cc = self._color_codes(color, bins)
@@ -261,7 +264,7 @@ class _Ask:
             centres, weights = bins.column(MEAN).values[mine], bins.column(N).values[mine]
             curves.append((g, xs, _kde_binned(centres, weights, xs, bws[g], n[g])))
             at += len(xs)
-        col = Column(x, kind, np.zeros(0), log=log)
+        col = Column(x, kind, np.zeros(0), scale=scale)
         return density_parts(layer, col, color, guniq, curves, no_members(at))
 
     def smooth(self) -> list[Part]:
@@ -277,16 +280,16 @@ class _Ask:
                 raise ValueError(
                     f"smooth(): x and y must be numbers or times; {name!r} holds categories"
                 )
-        xlog, ylog = "x" in self.logs, "y" in self.logs
+        xscale, yscale = self.scales.get("x", ""), self.scales.get("y", "")
         color = self._color()
         groups = self._by(color)
-        ok = self._ok(layer.x, xlog) & self._ok(layer.y, ylog)
-        xc = Column(layer.x, whole.kind(layer.x), np.zeros(0), log=xlog)
-        yc = Column(layer.y, "number", np.zeros(0), log=ylog)
+        ok = self._ok(layer.x, xscale) & self._ok(layer.y, yscale)
+        xc = Column(layer.x, whole.kind(layer.x), np.zeros(0), scale=xscale)
+        yc = Column(layer.y, "number", np.zeros(0), scale=yscale)
         if args["method"] == "loess":
             return self._loess(xc, yc, color, groups, ok)
         dx, dy = c(X) - c(X).mean().over(*groups), c(Y) - c(Y).mean().over(*groups)
-        xv, yv = self._value(layer.x, xlog), self._value(layer.y, ylog)
+        xv, yv = self._value(layer.x, xscale), self._value(layer.y, yscale)
         found = self._read(lambda q: q.filter(ok).select(*groups, xv.alias(X), yv.alias(Y))
                            .with_columns(dx.alias(DX), dy.alias(DY)).group_by(*groups).agg(
             _len(), c(X).mean().alias(XBAR), c(Y).mean().alias(YBAR),
@@ -320,7 +323,7 @@ class _Ask:
         c = nw.col
         layer = self.layer
         args = layer.stat_args
-        xv, yv = self._value(xc.name, xc.log), self._value(yc.name, yc.log)
+        xv, yv = self._value(xc.name, xc.scale), self._value(yc.name, yc.scale)
         bin_of = ((c(X) - c(XLO)) / (c(XHI) - c(XLO)) * LOESS_BINS).floor()
         found = self._read(lambda q: q.filter(ok).select(*groups, xv.alias(X), yv.alias(Y))
                            .with_columns(c(X).min().over(*groups).alias(XLO),
@@ -394,8 +397,8 @@ class _Ask:
         assert layer.y is not None
         horizontal = whole.kind(layer.y) == "category" and whole.kind(layer.x) != "category"
         pos, val = (layer.y, layer.x) if horizontal else (layer.x, layer.y)
-        pos_log = ("y" if horizontal else "x") in self.logs
-        val_log = ("x" if horizontal else "y") in self.logs
+        pos_scale = self.scales.get("y" if horizontal else "x", "")
+        val_scale = self.scales.get("x" if horizontal else "y", "")
         if whole.kind(val) != "number":
             raise ValueError(
                 f"{layer.mark}(): the values must be numbers; {val!r} holds "
@@ -405,12 +408,12 @@ class _Ask:
         color = self._color()
         kind = whole.kind(pos)
         levels = whole.levels(pos) if kind == "category" else ()
-        shape = _Shape(horizontal, Column(pos, kind, np.zeros(0), levels, log=pos_log),
-                       Column(val, "number", np.zeros(0), log=val_log), color)  # fmt: skip
-        ok = self._ok(val, val_log)
+        shape = _Shape(horizontal, Column(pos, kind, np.zeros(0), levels, scale=pos_scale),
+                       Column(val, "number", np.zeros(0), scale=val_scale), color)  # fmt: skip
+        ok = self._ok(val, val_scale)
         if kind != "category":
-            ok = ok & self._ok(pos, pos_log)
-        return shape, self._by(color, pos), ok, self._value(val, val_log)
+            ok = ok & self._ok(pos, pos_scale)
+        return shape, self._by(color, pos), ok, self._value(val, val_scale)
 
     def _keys(self, shape: _Shape, found: Table) -> tuple[Keys, np.ndarray]:
         """The groups of a query's rows (one each), and the rows in the groups' order."""
@@ -442,9 +445,8 @@ class _Ask:
             pi = found.column(pos.name).level_codes()
         else:
             values = found.column(pos.name).values
-            if pos.log:
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    values = np.log10(values)
+            if pos.scale:
+                values = forward(pos.scale, values)
             if shape.puniq is not None:  # the groups' positions: a row's among them
                 puniq = shape.puniq
                 pi = np.full(len(values), -1, dtype=np.int64)
@@ -484,19 +486,19 @@ class _Ask:
         out.whole = self.whole
         return out
 
-    def _span(self, name: str, log: bool) -> np.ndarray:
-        """The finite range of a column (on a log axis: of its values above 0, in log10
-        units), or none."""
+    def _span(self, name: str, scale: str) -> np.ndarray:
+        """The finite range of a column (on a transformed axis: of its values on the scale,
+        in its units), or none."""
         from anytrellis.query import span
 
         whole = self.whole
-        found = whole.memo(("span", name, log), lambda: span(whole, name, positive=log))
+        found = whole.memo(("span", name, scale), lambda: span(whole, name, scale))
         if found is None:
             return np.zeros(0)
-        return np.log10(np.array(found)) if log else np.array(found)
+        return forward(scale, np.array(found)) if scale else np.array(found)
 
-    def _value(self, name: str, log: bool) -> Any:
-        """A number or time column as numbers on its axis: log10 units on a log axis,
+    def _value(self, name: str, scale: str) -> Any:
+        """A number or time column as numbers on its axis: a transformed axis's units,
         times in milliseconds of wall-clock time."""
         import narwhals as nw
 
@@ -512,19 +514,20 @@ class _Ask:
         if self.whole.kind(name) != "number":
             raise ValueError(f"{self.layer.mark}(): {name!r} holds categories")
         value = c.cast(nw.Float64)
-        return value.log(10) if log else value
+        return expr(scale, value) if scale else value
 
-    def _ok(self, name: str, log: bool) -> Any:
-        """Rows with a value drawn: finite, and above 0 on a log axis."""
+    def _ok(self, name: str, scale: str) -> Any:
+        """Rows with a value drawn: finite, and on a transformed axis's scale."""
         import narwhals as nw
 
         if self.whole.kind(name) == "category":
             return always(name)
-        if log and self.whole.kind(name) != "number":
-            raise ValueError(f"a log scale needs numbers; {name!r} holds "
+        if scale and self.whole.kind(name) != "number":
+            raise ValueError(f"a {scale} scale needs numbers; {name!r} holds "
                              f"{self.whole.kind(name)}s")  # fmt: skip
         ok = _finite(self.whole, name)
-        return ok & (nw.col(name) > 0) if log else ok
+        domain = on_scale_expr(scale, nw.col(name)) if scale else None
+        return ok if domain is None else ok & domain
 
     def _fine_bins(self, groups: list[str], ok: Any, v: Any, adjust: float,
                    totals: bool = False) -> Table:  # fmt: skip
@@ -625,25 +628,25 @@ def selected(whole: Table, wheres: list[Where], panels: Callable[[list[int]], An
             if last is None:
                 terms.setdefault(head, [])
                 continue
-            head = (*head, ("range", last.name, last.kind, last.log))
+            head = (*head, ("range", last.name, last.kind, last.scale))
             is_open = bool(last.open[r]) if last.open is not None else False
             terms.setdefault(head, []).append((float(last.lo[r]), float(last.hi[r]), is_open))
     by_panel: dict[int, list[Any]] = {}  # a panel's tests (None: all its rows)
     for head, ranges in terms.items():
         panel, finite, color, *keys = head
         cond = None
-        for name, log in finite:
-            cond = _and(cond, _drawn(whole, name, log))
+        for name, scale in finite:
+            cond = _and(cond, _drawn(whole, name, scale))
         if color is not None:
             cond = _and(cond, among_labels(whole, color[0], [color[1]]))
         joined = keys.pop() if keys and keys[-1][0] == "range" else None
         for key in keys:
             cond = _and(cond, _test(whole, key))
         if joined is not None:
-            _, name, kind, log = joined
+            _, name, kind, scale = joined
             either = None
             for lo, hi, is_open in _joined(ranges):
-                either = _or(either, _range(whole, name, kind, log, lo, hi, is_open))
+                either = _or(either, _range(whole, name, kind, scale, lo, hi, is_open))
             cond = _and(cond, either)
         by_panel.setdefault(panel, []).append(cond)
     out = None
@@ -660,32 +663,33 @@ def _test_key(test: Range | Labels, r: int) -> tuple[Any, ...]:
     if isinstance(test, Labels):
         return ("labels", test.name, test.labels[r])
     is_open = bool(test.open[r]) if test.open is not None else False
-    return ("value", test.name, test.kind, test.log, float(test.lo[r]), float(test.hi[r]),
+    return ("value", test.name, test.kind, test.scale, float(test.lo[r]), float(test.hi[r]),
             is_open)  # fmt: skip
 
 
 def _test(whole: Table, key: tuple[Any, ...]) -> Any:
     if key[0] == "labels":
         return among_labels(whole, key[1], [key[2]])
-    _, name, kind, log, lo, hi, is_open = key
-    return _range(whole, name, kind, log, lo, hi, is_open)
+    _, name, kind, scale, lo, hi, is_open = key
+    return _range(whole, name, kind, scale, lo, hi, is_open)
 
 
-def _range(whole: Table, name: str, kind: str, log: bool, lo: float, hi: float,
+def _range(whole: Table, name: str, kind: str, scale: str, lo: float, hi: float,
            is_open: bool) -> Any:  # fmt: skip
     """Values from ``lo`` to ``hi`` (axis units); ``lo == hi``: that value (as read: within
     a hair of it)."""
     if lo == hi:
-        hair = 1e-3 if kind == "time" else 1e-10 if log else 1e-12 * max(abs(lo), 1e-300)
+        hair = 1e-3 if kind == "time" else 1e-10 if scale else 1e-12 * max(abs(lo), 1e-300)
         lo, hi, is_open = lo - hair, hi + hair, False
-    return within(whole, name, lo, hi, "log" if log else kind, open_hi=is_open)
+    return within(whole, name, lo, hi, kind, open_hi=is_open, scale=scale)
 
 
-def _drawn(whole: Table, name: str, log: bool) -> Any:
+def _drawn(whole: Table, name: str, scale: str) -> Any:
     import narwhals as nw
 
     ok = _finite(whole, name)
-    return ok & (nw.col(name) > 0) if log else ok
+    domain = on_scale_expr(scale, nw.col(name)) if scale else None
+    return ok if domain is None else ok & domain
 
 
 def _joined(ranges: list[tuple[float, float, bool]]) -> list[tuple[float, float, bool]]:
@@ -722,12 +726,12 @@ def counts(where: Where, rows: Table, panel_of: np.ndarray) -> np.ndarray:
     if not n or not rows.n:
         return np.zeros(n, dtype=np.int64)
     ok = panel_of >= 0
-    for name, log in where.finite:
-        ok &= np.isfinite(_axis_values(rows, name, log))
+    for name, scale in where.finite:
+        ok &= np.isfinite(_axis_values(rows, name, scale))
     tests, span = _span_of(where)
-    value = None if span is None else _axis_values(rows, span.name, span.log)
+    value = None if span is None else _axis_values(rows, span.name, span.scale)
     return _counted(where, tests, span, panel_of, ok, lambda name: _labels(rows, name),
-                    lambda _, t: _axis_values(rows, t.name, t.log), value)  # fmt: skip
+                    lambda _, t: _axis_values(rows, t.name, t.scale), value)  # fmt: skip
 
 
 def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray | None:
@@ -745,12 +749,12 @@ def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray
     n = len(where.panel)
     if not n:
         return np.zeros(0, dtype=np.int64)
-    ask = _Ask(part.layer, whole, grid, ())
+    ask = _Ask(part.layer, whole, grid, {})
     tests, span = _span_of(where)
     try:
         ok = keep
-        for name, log in where.finite:
-            ok = ok & ask._ok(name, log)
+        for name, scale in where.finite:
+            ok = ok & ask._ok(name, scale)
         names: list[str] = [*grid.columns]
         if where.color is not None:
             names.append(where.color.name)
@@ -760,7 +764,7 @@ def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray
             if isinstance(t, Labels):
                 names.append(t.name)
                 continue
-            v = ask._value(t.name, t.log)
+            v = ask._value(t.name, t.scale)
             alias = f"{VALUE}{i}"
             values[i] = alias
             extra.append(v.alias(alias))
@@ -771,7 +775,7 @@ def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray
         aggs = [_len()]
         mids: np.ndarray | None = None
         if span is not None:
-            v = ask._value(span.name, span.log)
+            v = ask._value(span.name, span.scale)
             bucket, mids, lo, hi = _buckets(span, v)
             if np.isfinite(lo):
                 ok = ok & (v >= lo)
@@ -911,12 +915,12 @@ def _counted(where: Where, tests: list[Range | Labels], span: Range | None,
     return np.bincount(hit[keep], weights=weights[keep], minlength=n).round().astype(np.int64)
 
 
-def _axis_values(rows: Table, name: str, log: bool) -> np.ndarray:
-    """A column's values on its axis: numbers (log10 on a log axis), times in ms."""
+def _axis_values(rows: Table, name: str, scale: str) -> np.ndarray:
+    """A column's values on its axis: numbers (a transformed axis's in its units), times
+    in ms."""
     values = rows.column(name).values
-    if log:
-        with np.errstate(divide="ignore", invalid="ignore"):
-            return np.where(values > 0, np.log10(values), np.nan)
+    if scale:
+        return forward(scale, values)
     return values.astype(np.float64)
 
 

@@ -41,9 +41,9 @@ import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
 import { type Brush, type Highlight, type Selection, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
 
 export type { Highlight } from "./selection";
-import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, pick, yExtent } from "./scene";
+import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
 import { numberFormat } from "./format";
-import { formatValue } from "./ticks";
+import { formatHeight, formatValue } from "./ticks";
 import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type TrellisSpec, isMark } from "./types";
 
 /** Versions of the selected marks' sets: never used twice, as the renderers keep a set's
@@ -778,8 +778,8 @@ export class TrellisView {
     // linked: in its own panel (the link spreads it); else the same range in all of them
     const linked = this.scene?.layers.some((l) => l.link) ?? false;
     return {
-      x: b.along === "y" ? null : [(r.x - v.map.ox) / v.map.sx, (r.x + r.w - v.map.ox) / v.map.sx],
-      y: b.along === "x" ? null : [(r.y + r.h - v.map.oy) / v.map.sy, (r.y - v.map.oy) / v.map.sy],
+      x: b.along === "y" ? null : xUnits(v.map, r.x, r.x + r.w),
+      y: b.along === "x" ? null : yUnits(v.map, r.y, r.y + r.h),
       panel: linked ? v.panel : null,
       legend: this.brush?.legend ?? null, // chosen legend entries: only their colours
     };
@@ -863,8 +863,8 @@ export class TrellisView {
     const spec = this.spec!;
     const src = this.views[vi];
     const sp = spec.panels[src.panel];
-    const [x0, x1] = [(rect.x - src.map.ox) / src.map.sx, (rect.x + rect.w - src.map.ox) / src.map.sx];
-    const [y0, y1] = [(rect.y + rect.h - src.map.oy) / src.map.sy, (rect.y - src.map.oy) / src.map.sy];
+    const [x0, x1] = xUnits(src.map, rect.x, rect.x + rect.w);
+    const [y0, y1] = yUnits(src.map, rect.y, rect.y + rect.h);
     const out: Rect[] = [];
     this.views.forEach((v, i) => {
       if (i === vi) return;
@@ -878,8 +878,9 @@ export class TrellisView {
       const r = v.rect;
       const [gx0, gx1] = slicedX && p.xg !== sp.xg ? sliceOf(v.x, [x0, x1]) : [x0, x1];
       const [gy0, gy1] = slicedY && p.yg !== sp.yg ? sliceOf(v.y, [y0, y1]) : [y0, y1];
-      const gx = sameX ? [v.map.ox + gx0 * v.map.sx, v.map.ox + gx1 * v.map.sx] : [r.x, r.x + r.w];
-      const gy = sameY ? [v.map.oy + gy1 * v.map.sy, v.map.oy + gy0 * v.map.sy] : [r.y, r.y + r.h];
+      const px = (a: number, b: number): number[] => (a <= b ? [a, b] : [b, a]);
+      const gx = sameX ? px(v.map.ox + gx0 * v.map.sx, v.map.ox + gx1 * v.map.sx) : [r.x, r.x + r.w];
+      const gy = sameY ? px(v.map.oy + gy1 * v.map.sy, v.map.oy + gy0 * v.map.sy) : [r.y, r.y + r.h];
       out.push({ x: gx[0], y: gy[0], w: gx[1] - gx[0], h: gy[1] - gy[0] });
     });
     return out;
@@ -892,8 +893,8 @@ export class TrellisView {
     const p = this.spec.panels[v.panel];
     const r = b.rect;
     this.remember();
-    if (b.along !== "y") this.setX(p.xg, [(r.x - v.map.ox) / v.map.sx, (r.x + r.w - v.map.ox) / v.map.sx]);
-    if (b.along !== "x") this.setY(p.yg, [(r.y + r.h - v.map.oy) / v.map.sy, (r.y - v.map.oy) / v.map.sy]);
+    if (b.along !== "y") this.setX(p.xg, xUnits(v.map, r.x, r.x + r.w));
+    if (b.along !== "x") this.setY(p.yg, yUnits(v.map, r.y, r.y + r.h));
   }
 
   /** One axis of a group back to its full domain (double-click on the axis). */
@@ -1150,9 +1151,7 @@ export class TrellisView {
       const x = this.xView.get(p.xg) ?? p.x;
       const y = this.yView.get(p.yg) ?? p.y;
       const r = box.rect;
-      const sx = r.w / (x[1] - x[0] || 1);
-      const sy = -r.h / (y[1] - y[0] || 1);
-      const map: PanelMap = { sx, ox: r.x - x[0] * sx, sy, oy: r.y + r.h - y[0] * sy };
+      const map: PanelMap = panelMap(r, x, y, !!spec.x.reverse, !!spec.y.reverse);
       return { panel: box.index, rect: r, map, x: [x[0], x[1]], y: [y[0], y[1]] };
     });
   }
@@ -1712,8 +1711,10 @@ export class TrellisView {
     // a bar's or a stacked area's own value: from its base
     const isBar = layer.spec.type === "bars" || layer.spec.type === "area";
     const hide = layer.spec.hide ?? [];
-    if (!hide.includes("x")) rows.push([spec.x.title || "x", formatValue(spec.x.kind, pt.x - (pt.x0 ?? 0), spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format)]);
-    if (!hide.includes("y")) rows.push([spec.y.title || "y", formatValue(spec.y.kind, isBar ? pt.y - pt.y0 : pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format)]);
+    const xText = pt.x0 === undefined ? formatValue(spec.x.kind, pt.x, spec.x.origin, v.x[1] - v.x[0], spec.x.levels, spec.x.format) : formatHeight(spec.x.kind, pt.x, pt.x0, spec.x.origin, v.x[1] - v.x[0], spec.x.format);
+    const yText = !isBar ? formatValue(spec.y.kind, pt.y, spec.y.origin, v.y[1] - v.y[0], spec.y.levels, spec.y.format) : formatHeight(spec.y.kind, pt.y, pt.y0, spec.y.origin, v.y[1] - v.y[0], spec.y.format);
+    if (!hide.includes("x")) rows.push([spec.x.title || "x", xText]);
+    if (!hide.includes("y")) rows.push([spec.y.title || "y", yText]);
     const legend = layer.spec.color.legend;
     if (layer.codes && legend !== null) {
       const lg = spec.legends[legend];

@@ -43,7 +43,7 @@ panels](how-to/pages.md).
 
 ```python
 Trellis(cars, wrap="origin", share_y=False)  # also "row", "col", "page", "sliced"
-Trellis(cars, wrap="origin", share_x="row", y_scale="log")  # x_scale too: "linear", "log"
+Trellis(cars, wrap="origin", share_x="row", y_scale="log")  # also "sqrt", "symlog", "linear"
 Trellis(cars, wrap="origin", aspect=1)  # square panels; aspect="bank": slopes at 45°
 Trellis(cars, wrap="origin", panel_height=150)  # or height=600, the whole plot
 Trellis(cars, wrap="origin", fit_y=True)  # y follows the data in view as x zooms
@@ -51,13 +51,15 @@ Trellis(cars, wrap="origin", fit_y=True)  # y follows the data in view as x zoom
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
 t.share(x=True, y="row")  # as share_x=, share_y=
 t.scale(x="log")  # as x_scale=
+t.scale(y=("sqrt", "reverse"))  # high to low; "reverse" alone: a linear axis reversed
 t.limits(y=(0, None))  # y from 0; None: the data's own end
 t.as_category("cylinders")  # read numbers as categories
 t.order("origin", ["USA", "Japan", "Europe"])  # levels in this order
 t.order("origin", by="median", of="mpg", descending=True)  # mean, min, max, sum, count
 ```
 
-See [Share or free the scales](how-to/scales.md) and [Use a log scale](how-to/log.md).
+See [Share or free the scales](how-to/scales.md) and [Log, sqrt, symlog and reversed
+scales](how-to/log.md).
 
 ## Marks
 

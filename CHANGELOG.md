@@ -19,6 +19,13 @@ All notable changes to anytrellis. The format follows
   and point sizes together (0.8, 1, 1.5, 2), for a figure in a paper or a plot on slides:
   `set_theme(context="talk")`. The header, legend and caption follow the size, and images
   saved from Python draw it the same.
+- **Square-root and symlog scales, and reversed axes**: `x_scale=`/`y_scale=` (and
+  `scale()`) take `"sqrt"` (counts and sizes, 0 kept at the bottom) and `"symlog"` (a log
+  scale either side of 0, linear near it, for changes), with ticks at round values or at
+  symlog's decades. `"reverse"` runs an axis from high to low, alone or with a scale:
+  `y_scale=("log", "reverse")`. Bars, areas, histograms and densities go on a sqrt or
+  symlog y (stacked or counted first, then drawn on the scale). Summaries, selections,
+  limits, rules, `load="pages"` queries and saved images all follow the scale.
 
 ### Changed
 

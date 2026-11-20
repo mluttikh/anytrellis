@@ -9,7 +9,7 @@ operation it lacks): the caller then computes the summary from the rows, as for 
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -112,17 +112,21 @@ def distinct(table: Table, names: Sequence[str]) -> Table:
     return Table(nw.to_native(table.lazy.select(*names).unique().collect()))
 
 
-def span(table: Table, name: str, positive: bool = False) -> tuple[float, float] | None:
+def span(table: Table, name: str, scale: str = "") -> tuple[float, float] | None:
     """The range of a lazy table's finite values of a number or time column (times in
-    milliseconds, as read; ``positive``: of those above 0), or None: it has none."""
+    milliseconds, as read; ``scale``: of those a transformed axis has a place for, as
+    read), or None: it has none."""
     import narwhals as nw
+
+    from anytrellis.transforms import on_scale_expr
 
     if table.kind(name) == "category":
         return None
     c = nw.col(name)
     ok = _finite(table, name)
-    if positive:
-        ok = ok & (c > 0)
+    domain = on_scale_expr(scale, c) if scale else None
+    if domain is not None:
+        ok = ok & domain
     found = Table(nw.to_native(table.lazy.filter(ok)
                                .select(c.min().alias("lo"), c.max().alias("hi"))
                                .collect()))  # fmt: skip
@@ -133,11 +137,14 @@ def span(table: Table, name: str, positive: bool = False) -> tuple[float, float]
 
 
 def panel_extents(table: Table, keys: Sequence[str], x: str, y: str,
-                  logs: Sequence[str]) -> Table:  # fmt: skip
+                  scales: Mapping[str, str]) -> Table:  # fmt: skip
     """Per combination of the facet columns ``keys``: the low and high x and y of the rows
-    drawn (``x_lo``, ``x_hi``, ``y_lo``, ``y_hi``: those with both; on a log axis, above
-    0), of number and time columns (a category axis's are left out)."""
+    drawn (``x_lo``, ``x_hi``, ``y_lo``, ``y_hi``: those with both; on a transformed axis,
+    those on its scale), of number and time columns (a category axis's are left out), as
+    read."""
     import narwhals as nw
+
+    from anytrellis.transforms import on_scale_expr
 
     drawn = always(x)
     aggs = []
@@ -145,8 +152,9 @@ def panel_extents(table: Table, keys: Sequence[str], x: str, y: str,
         if table.kind(name) == "category":  # every row has a category (or "(missing)")
             continue
         drawn = drawn & _finite(table, name)
-        if axis in logs:
-            drawn = drawn & (nw.col(name) > 0)
+        domain = on_scale_expr(scales[axis], nw.col(name)) if axis in scales else None
+        if domain is not None:
+            drawn = drawn & domain
         aggs += [nw.col(name).min().alias(f"{axis}_lo"), nw.col(name).max().alias(f"{axis}_hi")]
     if not aggs:
         return Table({})
@@ -271,11 +279,13 @@ def combos(table: Table, names: Sequence[str], rows: Sequence[Sequence[Any]]) ->
 
 
 def within(table: Table, name: str, lo: float, hi: float, kind: str,
-           open_hi: bool = False) -> Any:  # fmt: skip
+           open_hi: bool = False, scale: str = "") -> Any:  # fmt: skip
     """Rows whose value of number or time column ``name`` is in ``[lo, hi]`` (``open_hi``:
     ``[lo, hi)``; an infinite end: no end; a time: milliseconds of wall-clock time in its
-    zone; ``kind`` "log": log10 units)."""
+    zone; ``scale``: a transformed axis's units, compared as the values they stand for)."""
     import narwhals as nw
+
+    from anytrellis.transforms import inverse
 
     c = nw.col(name)
     if kind == "time":
@@ -284,8 +294,8 @@ def within(table: Table, name: str, lo: float, hi: float, kind: str,
             c = c.cast(nw.Datetime("us"))
         zone = getattr(dtype, "time_zone", None)
         value: Callable[[float], Any] = lambda ms: _datetime(ms, zone)  # noqa: E731
-    elif kind == "log":
-        value = lambda v: 10.0**v  # noqa: E731
+    elif scale:
+        value = lambda v: inverse(scale, v)  # noqa: E731
     else:
         value = float
     out = None if lo == -np.inf else c >= value(lo)
