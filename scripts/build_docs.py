@@ -11,8 +11,12 @@ gallery's pictures (scripts/docs_gallery.py) when they are missing or ``--galler
 A build fails on warnings, also on those Zensical's strict mode does not count: an example
 that raises (markdown-exec) and a docstring the API reference cannot read (griffe). It also
 fails when a page weighs more than ``PAGE_BUDGET`` gzipped (the plots' data is in the
-page), or when a public name (a method, a parameter of ``Trellis``) is in no guide: the
-reference lists everything, but a reader finds a feature through the guides.
+page), or when a public name (a method, a parameter of ``Trellis``) is in no guide (the
+reference lists everything, but a reader finds a feature through the guides) or not on the
+cheat sheet, which shows all of them.
+
+After the site, it writes its versions for language models (scripts/docs_llms.py):
+``llms.txt``, ``llms-full.txt`` and each page as Markdown.
 
 The build runs in Python's UTF-8 mode (as ``python -X utf8``), it and every process it
 starts: the pages and the code are UTF-8 (°, ×, µ), and on Windows Python otherwise reads
@@ -90,17 +94,20 @@ def build() -> int:
 
 
 def check() -> list[str]:
-    """The pages' weight, and the public names no guide uses."""
+    """The pages' weight, and the public names no guide uses or the cheat sheet lacks."""
     problems = []
     for page in sorted(SITE.rglob("*.html")):
         size = len(gzip.compress(page.read_bytes()))
         if size > PAGE_BUDGET:
             problems.append(f"{page.relative_to(SITE)} weighs {size / 1e6:.1f} MB gzipped")
 
+    import anytrellis
     from anytrellis import Trellis, pairs, synthetic
 
+    sheet = (DOCS / "cheat-sheet.md").read_text(encoding="utf-8")
     guides = "\n".join(p.read_text(encoding="utf-8") for p in DOCS.rglob("*.md")
-                       if "reference" not in p.relative_to(DOCS).parts)  # fmt: skip
+                       if "reference" not in p.relative_to(DOCS).parts
+                       and p.name != "cheat-sheet.md")  # fmt: skip
     methods = [f"Trellis.{n}" for n in dir(Trellis) if not n.startswith("_")]
     methods += [f"Link.{n}" for n in ("unlink", "clear")]
     methods += [f"synthetic.{n}" for n, f in vars(synthetic).items()
@@ -108,12 +115,18 @@ def check() -> list[str]:
                 and not n.startswith("_")]  # fmt: skip
     for name in methods:
         short = name.split(".")[1]
-        if not re.search(rf"\.{short}\b|\b{short}\(", guides):
-            problems.append(f"{name} is in no guide")
-    problems += [f"Trellis({p}=...) is in no guide" for p in inspect.signature(Trellis).parameters
-                 if p != "data" and not re.search(rf"\b{p}=", guides)]  # fmt: skip
+        found = rf"\.{short}\b|\b{short}\("
+        problems += [f"{name} is {where}" for text, where in
+                     ((guides, "in no guide"), (sheet, "not on the cheat sheet"))
+                     if not re.search(found, text)]  # fmt: skip
+    for p in inspect.signature(Trellis).parameters:
+        problems += [f"Trellis({p}=...) is {where}" for text, where in
+                     ((guides, "in no guide"), (sheet, "not on the cheat sheet"))
+                     if p != "data" and not re.search(rf"\b{p}=", text)]  # fmt: skip
     problems += [f"pairs({p}=...) is in no guide" for p in inspect.signature(pairs).parameters
                  if p != "data" and not re.search(rf"\b{p}=", guides)]  # fmt: skip
+    problems += [f"anytrellis.{n} is not on the cheat sheet" for n in anytrellis.__all__
+                 if not re.search(rf"\b{n}\b", sheet)]  # fmt: skip
     return problems
 
 
@@ -129,6 +142,9 @@ def main() -> None:
         sys.exit(subprocess.run(["zensical", "serve"], cwd=ROOT, check=False).returncode)
     if code := build():
         sys.exit(code)
+    import docs_llms  # beside this script
+
+    docs_llms.write(SITE)
     for problem in check():
         print(f"check: {problem}", file=sys.stderr)
         code = 1

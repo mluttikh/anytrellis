@@ -21,6 +21,7 @@ nav = [
   { "Home" = "index.md" },
   { "Gallery" = "gallery.md" },
   { "At a glance" = "glance.md" },
+  { "Cheat sheet" = "cheat-sheet.md" },
   { "Tutorials" = [
     "tutorials/index.md",
     { "Your first trellis plot" = "tutorials/first-plot.md" },

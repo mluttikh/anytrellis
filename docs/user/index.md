@@ -72,7 +72,12 @@ plot
 - **Know ggplot2, seaborn or Altair?** See how their facets translate:
   [ggplot2 and seaborn](how-to/from-ggplot2-seaborn.md),
   [Altair and lattice](how-to/from-altair-lattice.md).
-- **Looking up an argument?** The [reference](reference/index.md) lists every method.
+- **Looking up an argument?** The [reference](reference/index.md) lists every method,
+  and the [cheat sheet](cheat-sheet.md) shows them all as code on one page.
+- **Using an AI assistant?** Give it
+  [llms.txt](https://mluttikh.github.io/anytrellis/llms.txt), a map of these pages, or
+  [llms-full.txt](https://mluttikh.github.io/anytrellis/llms-full.txt), all of them in
+  one file. Every page is also Markdown at its address with `.md` for `.html`.
 
 </div>
 

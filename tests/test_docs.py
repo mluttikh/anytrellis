@@ -86,3 +86,66 @@ def test_every_gallery_plot_can_be_made() -> None:
     gallery._glance()._scene()
     targets = {label["target"].split(":")[0] for label in gallery.GLANCE_LABELS}
     assert targets <= {"title", "toolbar", "strip", "panel", "yaxis", "xaxis", "legend", "badge"}
+
+
+def _code_blocks(page: Path) -> list[str]:
+    return re.findall(r"^```python\n(.*?)^```", page.read_text(encoding="utf-8"),
+                      flags=re.MULTILINE | re.DOTALL)  # fmt: skip
+
+
+def test_the_cheat_sheet_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its blocks run in order as one script; each plot a line shows (an expression, as
+    a notebook cell's last line) is drawn, so a wrong argument fails here."""
+    import ast
+
+    from anytrellis import Trellis, set_theme
+
+    monkeypatch.chdir(tmp_path)  # it saves files
+    namespace: dict[str, Any] = {}
+    try:
+        for block in _code_blocks(DOCS / "cheat-sheet.md"):
+            for node in ast.parse(block).body:
+                if isinstance(node, ast.Expr):
+                    value = eval(compile(ast.Expression(node.value), "<cheat sheet>", "eval"),
+                                 namespace)  # fmt: skip
+                    if isinstance(value, Trellis):
+                        value._scene()
+                else:
+                    module = ast.Module(body=[node], type_ignores=[])
+                    exec(compile(module, "<cheat sheet>", "exec"), namespace)
+    finally:
+        set_theme()
+    assert {"cars.html", "cars.svg", "cars.png"} <= {p.name for p in tmp_path.iterdir()}
+
+
+def test_llms_txt_lists_every_page_and_each_page_is_plain_markdown(tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("docs_llms", ROOT / "scripts" / "docs_llms.py")
+    assert spec
+    assert spec.loader
+    llms = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(llms)
+    llms.write(tmp_path)
+
+    config = tomllib.loads((ROOT / "zensical.toml").read_text(encoding="utf-8"))
+    nav = _nav_pages(config["project"]["nav"])
+    index = (tmp_path / "llms.txt").read_text(encoding="utf-8")
+    assert index.startswith("# anytrellis\n\n> ")
+    url = config["project"]["site_url"]
+    listed = re.findall(rf"^- \[[^\]]+\]\({re.escape(url)}(\S+)\)", index, flags=re.MULTILINE)
+    assert sorted(listed) == sorted(nav)
+    assert "## Optional" in index
+
+    full = (tmp_path / "llms-full.txt").read_text(encoding="utf-8")
+    for page in nav:
+        text = (tmp_path / page).read_text(encoding="utf-8")
+        assert text.startswith("# "), page
+        for syntax in (r'exec="on"', "markdown-exec", r"^::: ", r"^--8<--", r"^\s*</?div"):
+            assert not re.search(syntax, text, flags=re.MULTILINE), f"{page} keeps {syntax}"
+        if page not in llms.OPTIONAL:
+            assert text in full, page
+    trellis = (tmp_path / "reference" / "trellis.md").read_text(encoding="utf-8")
+    assert "### Trellis.points" in trellis
+    assert "Select the marks in a range of x" in trellis  # a docstring, written out
+    assert "- [Points in a wrap](how-to/marks.md#points)" in (tmp_path / "gallery.md").read_text(
+        encoding="utf-8"
+    )
