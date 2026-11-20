@@ -6,6 +6,15 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A cheat sheet** in the documentation: all of anytrellis on one page, as code that runs
+  (the tests run it).
+- **The documentation for AI assistants** ([llms.txt](https://llmstxt.org)):
+  `llms.txt` maps the pages with what each holds, `llms-full.txt` has them all in one file,
+  and every page is also Markdown at its address with `.md` for `.html`, the API reference
+  written out from the docstrings.
+
 ## [0.6.0] - 2026-11-17
 
 ### Changed

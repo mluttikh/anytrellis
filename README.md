@@ -8,7 +8,9 @@ Trellis, facet and small-multiple plots for Jupyter and marimo notebooks, drawn 
 (WebGPU, WebGL2, or Canvas 2D on machines without a usable GPU).
 
 **Documentation: [mluttikh.github.io/anytrellis](https://mluttikh.github.io/anytrellis/)**:
-tutorials, guides, a gallery and the API reference, with live plots.
+tutorials, guides, a gallery, a [cheat sheet](https://mluttikh.github.io/anytrellis/cheat-sheet.html)
+and the API reference, with live plots; for AI assistants,
+[llms.txt](https://mluttikh.github.io/anytrellis/llms.txt).
 
 ```bash
 pip install anytrellis
@@ -326,7 +328,10 @@ uv run python scripts/docs_gallery.py          # redraw the gallery's pictures (
 ```
 
 Build the JavaScript bundle first (`cd js && npm run build`). The build also fails on a
-page over 3 MB gzipped, and on a public method or parameter that no guide uses.
+page over 3 MB gzipped, and on a public method or parameter that no guide uses or the cheat
+sheet (`docs/user/cheat-sheet.md`, whose code the tests run) lacks. It then writes
+`llms.txt`, `llms-full.txt` and each page as Markdown into the site
+(`scripts/docs_llms.py`).
 
 CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff
 and ty, the TypeScript checks, pytest on Python 3.12 to 3.15 (Linux; macOS and Windows on
