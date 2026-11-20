@@ -63,6 +63,12 @@ MARKS: list[tuple[str, dict[str, Any], dict[str, str]]] = [
      {"x": "log", "y": "log"}),
     ("errorbar", {"x": "sensor", "y": "v"}, {}),
     ("errorbar", {"x": "sensor", "y": "v", "extent": "range", "color": "sensor"}, {}),
+    ("bars", {"x": "sensor", "stat": "count"}, {}),
+    ("bars", {"y": "sensor", "stat": "count", "color": "sensor"}, {}),
+    ("bars", {"x": "sensor", "y": "v", "stat": "mean"}, {}),
+    ("bars", {"x": "sensor", "y": "w", "stat": "sum"}, {"y": "sqrt"}),
+    ("bars", {"y": "sensor", "x": "v", "stat": "median"}, {}),
+    ("bars", {"x": "sensor", "y": "w", "stat": "mean"}, {"y": "symlog"}),
 ]  # fmt: skip
 
 TIMES: list[tuple[str, dict[str, Any], dict[str, str]]] = [
@@ -220,6 +226,8 @@ BRUSHES: list[tuple[str, dict[str, Any], dict[str, Any], dict[str, str]]] = [
     ("density", {"x": "v", "color": "sensor"}, {"x": (0, 1)}, {}),
     ("smooth", {"x": "t", "y": "v"}, {"x": (2, 3)}, {}),
     ("errorbar", {"x": "sensor", "y": "v"}, {"x": ["a"]}, {}),
+    ("bars", {"x": "sensor", "stat": "count"}, {"x": ["b"]}, {}),
+    ("bars", {"y": "sensor", "x": "v", "stat": "mean"}, {"y": ["c"]}, {}),
 ]
 
 
@@ -269,6 +277,59 @@ def test_a_saved_page_of_summaries_reads_no_row(monkeypatch, tmp_path) -> None:
     assert every > len(panels(p._sent[0]))  # the widget's: the panels around the page
 
 
+@pytest.mark.parametrize("kind", list(LAZY))
+@pytest.mark.parametrize("kw", [{"x": "v", "color": "sensor"},
+                                {"x": "w", "complementary": True, "stat": "count"},
+                                {"x": "when"}])  # fmt: skip
+def test_an_ecdf_from_the_database_steps_at_bins(kind: str, kw: dict[str, Any],
+                                                monkeypatch) -> None:  # fmt: skip
+    # the database's steps at the ends of fine bins: each the share of the rows below it
+    seen = reads(monkeypatch)
+    df = readings()
+    paged, eager = pair(LAZY[kind], df, "ecdf", kw, {})
+    sp, se = paged._scene()[0], eager._scene()[0]
+    assert seen == [] if kind != "ibis" or kw["x"] != "when" else len(seen) == 1
+    assert (sp["x"]["kind"], sp["x"]["title"]) == (se["x"]["kind"], se["x"]["title"])
+    assert [p["y"] for p in sp["panels"]] == [p["y"] for p in se["panels"]]
+    stat = kw.get("stat", "proportion")
+    x = kw["x"]
+
+    def steps(p: Trellis) -> dict[tuple[float, str], tuple[np.ndarray, np.ndarray]]:
+        """Each (panel, colour)'s steps: x and value."""
+        _, table, _ = p._geometry[0]
+        panel = table.column("__panel__").values
+        color = np.array(table.raw("sensor"), dtype=object) if "color" in kw else \
+            np.full(table.n, "")  # fmt: skip
+        out = {}
+        for key in set(zip(panel.tolist(), color.tolist(), strict=True)):
+            mine = (panel == key[0]) & (color == key[1])
+            out[key] = table.column(x).values[mine], table.column(stat).values[mine]
+        return out
+
+    exact = steps(eager)
+    if kind == "ibis" and x == "when":  # read, as the rows: the same steps
+        assert all(np.allclose(exact[k][1], v[1]) for k, v in steps(paged).items())
+        return
+    first = 0.0 if not kw.get("complementary") else None
+    for key, (at, got) in steps(paged).items():
+        xs, fs = exact[key]
+        start = (
+            first
+            if first is not None
+            else (1.0 if stat == "proportion" else fs[0] + 1 if stat == "count" else 100.0)
+        )
+        k = np.searchsorted(xs, at, side="left") - 1  # the last exact step below each
+        want = np.where(k >= 0, fs[np.maximum(k, 0)], start)
+        want = np.where(at >= xs[-1], fs[-1], want)  # the last bin: up to its end
+        assert np.allclose(got, want), key
+    # a brush: about the rows it selects from the rows (steps at bins' ends, not values)
+    if x == "v":
+        for p in (paged, eager):
+            p.select(x=(0.5, 1))
+        a, b = ids(paged.selected()), ids(eager.selected())
+        assert len(a & b) / len(a | b) > 0.9
+
+
 def test_the_same_errors() -> None:
     rel = duckdb.from_arrow(readings(600).to_arrow())
     with pytest.raises(ValueError, match="split by a category"):
@@ -279,6 +340,14 @@ def test_the_same_errors() -> None:
         Trellis(rel, wrap="station", load="pages").hist(x="v").scale(y="log")._scene()
     with pytest.raises(ValueError, match="categories"):
         Trellis(rel, wrap="station", load="pages").density(x="sensor")._scene()
+    with pytest.raises(ValueError, match="categories"):
+        Trellis(rel, wrap="station", load="pages").ecdf(x="sensor")._scene()
+    with pytest.raises(ValueError, match=r"bars\(stat='count'\) with color='t'"):
+        Trellis(rel, wrap="station", load="pages").bars(x="sensor", stat="count",
+                                                         color="t")._scene()  # fmt: skip
+    with pytest.raises(ValueError, match="must be numbers"):
+        Trellis(rel, wrap="station", load="pages").bars(x="sensor", y="station",
+                                                         stat="mean")._scene()  # fmt: skip
 
 
 def test_loess_of_binned_values_is_loess() -> None:

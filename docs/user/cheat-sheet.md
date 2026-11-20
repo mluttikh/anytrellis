@@ -103,6 +103,9 @@ Trellis(penguins, wrap="island").density(x="body_mass_g", color="species", fill=
 Trellis(penguins, wrap="island").box(x="species", y="body_mass_g")
 Trellis(penguins, wrap="island").violin(x="species", y="body_mass_g")
 Trellis(penguins, wrap="island").errorbar(x="species", y="body_mass_g")  # extent="sd"
+Trellis(penguins, wrap="island").bars(x="species", stat="count")  # rows at each x
+Trellis(penguins, wrap="island").bars(x="species", y="body_mass_g", stat="mean")  # sum, median
+Trellis(penguins, wrap="island").ecdf(x="body_mass_g", color="species")  # complementary=True
 Trellis(cars, wrap="origin").points(x="weight", y="mpg").smooth(x="weight", y="mpg")
 Trellis(cars, wrap="origin").smooth(x="weight", y="mpg", method="linear", se=False)
 ```

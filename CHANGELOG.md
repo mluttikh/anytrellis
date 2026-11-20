@@ -39,6 +39,15 @@ All notable changes to anytrellis. The format follows
 - **Long legends** show their first 20 entries, how many more there are, and a search box
   for the rest.
 - **`legend("top")`** puts the legend over the panels, under the title.
+- **Bars that count or summarise**: `bars(x="origin", stat="count")` counts the rows at
+  each position (y alone: bars along y), and `stat="sum"`, `"mean"` or `"median"`
+  summarises y's values at each x (and colour). Counts and sums stack; means and medians
+  go side by side. Hovering a bar shows its value and how many rows it stands for, and
+  brushing it selects them.
+- **`ecdf()`**: the empirical cumulative distribution per panel and colour, as steps
+  (`stat="proportion"`, `"percent"` or `"count"`; `complementary=True` for survival).
+- Both come from the database with `load="pages"`: the bars as a grouped query, the ECDF
+  counted in 1,024 bins.
 
 ### Changed
 

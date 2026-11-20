@@ -1,7 +1,7 @@
 # Show distributions
 
-`hist()`, `box()`, `violin()`, `density()` and `errorbar()` summarise each panel's rows
-in Python, and draw the result as bars, boxes, violins, lines and error bars. Their bins
+`hist()`, `box()`, `violin()`, `density()`, `ecdf()` and `errorbar()` summarise each
+panel's rows in Python, and draw the result as bars, boxes, violins, lines and error bars. Their bins
 and x values are the same in every panel, so the panels compare. Brushing selects whole
 bins, boxes, violins and error bars, and `selected()` gives the rows they stand for.
 
@@ -117,6 +117,30 @@ print(plot._embed_html())  # markdown-exec: hide
 `bw_adjust=` scales the bandwidth (as in seaborn: 2 is smoother, 0.5 more detailed), and
 `cut=` sets how far past the data each curve goes, in bandwidths.
 
+## Cumulative distributions
+
+`ecdf()` draws the empirical cumulative distribution: a step line that rises at each
+value, to the share of the rows at or below it. It needs no bins and no bandwidth, so
+the panels compare exactly, and the median, the quartiles and the tails read off the y
+axis.
+
+```python exec="on" source="above" session="dist" html="true"
+plot = Trellis(penguins, wrap="island", cols=3, panel_height=170)
+plot.ecdf(x="body_mass_g", color="species")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+| Argument | Sets |
+| --- | --- |
+| `stat="proportion"` | the y axis: from 0 to 1; `"percent"`, or `"count"` of rows |
+| `complementary=True` | the share above each value instead: a survival curve |
+
+Hover a line for the share at that x, every colour's at once. A group with more than
+1,000 different values steps at 1,000 of them, evenly spaced by rank. With
+`load="pages"`, the database counts the rows in 1,024 bins over the values, and the
+steps are at the bins' ends.
+
 ## Error bars
 
 `errorbar()` draws each group's mean as a point, with a bar for its 95% confidence
@@ -167,4 +191,6 @@ Each row is one bar, and brushing it selects that row.
 | Medians and spread, many groups side by side | `box()` |
 | The shape of each group, side by side | `violin()` |
 | The shape of a few groups, overlaid | `density()` |
+| Groups compared without choosing bins; medians and tails | `ecdf()` |
+| How many rows at each value, or each category | `bars(x=..., stat="count")` |
 | Means and how sure they are | `errorbar()` |

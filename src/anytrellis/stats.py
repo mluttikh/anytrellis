@@ -157,6 +157,10 @@ def parts(
         return errorbar(layer, table, panel_of, npanels, also)
     if layer.mark == "horizon":
         return horizon(layer, table, panel_of, npanels, also)
+    if layer.mark == "barstat":
+        return barstat(layer, table, panel_of, npanels, also)
+    if layer.mark == "ecdf":
+        return ecdf(layer, table, panel_of, npanels, also)
     raise ValueError(f"{layer.mark!r} is not a summary mark")
 
 
@@ -397,8 +401,10 @@ class Keys:
             at = at.astype(np.float64)
             test = Range(pos.name, pos.kind, at, at.copy(), pos.scale)
         tests = [test] if value is None else [test, value]
+        counted = self.layer.stat_args.get("stat") == "count"  # rows, not values: none needed
+        finite = () if counted else ((self.val.name, self.val.scale),)
         return Where(self.gp[index], _color_where(self.color, self.labels, self.gc[index]),
-                     tests, ((self.val.name, self.val.scale),))  # fmt: skip
+                     tests, finite)  # fmt: skip
 
 
 @dataclass
@@ -431,16 +437,7 @@ def _grouped(
     also: np.ndarray | None = None,
 ) -> _Groups:
     """The layer's values grouped by panel, position (x, or a category y) and colour."""
-    assert layer.x is not None
-    assert layer.y is not None
-    xc, yc = table.column(layer.x), table.column(layer.y)
-    horizontal = yc.kind == "category" and xc.kind != "category"
-    pos, val = (yc, xc) if horizontal else (xc, yc)
-    if val.kind != "number":
-        raise ValueError(
-            f"{layer.mark}(): the values must be numbers; {val.name!r} holds {val.kind}s (one "
-            "of x and y gives the positions, the other the numbers)"
-        )
+    horizontal, pos, val = _oriented(layer, table)
     color = _color(layer, table)
     rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
     v = val.values[rows]
@@ -463,6 +460,37 @@ def _grouped(
     starts = np.r_[0, np.cumsum(counts)].astype(np.intp)
     return _Groups(layer, horizontal, pos, val, color, puniq, labels, guniq, counts, v[order],
                    ginv[order], rows[order], starts)  # fmt: skip
+
+
+COUNT = "count"
+"""A count's column (``bars(stat="count")``): its rows counted, one each."""
+
+
+def _oriented(layer: Layer, table: Table) -> tuple[bool, Column, Column]:
+    """Whether the groups are horizontal (y the category, x the numbers), their positions
+    and their values (a count: a 1 a row)."""
+    if layer.stat_args.get("stat") == "count":  # one of x and y: the positions
+        horizontal = layer.x is None
+        name = layer.y if horizontal else layer.x
+        assert name is not None
+        return horizontal, table.column(name), Column(COUNT, "number", np.ones(table.n))
+    assert layer.x is not None
+    assert layer.y is not None
+    xc, yc = table.column(layer.x), table.column(layer.y)
+    horizontal = yc.kind == "category" and xc.kind != "category"
+    pos, val = (yc, xc) if horizontal else (xc, yc)
+    if val.kind != "number":
+        raise ValueError(
+            f"{_called(layer)}: the values must be numbers; {val.name!r} holds {val.kind}s "
+            "(one of x and y gives the positions, the other the numbers)"
+        )
+    return horizontal, pos, val
+
+
+def _called(layer: Layer) -> str:
+    """The method a layer came from, as the user wrote it."""
+    return f"bars(stat={layer.stat_args['stat']!r})" if layer.mark == "barstat" else \
+        f"{layer.mark}()"  # fmt: skip
 
 
 @dataclass
@@ -887,6 +915,186 @@ def _errorbar_parts(layer: Layer, bars: Table, panel: np.ndarray, slots: _Slots,
         Part(lines, bars, build_lines, members, hide=("x", "y"), family=True, where=where),
         Part(points, bars, build_points, members, hide=("x", "y"), family=True, where=where),
     ]
+
+
+# ---- summarising bars ---------------------------------------------------------------------
+
+
+def barstat(layer: Layer, table: Table, panel_of: np.ndarray | None,
+            npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
+    """A bar per (panel, position, colour): its rows counted, or its values' sum, mean or
+    median (``bars(stat=...)``)."""
+    g = _grouped(layer, table, panel_of, npanels, also)
+    stat = layer.stat_args["stat"]
+    if not len(g.sv):
+        value = np.zeros(0)
+    elif stat == "count":
+        value = g.counts.astype(np.float64)
+    elif stat == "sum":
+        value = np.add.reduceat(g.sv, g.first)
+    elif stat == "mean":
+        value = np.add.reduceat(g.sv, g.first) / g.counts
+    else:
+        value = g.quantile(0.5)
+    return barstat_parts(g, value, Members(g.starts, g.srows))
+
+
+def barstat_parts(g: Keys, value: np.ndarray, members: Members) -> list[Part]:
+    """Bars of groups ``g`` from 0 to ``value`` (on the values' axis): centred on their
+    position, side by side by colour (``"dodge"``), or stacked (``"stack"``, ``"fill"``)."""
+    layer = g.layer
+    args = layer.stat_args
+    stat = args["stat"]
+    groups = np.arange(len(g.guniq))
+    extra: dict[str, np.ndarray] = {g.pos.name: g.raw_position(g.gpos)}
+    if stat != "count":
+        extra[stat] = value
+        extra["n"] = g.counts
+    out = _table(g.columns(groups, value), extra)
+    tips = [g.pos.name, COUNT] if stat == "count" else [g.pos.name, stat, "n"]
+    slots = g.slots(float(args["width"]))
+    gp, gpos = g.gp, g.gpos
+    color = g.color
+    stacked = color is not None and color.name != g.pos.name and \
+        layer.position in ("stack", "fill")  # fmt: skip
+
+    def build(x_levels: Levels, y_levels: Levels, color_levels: ColorLevels) -> Geometry:
+        centre, half = slots.centres(out, x_levels, y_levels, color_levels)
+        v0, v1 = np.zeros(len(value)), value.astype(np.float64)
+        if stacked and color is not None and len(value):
+            code = axis_values(out.column(color.name), color_levels[color.name])
+            order = np.lexsort((code, gpos, gp))
+            s0, s1 = _stack(gp[order], gpos[order].astype(np.float64), value[order],
+                            fill=layer.position == "fill")  # fmt: skip
+            v0[order], v1[order] = s0, s1
+        return slots.oriented(gp, centre - half, v0, centre + half, v1, groups)
+
+    axes = {"x": g.val.name, "y": g.pos.name} if g.horizontal else \
+        {"x": g.pos.name, "y": g.val.name}  # fmt: skip
+    drawn = replace(layer, mark="bars", tooltip=tips, **axes)
+    return [Part(drawn, out, build, members, hide=("x", "y"), where=g.where(groups))]
+
+
+# ---- empirical cumulative distributions ---------------------------------------------------
+
+ECDF_STEPS = 1000
+"""The most steps an ECDF draws (of a group with more distinct values: these many, at
+evenly spaced ranks, each exact)."""
+
+ECDF_BINS = 1024
+"""``load="pages"``: an ECDF's steps, at the ends of these many bins over the values."""
+
+
+@dataclass
+class Steps:
+    """An ECDF's steps, each group's in order: its panel, colour, x (axis units), the rows
+    at or below it, the group's rows, and the range of values each step stands for."""
+
+    panel: np.ndarray
+    color: np.ndarray
+    x: np.ndarray
+    below: np.ndarray
+    total: np.ndarray
+    lo: np.ndarray
+    hi: np.ndarray
+    open: np.ndarray | None = None
+    """A step's range is below its ``hi``, not at it (binned steps: but the last)."""
+
+
+def ecdf(layer: Layer, table: Table, panel_of: np.ndarray | None,
+         npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
+    """A step line per (panel, colour): the share of its values at or below each x, rising
+    at each value (at most ``ECDF_STEPS`` steps)."""
+    assert layer.x is not None
+    col = table.column(layer.x)
+    if col.kind == "category":
+        raise ValueError(f"ecdf(): x must be numbers or times; {col.name!r} holds categories")
+    color = _color(layer, table)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
+    v = col.values[rows]
+    keep = np.isfinite(v)
+    rows, panel, v = rows[keep], panel[keep], v[keep]
+    labels, c = _color_codes(color, rows)
+    guniq, ginv = _codes(panel * len(labels) + c)
+    order = np.lexsort((v, ginv))
+    sv, srows = v[order], rows[order]
+    counts = np.bincount(ginv[order], minlength=len(guniq))
+    starts = np.r_[0, np.cumsum(counts)].astype(np.int64)
+    parts: list[tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
+    member_starts, member_rows = [0], []
+    for k in range(len(guniq)):
+        s = sv[starts[k] : starts[k + 1]]
+        uniq = np.unique(s)
+        if len(uniq) > ECDF_STEPS:  # steps at evenly spaced ranks of the distinct values
+            uniq = uniq[np.unique(np.round(np.linspace(0, len(uniq) - 1, ECDF_STEPS))
+                                  .astype(np.int64))]  # fmt: skip
+        below = np.searchsorted(s, uniq, side="right")
+        first = np.r_[0, below[:-1]]
+        parts.append((k, uniq, below, s[first], s[below - 1]))
+        for a, b in zip(first, below, strict=True):
+            member_rows.append(srows[starts[k] + a : starts[k] + b])
+            member_starts.append(member_starts[-1] + b - a)
+    nc = len(labels)
+    group = np.concatenate([np.full(len(p[1]), p[0]) for p in parts]) if parts else \
+        np.zeros(0, dtype=np.int64)  # fmt: skip
+
+    def joined(i: int) -> np.ndarray:
+        return np.concatenate([p[i] for p in parts]) if parts else np.zeros(0)
+
+    steps = Steps((guniq // nc)[group], (guniq % nc)[group], joined(1),
+                  joined(2).astype(np.float64), counts[group].astype(np.float64), joined(3),
+                  joined(4))  # fmt: skip
+    members = Members(
+        np.array(member_starts, dtype=np.int64),
+        np.concatenate(member_rows) if member_rows else np.zeros(0, np.int64),
+    )
+    return ecdf_parts(layer, col, color, labels, steps, members)
+
+
+def ecdf_parts(layer: Layer, col: Column, color: Column | None, labels: np.ndarray,
+               steps: Steps, members: Members) -> list[Part]:  # fmt: skip
+    """An ECDF's step lines: a riser at each step's x, from the step before to its share
+    of the group's rows, then along to the next step's x."""
+    args = layer.stat_args
+    stat = args["stat"]
+    below, total = steps.below, steps.total
+    if args["complementary"]:
+        below = total - below
+    value = below / np.maximum(total, 1) * (100.0 if stat == "percent" else 1.0) \
+        if stat != "count" else below  # fmt: skip
+    n = len(value)
+    k = np.arange(n)
+    same = np.r_[
+        False, (steps.panel[1:] == steps.panel[:-1]) & (steps.color[1:] == steps.color[:-1])
+    ]  # a step after another of its group
+    full = steps.total if stat == "count" else np.full(n, 100.0 if stat == "percent" else 1.0)
+    start = full if args["complementary"] else np.zeros(n)  # below the first value
+    before = np.where(same, np.r_[0.0, value[:-1]], start)
+    has_next = np.r_[same[1:], False]
+    after = np.where(has_next, np.r_[steps.x[1:], 0.0], steps.x)
+    cols = [Column(PANEL, "number", steps.panel.astype(np.float64)),
+            Column(col.name, col.kind, steps.x, scale=col.scale),
+            Column(stat, "number", value)]  # fmt: skip
+    if color is not None:
+        cols.append(Column(color.name, "category", labels[steps.color], color.levels))
+    (shown,) = _shown(col, steps.x)
+    out = _table(cols, {col.name: _times(shown) if col.kind == "time" else shown})
+
+    def build(_x: Levels, _y: Levels, _c: ColorLevels) -> Geometry:
+        run = k[has_next]
+        x0 = np.r_[steps.x, steps.x[run]]
+        x1 = np.r_[steps.x, after[run]]
+        y0 = np.r_[before, value[run]]
+        y1 = np.r_[value, value[run]]
+        owners = np.r_[k, run]
+        g = Geometry(steps.panel[owners], x0, y0, x1, y1, owners)
+        g.rows_end = owners.copy()
+        return _sorted(g)
+
+    test = Range(col.name, col.kind, steps.lo, steps.hi, col.scale, steps.open)
+    where = Where(steps.panel, _color_where(color, labels, steps.color), [test])
+    drawn = replace(layer, mark="line", y=stat, tooltip=[col.name, stat])
+    return [Part(drawn, out, build, members, hide=("x", "y"), where=where)]
 
 
 # ---- densities ----------------------------------------------------------------------------
@@ -1460,8 +1668,8 @@ def _color(layer: Layer, table: Table) -> Column | None:
     col = table.column(layer.color)
     if col.kind != "category":
         raise ValueError(
-            f"{layer.mark}(color={layer.color!r}): a summary is split by a category column, "
-            f"and this one holds {col.kind}s"
+            f"{_called(layer)} with color={layer.color!r}: a summary is split by a category "
+            f"column, and this one holds {col.kind}s (as_category() reads it as categories)"
         )
     return col
 

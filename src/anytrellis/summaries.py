@@ -27,19 +27,25 @@ from anytrellis.facets import Grid
 from anytrellis.layers import Layer
 from anytrellis.query import _finite, always, among_labels, within
 from anytrellis.stats import (
+    COUNT,
+    ECDF_BINS,
     Fit,
     Keys,
     Labels,
     Part,
     Range,
+    Steps,
     Where,
+    _called,
     _codes,
     _color_codes,
     _kde_binned,
+    barstat_parts,
     bin_edges,
     box_parts,
     density_grids,
     density_parts,
+    ecdf_parts,
     errorbar_parts,
     hist_parts,
     linear_fit,
@@ -104,6 +110,10 @@ def parts(layer: Layer, whole: Table, grid: Grid,
             return ask.smooth()
         if mark == "errorbar" and args.get("lo") is None:
             return ask.errorbar()
+        if mark == "barstat":
+            return ask.barstat()
+        if mark == "ecdf":
+            return ask.ecdf()
     except _Unable:
         return None
     return None
@@ -369,6 +379,83 @@ class _Ask:
         mean, sd, lo, hi = (found.column(k).values[at] for k in (MEAN, SD, LO, HI))
         return errorbar_parts(keys, mean, sd, lo, hi, no_members(len(keys.guniq)))
 
+    def barstat(self) -> list[Part]:
+        import narwhals as nw
+
+        c = nw.col
+        stat = self.layer.stat_args["stat"]
+        if stat == "count":
+            g, groups, ok = self._counted()
+            found = self._read(lambda q: q.filter(ok).group_by(*groups).agg(_len()))
+            keys, _ = self._keys(g, found)
+            return barstat_parts(keys, keys.counts.astype(np.float64),
+                                 no_members(len(keys.guniq)))  # fmt: skip
+        g, groups, ok, v = self._positions()
+        summary = {"sum": c(VALUE).sum(), "mean": c(VALUE).mean(),
+                   "median": c(VALUE).quantile(0.5, interpolation="linear")}[stat]  # fmt: skip
+        found = self._read(lambda q: q.filter(ok).select(*groups, v.alias(VALUE))
+                           .group_by(*groups).agg(_len(), summary.alias(MEAN)))  # fmt: skip
+        keys, at = self._keys(g, found)
+        return barstat_parts(keys, found.column(MEAN).values[at], no_members(len(keys.guniq)))
+
+    def ecdf(self) -> list[Part]:
+        """The rows counted in ``ECDF_BINS`` bins over x's range (every panel's), each
+        group's steps at the ends of its bins."""
+        layer, whole = self.layer, self.whole
+        assert layer.x is not None
+        x = layer.x
+        kind = whole.kind(x)
+        if kind == "category":
+            raise ValueError(f"ecdf(): x must be numbers or times; {x!r} holds categories")
+        scale = self.scales.get("x", "")
+        col = Column(x, kind, np.zeros(0), scale=scale)
+        color = self._color()
+        groups = self._by(color)
+        span = self._span(x, scale)
+        lo, hi = (float(span[0]), float(span[-1])) if len(span) else (0.0, 1.0)
+        width = (hi - lo) / ECDF_BINS if hi > lo else 1.0
+        v = self._value(x, scale)
+        bin_of = ((v - lo) / width).floor().clip(0, ECDF_BINS - 1)
+        ok = self._ok(x, scale)
+        found = self._read(lambda q: q.filter(ok).with_columns(bin_of.alias(BIN))
+                           .group_by(*groups, BIN).agg(_len()))  # fmt: skip
+        p = self._panels(found)
+        cc = self._color_codes(color, found)
+        b = np.nan_to_num(found.column(BIN).values, nan=-1).astype(np.int64)
+        keep = (p >= 0) & (b >= 0)
+        nc = max(len(color.levels), 1) if color is not None else 1
+        group = (p * nc + cc)[keep]
+        order = np.lexsort((b[keep], group))
+        group, b, n = group[order], b[keep][order], found.column(N).values[keep][order]
+        first = np.r_[True, group[1:] != group[:-1]]
+        starts = np.flatnonzero(first)
+        size = np.diff(np.r_[starts, len(group)])
+        cum = np.cumsum(n)
+        below = cum - np.repeat(np.r_[0.0, cum][starts], size)
+        total = np.repeat(below[np.r_[starts[1:] - 1, len(group) - 1]] if len(group) else
+                          np.zeros(0), size)  # fmt: skip
+        edge_lo = lo + b * width
+        edge_hi = np.where(b == ECDF_BINS - 1, hi, lo + (b + 1) * width)
+        labels, _ = _color_codes(color, np.zeros(0, dtype=np.int64))
+        steps = Steps(group // nc, group % nc, edge_hi, below.astype(np.float64),
+                      total.astype(np.float64), edge_lo, edge_hi, b < ECDF_BINS - 1)  # fmt: skip
+        return ecdf_parts(layer, col, color, labels, steps, no_members(len(group)))
+
+    def _counted(self) -> tuple[_Shape, list[str], Any]:
+        """A count's positions: their shape (the values: a 1 a row), the columns grouped
+        by and the rows counted."""
+        layer, whole = self.layer, self.whole
+        horizontal = layer.x is None
+        pos = layer.y if horizontal else layer.x
+        assert pos is not None
+        scale = self.scales.get("y" if horizontal else "x", "")
+        kind = whole.kind(pos)
+        levels = whole.levels(pos) if kind == "category" else ()
+        color = self._color()
+        shape = _Shape(horizontal, Column(pos, kind, np.zeros(0), levels, scale=scale),
+                       Column(COUNT, "number", np.zeros(0)), color)  # fmt: skip
+        return shape, self._by(color, pos), self._ok(pos, scale)
+
     # ---- groups --------------------------------------------------------------------------
 
     def _color(self) -> Column | None:
@@ -378,8 +465,9 @@ class _Ask:
             return None
         if whole.kind(layer.color) != "category":
             raise ValueError(
-                f"{layer.mark}(color={layer.color!r}): a summary is split by a category "
-                f"column, and this one holds {whole.kind(layer.color)}s"
+                f"{_called(layer)} with color={layer.color!r}: a summary is split by a "
+                f"category column, and this one holds {whole.kind(layer.color)}s "
+                "(as_category() reads it as categories)"
             )
         return Column(layer.color, "category", np.zeros(0, dtype=object),
                       whole.levels(layer.color))  # fmt: skip
