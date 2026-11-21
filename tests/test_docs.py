@@ -77,6 +77,14 @@ def test_a_link_between_pages_leads_to_a_page_and_heading(page: str, target: str
         assert anchor in _anchors(linked), f"{page} links to {target}: no such heading"
 
 
+def test_every_gallery_section_is_on_the_page_once() -> None:
+    """docs/user/gallery.md has a heading and the cards of each section, in order."""
+    text = (ROOT / "docs" / "user" / "gallery.md").read_text(encoding="utf-8")
+    sections = _gallery().sections()
+    assert re.findall(r"^## (.+)$", text, re.MULTILINE) == sections
+    assert re.findall(r'print\(cards\("([^"]+)"\)\)', text) == sections
+
+
 def test_every_gallery_plot_can_be_made() -> None:
     gallery = _gallery()
     entries = gallery.entries()
