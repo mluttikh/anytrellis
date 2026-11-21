@@ -51,9 +51,17 @@ All notable changes to anytrellis. The format follows
 - **Filter histograms**: in the page bar's filters, each number statistic shows its values
   over the panels as a small histogram (the panels the other filters keep on top). Drag
   across it to filter by that range; a click clears it.
+- **The marks by the keys**: in a panel opened (or a plot of one panel), the arrow keys step
+  through its marks, ← → along x and ↑ ↓ to the mark above or below (Home, End: the ends).
+  Each shows its tooltip, said to a screen reader through a live region; the view follows a
+  mark off it.
+- **A table view**: the toolbar's table button (or `t`) shows each panel's statistics and,
+  when 500 or fewer, the rows the plot draws as HTML tables; a panel's name opens it. A
+  saved page has it too.
 
 ### Changed
 
+- `stats()` gives the panels' statistics of any plot, not only a paged wrap's.
 - With select on, a click on a mark selects it; a click on no mark still clears the
   selection.
 

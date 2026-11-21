@@ -85,8 +85,10 @@ its text. A click away from the marks, ++esc++ or its
 | ++y++ | fit y to the data in view, and keep fitting it as x changes; again to stop |
 | ++s++ | drag draws a selection brush, and back |
 | ++l++ | drag draws a lasso, and back |
-| ++esc++ | unpin the tooltip; with none, show every legend entry again; then let the arrow keys' ring go; then stop comparing; then clear the selection; then back to all panels |
-| ++left++ ++right++ ++up++ ++down++ | move a ring from panel to panel (its name is said) |
+| ++esc++ | unpin the tooltip; with none, show every legend entry again; then let go of the mark the arrow keys reached, or their ring; then stop comparing; then clear the selection; then back to all panels |
+| ++left++ ++right++ ++up++ ++down++ | move a ring from panel to panel (its name is said); in a panel opened, or a plot of one panel, step through its marks: ++left++ ++right++ along x, ++up++ ++down++ to the nearest mark above or below. Each shows its tooltip, said to a screen reader |
+| ++home++ ++end++ | in a panel opened (or a plot of one): its first or last mark |
+| ++t++ | the plot as a table: each panel's statistics, and the rows when 500 or fewer |
 | ++enter++ | open the panel the ring is on, or the one under the pointer |
 | ++p++ | pin that panel first on every page of a paged wrap, and unpin it |
 | ++c++ | compare every panel with that one: its marks in grey in the others; again to stop |
@@ -101,7 +103,7 @@ its text. A click away from the marks, ++esc++ or its
 
 The buttons at the top right do the same as keys. The first three choose what a drag
 does, one of them always on: pan, box zoom (++z++) or select (++s++); with one focused, the
-arrow keys move along them. Then fit y (++y++), reset (++r++), settings (++comma++), export
+arrow keys move along them. Then fit y (++y++), reset (++r++), the table (++t++), settings (++comma++), export
 (++e++), the keys and mouse (++question++) and full screen (++f++). The settings panel
 changes the layout, scales, colour and order, and copies the plot's Python ([Change a plot
 from its settings panel](../how-to/settings.md)). With a panel opened, the strip over it

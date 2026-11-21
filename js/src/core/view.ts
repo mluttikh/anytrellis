@@ -47,7 +47,8 @@ export type { Highlight } from "./selection";
 import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, layerMap, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
 import { numberFormat } from "./format";
 import { formatHeight, formatValue } from "./ticks";
-import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type SavedView, type TrellisSpec, type Zoom, isMark } from "./types";
+import { type Stop, nextStop, stopsOf } from "./stops";
+import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type SavedView, type TableView, type TrellisSpec, type Zoom, isMark } from "./types";
 
 /** Versions of the selected marks' sets: never used twice, as the renderers keep a set's
  * buffers by key and version (a selection cleared and made again under the same key must
@@ -78,6 +79,8 @@ export interface ViewOptions {
   onView?: (view: ShownView) => void;
   /** The reader turned a page, sorted or filtered a paged wrap's panels. */
   onPaging?: (paging: Paging) => void;
+  /** The table view's data (Python's, or the page's), or null: none. */
+  table?: () => Promise<TableView | null>;
   /** The reader kept a view or deleted one (the views now). */
   onViews?: (views: Record<string, SavedView>) => void;
   /** Layers in detail were drawn (Python sends a highlight for them again). */
@@ -234,6 +237,7 @@ const GHOST_ALPHA = 0.7;
 
 const ICONS = {
   pan: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" /></svg>',
+  table: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1" /><path d="M2 6h12M2 9.5h12M6.5 6v7.5" /></svg>',
   help: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" /><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.5" /><path d="M8 11.6v.1" /></svg>',
   back: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>',
   prev: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4" /></svg>',
@@ -283,6 +287,16 @@ export class TrellisView {
   /** Keys and mouse, the renderer and the version (?). */
   private readonly help: HTMLDivElement;
   private readonly helpButton: HTMLButtonElement;
+  private readonly tableButton: HTMLButtonElement;
+  private readonly tableView: HTMLDivElement;
+  private tableFor: TrellisSpec | null = null;
+  /** Says what the arrow keys reach, for a screen reader (polite: after what it reads). */
+  private readonly announcer: HTMLDivElement;
+  private announceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The arrow keys' mark (in a panel opened, or a plot of one panel), and the stops of
+   * the panel they step through (for a scene, a panel and what is hidden). */
+  private markAt: { panel: number; stop: Stop } | null = null;
+  private stopCache: { scene: Scene; panel: number; hidden: string; stops: Stop[] } | null = null;
   private rendererName = "";
   private renderer: Renderer | null = null;
   private rendererReady: Promise<void>;
@@ -445,6 +459,18 @@ export class TrellisView {
     this.helpButton = button(ICONS.help, "Keys and mouse (?)", () => this.toggleHelp());
     this.helpButton.setAttribute("aria-haspopup", "dialog");
     this.helpButton.setAttribute("aria-expanded", "false");
+    this.tableButton = button(ICONS.table, "Table: the panels' statistics and the rows (t)", () => this.toggleTable());
+    this.tableButton.setAttribute("aria-haspopup", "dialog");
+    this.tableButton.setAttribute("aria-expanded", "false");
+    this.tableButton.hidden = !opts.table;
+    this.tableView = el("div", "atr-help atr-table-view");
+    this.tableView.setAttribute("role", "dialog");
+    this.tableView.setAttribute("aria-label", "The plot as a table");
+    this.tableView.tabIndex = -1;
+    this.tableView.hidden = true;
+    this.announcer = el("div", "atr-sr");
+    this.announcer.setAttribute("aria-live", "polite");
+    this.announcer.setAttribute("aria-atomic", "true");
     this.help = el("div", "atr-help");
     this.help.setAttribute("role", "dialog");
     this.help.setAttribute("aria-label", "Keys and mouse");
@@ -469,7 +495,7 @@ export class TrellisView {
     this.settingsPanel.setAttribute("aria-label", "Settings");
     this.settingsPanel.tabIndex = -1;
     this.settingsPanel.hidden = true;
-    this.toolbar.append(this.backButton, modes, this.fitButton, this.resetButton, this.settingsButton, this.exportButton, this.helpButton, this.fullButton);
+    this.toolbar.append(this.backButton, modes, this.fitButton, this.resetButton, this.tableButton, this.settingsButton, this.exportButton, this.helpButton, this.fullButton);
     this.header.append(this.heading, this.chips, this.toolbar);
     this.pager = new Pager((paging) => this.setPaging(paging, true), {
       show: (name) => this.showView(name, true),
@@ -501,7 +527,7 @@ export class TrellisView {
     this.tools.append(this.openTool, this.pinTool, this.compareTool);
     for (const type of ["pointerdown", "pointermove", "pointerup", "dblclick", "wheel"]) this.tools.addEventListener(type, (e) => e.stopPropagation());
     this.stage.append(this.back, this.front, this.tools, this.tip, this.status, this.notice, this.empty);
-    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.settingsPanel, this.help);
+    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.settingsPanel, this.help, this.tableView, this.announcer);
     host.append(this.root);
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
@@ -1722,8 +1748,177 @@ export class TrellisView {
     this.hideTip();
     this.toggleExport(false);
     this.toggleSettings(false);
+    this.toggleTable(false);
     this.fillHelp();
     this.help.focus();
+  }
+
+  // ---- the table view and the keys among marks ---------------------------------------------
+
+  /** Show or hide the table view (its toolbar button, t): each panel's statistics, and the
+   * rows when they are few, as HTML tables. */
+  private toggleTable(show = this.tableView.hidden): void {
+    if (!this.opts.table) return;
+    this.tableView.hidden = !show;
+    this.tableButton.setAttribute("aria-expanded", String(show));
+    if (!show) return;
+    this.hideTip();
+    this.toggleExport(false);
+    this.toggleSettings(false);
+    if (!this.help.hidden) this.toggleHelp(false);
+    this.tableView.focus();
+    if (this.tableFor === this.spec && this.tableView.childElementCount) return;
+    const spec = this.spec;
+    this.tableFor = spec;
+    this.fillTable(null, "Reading the table…");
+    this.opts
+      .table()
+      .then((data) => this.tableFor === spec && this.fillTable(data, data ? "" : "No table for this plot."))
+      .catch((err) => this.tableFor === spec && this.fillTable(null, `The table could not be read: ${String(err)}`));
+  }
+
+  private fillTable(data: TableView | null, message: string): void {
+    const close = button('<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>', "Close (Esc)", () => {
+      this.toggleTable(false);
+      this.root.focus();
+    });
+    close.classList.add("atr-help-close");
+    const parts: (HTMLElement | string)[] = [close];
+    if (message) parts.push(el("div", "atr-help-lead", message));
+    if (data) {
+      const n = data.panels.rows.length;
+      parts.push(this.dataTable(n > 1 ? `Panels (${n})` : "The plot", data.panels.columns, data.panels.rows, n > 1));
+      if (data.rows) parts.push(this.dataTable(data.rows.caption, data.rows.columns, data.rows.rows, false));
+      if (data.note) parts.push(el("div", "atr-help-about", data.note));
+    }
+    this.tableView.replaceChildren(...parts);
+  }
+
+  /** A table: a caption, a header row, and a row a panel (its name a button that opens it)
+   * or a row of data; numbers right-aligned. */
+  private dataTable(caption: string, columns: string[], rows: string[][], panels: boolean): HTMLElement {
+    const wrap = el("div", "atr-table-wrap");
+    const table = el("table", "atr-data-table");
+    table.append(el("caption", "", caption));
+    // a column of numbers (and blanks): right-aligned, its header too
+    const numeric = /^[-+−]?[\d.,]+(e[-+]?\d+)?%?$/i;
+    const numbers = columns.map((_, k) => k > 0 && rows.some((r) => r[k]) && rows.every((r) => !r[k] || numeric.test(r[k])));
+    const head = el("tr");
+    columns.forEach((c, k) => {
+      const th = el("th", numbers[k] ? "atr-num" : "", c);
+      th.setAttribute("scope", "col");
+      head.append(th);
+    });
+    const thead = el("thead");
+    thead.append(head);
+    const body = el("tbody");
+    rows.forEach((row, i) => {
+      const tr = el("tr");
+      row.forEach((value, k) => {
+        const cell = el(k === 0 ? "th" : "td", numbers[k] ? "atr-num" : "");
+        if (k === 0) cell.setAttribute("scope", "row");
+        if (k === 0 && panels) {
+          const open = el("button", "atr-link", value);
+          open.type = "button";
+          open.title = `Open ${value}`;
+          open.addEventListener("click", () => {
+            this.toggleTable(false);
+            this.setFocus(i, true);
+            this.root.focus();
+          });
+          cell.append(open);
+        } else cell.textContent = value;
+        tr.append(cell);
+      });
+      body.append(tr);
+    });
+    table.append(thead, body);
+    wrap.append(table);
+    return wrap;
+  }
+
+  /** The panel the arrow keys step through the marks of: the one opened, or a plot's only
+   * panel (null: the arrow keys move between panels). */
+  private markPanel(): number | null {
+    if (this.focused !== null) return this.focused;
+    return (this.spec?.panels.length ?? 0) === 1 ? (this.views[0]?.panel ?? 0) : null;
+  }
+
+  private panelStops(p: number): Stop[] {
+    const scene = this.scene!;
+    const hidden = JSON.stringify(this.isolated);
+    const c = this.stopCache;
+    if (c && c.scene === scene && c.panel === p && c.hidden === hidden) return c.stops;
+    const stops = stopsOf(scene, p, this.spec!, (layer, i) => this.hidden(layer, i));
+    this.stopCache = { scene, panel: p, hidden, stops };
+    return stops;
+  }
+
+  /** The arrow keys in a panel: step to a mark (along x, above or below, the first or last),
+   * show its tooltip there and say it. Along x, the view follows the mark. */
+  private stepMark(move: { step?: number; up?: number; to?: "first" | "last" }): void {
+    const spec = this.spec;
+    const p = this.markPanel();
+    if (!spec || !this.scene || !this.lay || p === null) return;
+    const stops = this.panelStops(p);
+    if (!stops.length) {
+      this.notify("No marks in this panel");
+      return;
+    }
+    const here = this.panelViews().find((w) => w.panel === p);
+    if (!here) return;
+    const k = this.markAt?.panel === p ? stops.indexOf(this.markAt.stop) : -1;
+    const j = nextStop(stops, k, move, here.map);
+    if (j === null) {
+      const why = move.step ? (move.step < 0 ? "The first mark" : "The last mark") : move.up! < 0 ? "No mark above" : "No mark below";
+      this.notify(why);
+      this.say(why);
+      return;
+    }
+    const stop = stops[j];
+    this.markAt = { panel: p, stop };
+    // the mark off the view along x: the view goes to it (y follows when fitted)
+    const panel = spec.panels[p];
+    const xr = this.xView.get(panel.xg) ?? panel.x;
+    const lo = Math.min(xr[0], xr[1]);
+    const hi = Math.max(xr[0], xr[1]);
+    if (stop.x < lo || stop.x > hi) {
+      this.remember();
+      this.setX(panel.xg, [stop.x - (hi - lo) / 2, stop.x + (hi - lo) / 2]);
+      if (this.needFit) {
+        this.needFit = false;
+        this.fitGroups();
+      }
+    }
+    this.views = this.panelViews();
+    const v = this.views.find((w) => w.panel === p)!;
+    const x = v.map.ox + stop.x * v.map.sx;
+    const y = v.map.oy + stop.y * v.map.sy;
+    this.hover(x, y);
+    if (!this.front_.hovers.length) {
+      const layer = this.scene.layers[stop.layer];
+      this.front_.hovers = [{ x, y, r: 4, color: colorOf(layer, stop.instance) }];
+    }
+    this.request();
+    const at = `${j + 1} of ${stops.length}`;
+    clearTimeout(this.announceTimer);
+    // once the keys rest (and Python's tooltip columns have come)
+    this.announceTimer = setTimeout(() => this.say(`${this.tipText() || "A mark"}. ${at}.`), 250);
+  }
+
+  /** The tooltip as one line of text: its title line, then each row's label and value. */
+  private tipText(): string {
+    if (this.tip.style.display === "none") return "";
+    const head = [...this.tip.querySelectorAll(".atr-tip-head > span")].map((s) => s.textContent?.trim()).filter(Boolean);
+    const rows = [...this.tip.querySelectorAll("tr")].map((tr) => `${tr.querySelector("th")?.textContent ?? ""}: ${tr.querySelector("td")?.textContent ?? ""}`);
+    return [...head, ...rows].join(", ");
+  }
+
+  /** Say `text` to a screen reader (the live region), once (instead of a mark waiting). */
+  private say(text: string): void {
+    clearTimeout(this.announceTimer);
+    this.announcer.textContent = "";
+    requestAnimationFrame(() => (this.announcer.textContent = text));
   }
 
   private fillHelp(): void {
@@ -1767,10 +1962,12 @@ export class TrellisView {
         ["y", "fit y to the data in view"],
         ["r  u", "reset the zoom, undo the last"],
         ["Esc", "unpin, clear the selection, close a panel"],
-        ["← → ↑ ↓", "move between panels"],
+        ["← → ↑ ↓", "move between panels; in a panel opened (or a plot of one), step through its marks: along x, and to the mark above or below"],
+        ["Home  End", "the first and last mark"],
         ["Enter", "open the panel reached (or under the pointer)"],
         ["p  c", "pin it first on every page, compare every panel with it"],
         ["Page Up / Down", "the previous / next panel or page"],
+        ["t", "the plot as a table: each panel's statistics, and the rows when few"],
         ["e  ,  f", "export, settings (and Copy as Python), full screen"],
         ["?", "these keys"],
       ]),
@@ -1911,6 +2108,7 @@ export class TrellisView {
         if (!this.exportMenu.hidden && !path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
         if (!this.settingsPanel.hidden && !path.includes(this.settingsPanel) && !path.includes(this.settingsButton)) this.toggleSettings(false);
         if (!this.help.hidden && !path.includes(this.help) && !path.includes(this.helpButton)) this.toggleHelp(false);
+        if (!this.tableView.hidden && !path.includes(this.tableView) && !path.includes(this.tableButton)) this.toggleTable(false);
         if (this.pager.menuOpen && !path.includes(this.pager.el)) this.pager.closeMenus();
       },
       { signal, capture: true },
@@ -2243,8 +2441,21 @@ export class TrellisView {
       case "ArrowRight":
       case "ArrowUp":
       case "ArrowDown":
-        if (!many || this.focused !== null) return false;
-        this.moveRing(key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : 0, key === "ArrowUp" ? -1 : key === "ArrowDown" ? 1 : 0);
+        if (many && this.focused === null) {
+          this.moveRing(key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : 0, key === "ArrowUp" ? -1 : key === "ArrowDown" ? 1 : 0);
+          return true;
+        }
+        // in a panel opened (or a plot of one): its marks
+        this.stepMark(key === "ArrowLeft" || key === "ArrowRight" ? { step: key === "ArrowLeft" ? -1 : 1 } : { up: key === "ArrowUp" ? -1 : 1 });
+        return true;
+      case "Home":
+      case "End":
+        if (this.markPanel() === null) return false;
+        this.stepMark({ to: key === "Home" ? "first" : "last" });
+        return true;
+      case "t":
+        if (!this.opts.table) return false;
+        this.toggleTable();
         return true;
       case "p":
         if (!many) return false;
@@ -2268,6 +2479,11 @@ export class TrellisView {
           this.root.focus();
           return true;
         }
+        if (!this.tableView.hidden) {
+          this.toggleTable(false);
+          this.root.focus();
+          return true;
+        }
         if (!this.exportMenu.hidden) {
           this.toggleExport(false);
           return true;
@@ -2287,6 +2503,11 @@ export class TrellisView {
         }
         if (this.isolated) {
           this.isolate(null);
+          return true;
+        }
+        if (this.markAt) {
+          this.markAt = null;
+          this.clearHover();
           return true;
         }
         if (this.ring !== null && this.focused === null) {

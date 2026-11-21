@@ -254,7 +254,7 @@ t = Trellis(synthetic.sensors(stations=120), wrap="station")  # over 100 panels:
 t.line(x="time", y="temp", color="sensor")
 t.pages, t.page, t.page_names  # how many pages, the one shown, their names
 t.show_page(2)
-t.stats()  # rows, mean, median, min, max, sd and trend of each panel
+t.stats()  # rows, mean, median, min, max, sd and trend of each panel (any plot: its table)
 t.sort_panels("trend temp", descending=True)
 t.filter_panels("station 1", **{"mean temp": (10, None)})  # filter_panels() clears
 t.panel_stats({"station": ["station 1", "station 2"], "region": ["north", "south"]})
@@ -313,6 +313,8 @@ Click a plot first, then:
 | ++y++ | fit y to the data in view |
 | ++r++, ++u++ | reset the zoom, undo it |
 | ++esc++ | unpin, clear the selection |
+| ++left++ ++right++ ++up++ ++down++, ++home++ ++end++ | in a panel opened: step through its marks, said to a screen reader |
+| ++t++ | the plot as a table: each panel's statistics and, when few, the rows |
 | ++e++, ++f++, ++question++ | export, full screen, help |
 
 See [Mouse and keys](reference/mouse-and-keys.md).

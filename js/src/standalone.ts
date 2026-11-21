@@ -6,7 +6,7 @@
 import { LinkGroup, type SavedLink, readLink } from "./core/savedlink";
 import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
-import type { Paging, RendererPreference, SavedView, TrellisSpec, Zoom } from "./core/types";
+import type { Paging, RendererPreference, SavedView, TableView, TrellisSpec, Zoom } from "./core/types";
 import { TrellisView } from "./core/view";
 
 interface Payload {
@@ -28,6 +28,8 @@ interface Payload {
   views?: Record<string, SavedView> | null;
   /** The zoom it opens with (a view shown in Python), or null: as the plot starts. */
   zoom?: Zoom | null;
+  /** The table view's data (Trellis._table_view). */
+  table?: TableView | null;
 }
 
 /** The view a link to the page names: #view=<name>. */
@@ -75,6 +77,7 @@ async function start(host: HTMLElement): Promise<void> {
       source: embeddedSource(payload.buffers),
       renderer,
       code: () => code,
+      table: payload.table ? async () => payload.table ?? null : undefined,
       onSelect: group ? changed : undefined,
       onBrushing: group ? changed : undefined,
       onClear: group ? () => group!.clear() : undefined,

@@ -1,7 +1,7 @@
 # Make a plot readable by everyone
 
 A plot is drawn on canvases, which a screen reader can't read, and its colours may be
-the only thing telling its series apart. anytrellis does three things about that.
+the only thing telling its series apart. anytrellis does five things about that.
 
 ## A description, made for you
 
@@ -30,6 +30,39 @@ Trellis(cars, wrap="origin", alt="Heavier cars go fewer miles on a gallon, in ev
         "region; American cars are the heaviest.")
 ```
 
+## The marks, one at a time, by the keys
+
+Click the plot (or reach it with ++tab++), and the arrow keys move a ring between its
+panels; ++enter++ opens one. In a panel opened, or in a plot of one panel, the arrow keys
+step through its marks:
+
+| Key | Goes to |
+| --- | --- |
+| ++left++ ++right++ | the previous or next mark along x (a line's every point) |
+| ++up++ ++down++ | the nearest mark above or below: at the same x, the other series |
+| ++home++ ++end++ | the first or last mark |
+| ++esc++ | lets go of the mark (again: back to all panels) |
+
+Each mark shows its tooltip, and a screen reader says it, with where the mark is among the
+panel's ("Europe, weight 1825, mpg: 29.5. 1 of 70."). Lines coloured by a category say
+every line's value at that x, as hovering shows them. A mark off the zoomed view brings the
+view to it.
+
+## The plot as a table
+
+The toolbar's table button (or ++t++) shows the plot as HTML tables a screen reader can
+move through: a row for each panel with its statistics (the rows, and the mean, median,
+min, max, sd and trend of the values drawn: `stats()`), and the rows themselves, with the
+columns the plot shows, when there are 500 or fewer. A panel's name opens it.
+
+```python exec="on" source="above" session="a11y" result="python"
+plot = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
+print({name: values[:3] for name, values in plot.stats().items() if name in ("panel", "rows", "mean mpg")})
+```
+
+A plot reading a database a page at a time (`load="pages"`) lists the statistics the
+database computes, and not its rows. A page from `save_html` has the table too.
+
 ## A second encoding: shapes and dashes
 
 `redundant=True` gives a colour column's categories a shape each (points) and a dash each
@@ -57,8 +90,8 @@ at.set_theme(redundant=True)
 
 - The default palette (Petroff's ten colours, in the minimal theme) was chosen for readers
   with colour-vision deficiencies; `palette="okabe-ito"` is another such set.
-- Everything the mouse does, the keys do too: the arrow keys move between panels, Enter
-  opens one, and `?` lists the rest ([mouse and keys](../reference/mouse-and-keys.md)). The
-  toolbar and legend are buttons with names.
+- Everything the mouse does, the keys do too: the arrow keys move between panels and
+  marks, Enter opens a panel, and `?` lists the rest ([mouse and
+  keys](../reference/mouse-and-keys.md)). The toolbar and legend are buttons with names.
 - `label="end"` names lines at their ends, in their colour, so the legend's colours
   needn't be matched ([marks](marks.md)).

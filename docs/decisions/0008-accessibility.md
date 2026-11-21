@@ -1,7 +1,7 @@
 # 0008: Accessibility: a description from Python, keys for everything, colour not alone
 
 - Status: **partly implemented**, 21 November 2026 (#51 keys between panels, #52 touch, #53
-  the description and second encodings).
+  the description and second encodings; the marks by the keys and a table view: 0016).
 - Changes: `describe.py`, `plot.py` (`description`, `alt=`, `redundant=`), `theme.py`
   (`redundant`), `channels.py`, `figure.py` and `js/src/core/export.ts` (`<title>`,
   `<desc>`), `js/src/core/view.ts` (`role="figure"`, keys); `docs/user/how-to/
@@ -31,7 +31,5 @@ testable criteria.
 
 ## To do
 
-- Arrows stepping through the marks inside a panel, announcing the tooltip through a live
-  region; a table view of the panels and rows (design review, phase 3).
 - `prefers-reduced-motion`, `prefers-contrast` and `forced-colors`, once animation lands.
 - An audit with Chartability, published in the docs.

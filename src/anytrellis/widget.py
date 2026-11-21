@@ -24,6 +24,9 @@ buffers, drawn in the browser. This module is the protocol between them.
 * ``{"type": "tooltip", "request", "layer", "index", "of"}`` asks for the tooltip columns of
   one instance of a layer (``of``: the id of its coords as shown); Python answers
   ``{"type": "answer", "request", "rows"}``.
+* ``{"type": "table", "request"}`` asks for the table view: Python answers ``{"type":
+  "answer", "request", "table": {"panels": {"columns", "rows"}, "rows": {"caption",
+  "columns", "rows"} | None, "note"}}``, every value as text (``Trellis._table_view``).
 * ``{"type": "save", "request", "name"}`` with the file's bytes as its buffer: an image from
   the Export menu, saved in Python's working folder (the notebook's, usually) without
   overwriting; Python answers ``{"type": "answer", "request", "path"}``.
@@ -143,6 +146,13 @@ class TrellisWidget(anywidget.AnyWidget):
                 answer["rows"] = self._plot._tooltip(int(content["layer"]), int(content["index"]),
                                                      None if of is None else str(of))  # fmt: skip
             except Exception as err:  # the browser shows what it has; the kernel carries on
+                answer["error"] = str(err)
+            self.send(answer)
+        elif kind == "table":  # the table view (the toolbar's Table, t)
+            answer = {"type": "answer", "request": content.get("request")}
+            try:
+                answer["table"] = self._plot._table_view()
+            except Exception as err:  # the browser says what went wrong
                 answer["error"] = str(err)
             self.send(answer)
         elif kind == "save":  # the Export menu's "Save ... next to the notebook"
