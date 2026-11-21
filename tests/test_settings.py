@@ -264,3 +264,19 @@ def test_pairs_code_has_its_texts_as_they_are() -> None:
     p = at.pairs(CARS, ["mpg", "weight"])
     p.title = "Pairs"
     assert p.code() == 'pairs(data, ["mpg", "weight"], title="Pairs")'
+
+
+def test_a_shape_of_its_own_stays_a_choice() -> None:
+    t = Trellis(CARS, wrap="origin", aspect=0.8).points(x="weight", y="mpg")
+    t.widget.send = Sent()
+    by = {s["name"]: s for sec in t._scene()[0]["settings"] for s in sec["settings"]}
+    assert by["aspect"]["value"] == 0.8
+    assert [o[1] for o in by["aspect"]["options"]] == ["Auto", "Wide (2:1)", "4:3", "5:4",
+                                                       "Square", "Tall (2:3)"]  # fmt: skip
+    t.widget._on_msg(t.widget, {"type": "settings", "request": 1,
+                                "changes": {"aspect": 1}}, [])  # fmt: skip
+    by = {s["name"]: s for sec in t.widget._spec["settings"] for s in sec["settings"]}
+    assert [0.8, "5:4"] in by["aspect"]["options"]  # to go back to
+    t.aspect = 0.37
+    by = {s["name"]: s for sec in t.widget._spec["settings"] for s in sec["settings"]}
+    assert [0.37, "Height 0.37 × width"] in by["aspect"]["options"]

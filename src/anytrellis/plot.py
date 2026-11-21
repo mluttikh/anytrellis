@@ -13,9 +13,11 @@ import copy
 import functools
 import html
 import json
+import math
 import numbers
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -360,6 +362,10 @@ class Trellis:
         """The height and panel height a panel shape replaced, for the settings panel to
         offer again."""
         self._aspect_given = _aspect_of(aspect)
+        self._own_aspect: float | None = None
+        """A panel shape given that the settings panel has no choice for (0.8), kept there
+        as one once set."""
+        self._keep_aspect()
         self._banked: float | None = None
         """``aspect="bank"`` with ``load="pages"``: the aspect banked from the rows read
         first, kept so that turning the pages doesn't change the panels' shape."""
@@ -1680,9 +1686,16 @@ class Trellis:
         """A panel shape chosen: it sets the panels' height, so a height or panel height
         given before lets go (the settings panel's "Panel shape" does the same)."""
         self._aspect_given, self._banked = _aspect_of(aspect), None
+        self._keep_aspect()
         if self._height is not None or self._panel_height is not None:
             self._let_go = (self._height, self._panel_height)
         self._height = self._panel_height = None
+
+    def _keep_aspect(self) -> None:
+        """A shape the settings panel doesn't list kept, to offer as a choice."""
+        a = self._aspect_given
+        if isinstance(a, int | float) and a not in SHAPES:
+            self._own_aspect = a
 
     def _set_height(self) -> None:
         """The height a panel shape replaced, chosen again in the settings panel."""
@@ -1886,8 +1899,11 @@ class Trellis:
             layout.append({"name": "cols", "label": "Columns", "kind": "stepper",
                            "value": self._cols if self._cols is not None else cols,
                            "shown": cols, "min": 1, "max": most})  # fmt: skip
-        shapes: list[tuple[Any, str]] = [(None, "Auto"), (0.5, "Wide (1:2)"), (0.75, "4:3"),
-                                         (1, "Square"), (1.5, "Tall (3:2)")]  # fmt: skip
+        shapes: list[tuple[Any, str]] = [(None, "Auto"), *SHAPES.items()]
+        if self._own_aspect is not None:  # the plot's own, in its place by height
+            own = (self._own_aspect, _shape_label(self._own_aspect))
+            at = 1 + sum(a < self._own_aspect for a in SHAPES)
+            shapes.insert(at, own)
         if any(lr.mark in ("line", "smooth") for lr in self._layers):
             shapes.append(("bank", "Banked to 45°"))
         shape: Any = self._aspect_given
@@ -1957,7 +1973,7 @@ class Trellis:
         """Changes from the settings panel, by name; all or none (a change the plot can't
         draw raises, and the plot is as it was)."""
         saved = (self._cols, self._aspect_given, self._banked, self._height,
-                 self._panel_height, self._let_go, dict(self._share),
+                 self._panel_height, self._let_go, self._own_aspect, dict(self._share),
                  dict(self._scales), dict(self._reverse), dict(self._orders),
                  [(lr, lr.color, lr.shape, lr.dash_by, lr.second)
                   for lr in self._layers])  # fmt: skip
@@ -1983,7 +1999,8 @@ class Trellis:
             self._changed()
         except Exception:
             (self._cols, self._aspect_given, self._banked, self._height, self._panel_height,
-             self._let_go, share, scales, reverse, orders, layers) = saved  # fmt: skip
+             self._let_go, self._own_aspect, share, scales, reverse, orders,
+             layers) = saved  # fmt: skip
             self._share, self._scales, self._reverse, self._orders = share, scales, reverse, orders
             for lr, color, shape, dash_by, second in layers:
                 lr.color, lr.shape, lr.dash_by, lr.second = color, shape, dash_by, second
@@ -5065,6 +5082,19 @@ def _given_only(function: Callable[..., Any], kwargs: Mapping[str, Any]) -> dict
             pass
         out[name] = value
     return out
+
+
+SHAPES: dict[float, str] = {0.5: "Wide (2:1)", 0.75: "4:3", 1: "Square", 1.5: "Tall (2:3)"}
+"""The settings panel's panel shapes: height over width, and as width:height."""
+
+
+def _shape_label(aspect: float) -> str:
+    """A panel shape (height over width) as width:height, ``5:4``, when it is one of small
+    numbers, else as the multiple."""
+    ratio = Fraction(1 / aspect).limit_denominator(16)
+    if math.isclose(float(ratio), 1 / aspect, rel_tol=1e-9):
+        return f"{ratio.numerator}:{ratio.denominator}"
+    return f"Height {aspect:g} × width"
 
 
 COLOR_LEVELS = 30

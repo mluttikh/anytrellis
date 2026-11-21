@@ -12,7 +12,7 @@ The toolbar's settings button (or ++comma++) opens it. It offers what the plot h
 | Section | Setting | In Python |
 | --- | --- | --- |
 | Layout | Columns (a wrap) | `t.cols`, `Trellis(cols=)` |
-| | Panel shape: auto, wide, 4:3, square, tall, banked to 45° (lines) | `t.aspect`, `Trellis(aspect=)` |
+| | Panel shape: auto, wide (2:1), 4:3, square, tall (2:3), banked to 45° (lines) | `t.aspect`, `Trellis(aspect=)` |
 | Scales | Share x, share y: shared, free, per row or column (a grid), per page (paged), sliced | `t.share_x`, `t.share_y`, `share()` |
 | | x scale, y scale (numbers): linear, log, square root, symlog | `t.x_scale`, `t.y_scale`, `scale()` |
 | Data | Colour by: a column with a few categories, or numbers; none | `t.color` |
@@ -24,7 +24,8 @@ axis) is refused with the reason, and the plot stays as it was.
 A plot given `panel_height=` or `height=` has its panels' height set by it, and the panel
 shape shows it (*200 px high*). Choosing a shape lets that height go: the shape sets the
 panels' height from then on, and the code says `aspect=` instead. *200 px high* stays in
-the list, to go back to. Setting `t.panel_height`
+the list, to go back to, and so does a shape of the plot's own (`aspect=0.8`, as *5:4*,
+width to height). Setting `t.panel_height`
 or `t.height` again takes over from the shape; the latest of the two decides.
 
 ## Read it back in Python
