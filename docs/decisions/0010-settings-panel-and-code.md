@@ -2,7 +2,8 @@
 
 - Status: **implemented**, 21 November 2026 (design review, item 1).
 - Changes: `code.py` (`recorded`, `recorded_init`, `literal`, `source_name`), `plot.py`
-  (the properties `cols`, `aspect`, `share_x`, `share_y`, `x_scale`, `y_scale`, `color`;
+  (the properties `cols`, `aspect`, `share_x`, `share_y`, `x_scale`, `y_scale`, `color`,
+  `title`, `subtitle`, `caption`, `height`, `panel_height`;
   `code`, `_settings`, `_apply_settings`), `widget.py` (the `settings` message, `_code`),
   `js/src/core/view.ts` (the panel), `js/src/standalone.ts`; `tests/test_settings.py`,
   `js/test/settings.mjs`; `docs/user/how-to/settings.md`.
@@ -30,7 +31,14 @@ name in Python.
   and the browser shows the reason.
 - **Names are Python's**: `t.cols`, `t.aspect`, `t.share_x`, `t.share_y`, `t.x_scale`,
   `t.y_scale` and `t.color` read back what the panel shows, take the constructor's values,
-  and redraw a shown plot when set. The order is `order(column, by=, of=)`.
+  and redraw a shown plot when set. The order is `order(column, by=, of=)`. The plot's
+  other settable values (`t.title`, `t.subtitle`, `t.caption`, `t.height`,
+  `t.panel_height`) are properties that redraw too: an attribute set without a redraw would
+  leave the plot, the panel and `code()` disagreeing.
+- **Every control does what it says.** A height given (`panel_height=`, `height=`) sets
+  the panels' height over a shape, so the panel shows it as the shape (*200 px high*), and
+  choosing a shape lets the height go. In Python alike: of `aspect` and a height, the one
+  set last decides.
 - **`code()` writes the calls that made the plot**, recorded as they were made (the
   constructor's arguments that differ from its defaults, then each method), with what was
   changed since written in from the plot's state:

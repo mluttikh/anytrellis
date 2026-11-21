@@ -198,3 +198,61 @@ def test_from_a_database() -> None:
     assert sent.messages[-1] == {"type": "answer", "request": 1}
     assert t.widget._spec["legends"][0]["name"] == "k"
     assert '.order("g", by="max", of="y")' in t.code()
+
+
+def test_texts_and_heights_redraw_and_are_in_the_code() -> None:
+    t = Trellis(CARS, wrap="origin").points(x="weight", y="mpg")
+    t.widget.send = Sent()
+    t.title = "Fuel"
+    t.subtitle = "by weight"
+    t.caption = "Source: cars"
+    t.panel_height = 200
+    spec = t.widget._spec
+    assert (spec["title"], spec["subtitle"], spec["caption"]) == ("Fuel", "by weight",
+                                                                  "Source: cars")  # fmt: skip
+    assert spec["panel_height"] == 200
+    code = t.widget._code
+    assert ('Trellis(data, wrap="origin", panel_height=200, title="Fuel", '
+            'subtitle="by weight", caption="Source: cars")') in code  # fmt: skip
+    assert same(t, rerun(t, data=CARS))
+    t.height = 500
+    assert t.widget._spec["height"] == 500
+    with pytest.raises(ValueError, match="positive number of pixels"):
+        t.panel_height = 0
+
+
+def test_a_panel_shape_replaces_a_height() -> None:
+    t = Trellis(CARS, wrap="origin", panel_height=200).points(x="weight", y="mpg")
+    sent = Sent()
+    t.widget.send = sent
+    by = {s["name"]: s for sec in t._scene()[0]["settings"] for s in sec["settings"]}
+    assert by["aspect"]["value"] == "fixed"
+    assert by["aspect"]["options"][0] == ["fixed", "200 px high"]
+    # chosen again: kept
+    t.widget._on_msg(t.widget, {"type": "settings", "request": 1,
+                                "changes": {"aspect": "fixed"}}, [])  # fmt: skip
+    assert (t.panel_height, t.aspect) == (200, None)
+    # a shape: it sets the panels' height now
+    t.widget._on_msg(t.widget, {"type": "settings", "request": 2,
+                                "changes": {"aspect": 1}}, [])  # fmt: skip
+    assert sent.messages[-1] == {"type": "answer", "request": 2}
+    assert (t.panel_height, t.aspect) == (None, 1)
+    assert t.widget._spec["panel_height"] is None
+    assert "panel_height" not in t.code()
+    assert 'Trellis(data, wrap="origin", aspect=1)' in t.code()
+    by = {s["name"]: s for sec in t.widget._spec["settings"] for s in sec["settings"]}
+    assert by["aspect"]["value"] == 1
+    assert "fixed" not in [o[0] for o in by["aspect"]["options"]]
+    # and a height set after it takes over again
+    t.panel_height = 150
+    assert (t.panel_height, t.aspect) == (150, None)
+    # the plot's height alike
+    h = Trellis(CARS, wrap="origin", height=480).points(x="weight", y="mpg")
+    h.aspect = 0.5
+    assert (h.height, h.aspect) == (None, 0.5)
+
+
+def test_pairs_code_has_its_texts_as_they_are() -> None:
+    p = at.pairs(CARS, ["mpg", "weight"])
+    p.title = "Pairs"
+    assert p.code() == 'pairs(data, ["mpg", "weight"], title="Pairs")'

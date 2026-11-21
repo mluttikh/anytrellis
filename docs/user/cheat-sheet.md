@@ -61,6 +61,8 @@ t.y_scale = "log"
 t.x_scale = "linear"
 t.share_x = True
 t.color = "cylinders"  # the layers' colour column (None: none)
+t.title = "Fuel use"  # also t.subtitle, t.caption: each redraws the plot shown
+t.panel_height = 160  # or t.height; a shape (t.aspect) set after it lets it go
 print(t.code())  # the Python of the plot as it is now (the panel's "Copy as Python")
 t.share(x=True, y="row")  # as share_x=, share_y=
 t.scale(x="log")  # as x_scale=

@@ -21,10 +21,16 @@ The toolbar's settings button (or ++comma++) opens it. It offers what the plot h
 Each change draws the plot again, from Python. One the plot can't draw (bars on a log
 axis) is refused with the reason, and the plot stays as it was.
 
+A plot given `panel_height=` or `height=` has its panels' height set by it, and the panel
+shape shows it (*200 px high*). Choosing a shape lets that height go: the shape sets the
+panels' height from then on, and the code says `aspect=` instead. Setting `t.panel_height`
+or `t.height` again takes over from the shape; the latest of the two decides.
+
 ## Read it back in Python
 
 Every setting is the property or method of the same name, both ways: what the panel set,
-Python reads, and what Python sets, the panel shows.
+Python reads, and what Python sets, the panel shows. `t.title`, `t.subtitle`, `t.caption`,
+`t.height` and `t.panel_height` redraw a shown plot too, and are in its code.
 
 ```python exec="on" source="above" session="settings" result="text"
 from anytrellis import Trellis

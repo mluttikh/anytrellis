@@ -13,6 +13,7 @@ import copy
 import functools
 import html
 import json
+import numbers
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -353,15 +354,15 @@ class Trellis:
         """Number columns read as categories (``as_category``)."""
         self._layers: list[Layer] = []
         self._tables: dict[int, Table] = {}
-        self.height = height
-        self.panel_height = panel_height
+        self._height = _pixels("height", height)
+        self._panel_height = _pixels("panel_height", panel_height)
         self._aspect_given = _aspect_of(aspect)
         self._banked: float | None = None
         """``aspect="bank"`` with ``load="pages"``: the aspect banked from the rows read
         first, kept so that turning the pages doesn't change the panels' shape."""
-        self.title = title
-        self.subtitle = subtitle
-        self.caption = caption
+        self._title = title
+        self._subtitle = subtitle
+        self._caption = caption
         self.labels: dict[str, str] = _labels(labels)
         self.x_title = x_title
         self.y_title = y_title
@@ -1592,6 +1593,64 @@ class Trellis:
     # ---- settings (the settings panel's, by the same names) ---------------------------------
 
     @property
+    def title(self) -> str:
+        """The plot's title (``""``: none). Setting it redraws a shown plot."""
+        return self._title
+
+    @title.setter
+    def title(self, title: str) -> None:
+        self._title = title
+        self._changed()
+
+    @property
+    def subtitle(self) -> str:
+        """The line or two under the title. Setting it redraws a shown plot."""
+        return self._subtitle
+
+    @subtitle.setter
+    def subtitle(self, subtitle: str) -> None:
+        self._subtitle = subtitle
+        self._changed()
+
+    @property
+    def caption(self) -> str:
+        """The note under the plot. Setting it redraws a shown plot."""
+        return self._caption
+
+    @caption.setter
+    def caption(self, caption: str) -> None:
+        self._caption = caption
+        self._changed()
+
+    @property
+    def height(self) -> int | None:
+        """The whole plot's height in pixels, or None. It sets the panels' height over
+        ``aspect``; setting it (not None) lets ``aspect`` go, so the latest of the two
+        decides. Setting it redraws a shown plot."""
+        return self._height
+
+    @height.setter
+    def height(self, height: int | None) -> None:
+        self._height = _pixels("height", height)
+        if height is not None:
+            self._aspect_given, self._banked = None, None
+        self._changed()
+
+    @property
+    def panel_height(self) -> int | None:
+        """Each panel's height in pixels, or None. It sets the panels' height over
+        ``aspect``; setting it (not None) lets ``aspect`` go, so the latest of the two
+        decides. Setting it redraws a shown plot."""
+        return self._panel_height
+
+    @panel_height.setter
+    def panel_height(self, height: int | None) -> None:
+        self._panel_height = _pixels("panel_height", height)
+        if height is not None:
+            self._aspect_given, self._banked = None, None
+        self._changed()
+
+    @property
     def cols(self) -> int | None:
         """A wrap's columns (``None``: about the square root of the panels; 6 a page)."""
         return self._cols
@@ -1611,9 +1670,14 @@ class Trellis:
 
     @aspect.setter
     def aspect(self, aspect: float | str | None) -> None:
-        self._aspect_given = _aspect_of(aspect)
-        self._banked = None
+        self._set_aspect(aspect)
         self._changed()
+
+    def _set_aspect(self, aspect: Any) -> None:
+        """A panel shape chosen: it sets the panels' height, so a height or panel height
+        given before lets go (the settings panel's "Panel shape" does the same)."""
+        self._aspect_given, self._banked = _aspect_of(aspect), None
+        self._height = self._panel_height = None
 
     @property
     def share_x(self) -> bool | str:
@@ -1710,12 +1774,20 @@ class Trellis:
         ```
         """
         given = self._given
-        if given.name == "Pairs":  # pairs(): made whole by its call
+        if given.name == "Pairs":  # pairs(): made whole by its call, its texts as they are now
             from anytrellis.pairs import pairs
 
-            return call_text("pairs", given.args, _given_only(pairs, given.kwargs))
+            now = {"height": self._height, "panel_height": self._panel_height,
+                   "title": self._title, "subtitle": self._subtitle,
+                   "caption": self._caption}  # fmt: skip
+            return call_text("pairs", given.args, _given_only(pairs, {**given.kwargs, **now}))
         kwargs = _given_only(Trellis.__init__, given.kwargs)
         settings = (
+            ("height", self._height, None),
+            ("panel_height", self._panel_height, None),
+            ("title", self._title, ""),
+            ("subtitle", self._subtitle, ""),
+            ("caption", self._caption, ""),
             ("cols", self._cols, None),
             ("aspect", self._aspect_given, None),
             ("share_x", self.share_x, True),
@@ -1807,7 +1879,13 @@ class Trellis:
                                          (1, "Square"), (1.5, "Tall (3:2)")]  # fmt: skip
         if any(lr.mark in ("line", "smooth") for lr in self._layers):
             shapes.append(("bank", "Banked to 45°"))
-        layout.append(choice("aspect", "Panel shape", self._aspect_given, shapes))
+        shape: Any = self._aspect_given
+        if self._panel_height is not None or self._height is not None:  # their height set
+            shape = "fixed"
+            high = (f"{self._panel_height} px high" if self._panel_height is not None
+                    else f"Plot {self._height} px high")  # fmt: skip
+            shapes.insert(0, ("fixed", high))
+        layout.append(choice("aspect", "Panel shape", shape, shapes))
         scales: list[dict[str, Any]] = []
         for axis, lv in zip(("x", "y"), levels, strict=True):
             if many:
@@ -1863,7 +1941,8 @@ class Trellis:
     def _apply_settings(self, changes: Mapping[str, Any]) -> None:
         """Changes from the settings panel, by name; all or none (a change the plot can't
         draw raises, and the plot is as it was)."""
-        saved = (self._cols, self._aspect_given, self._banked, dict(self._share),
+        saved = (self._cols, self._aspect_given, self._banked, self._height,
+                 self._panel_height, dict(self._share),
                  dict(self._scales), dict(self._reverse), dict(self._orders),
                  [(lr, lr.color, lr.shape, lr.dash_by, lr.second)
                   for lr in self._layers])  # fmt: skip
@@ -1872,7 +1951,8 @@ class Trellis:
                 if name == "cols":
                     self._cols = None if value is None else int(value)
                 elif name == "aspect":
-                    self._aspect_given, self._banked = _aspect_of(value), None
+                    if value != "fixed":  # (the height given, chosen again: kept)
+                        self._set_aspect(value)
                 elif name in ("share_x", "share_y"):
                     self._share[name[-1]] = share_mode(value)
                 elif name in ("x_scale", "y_scale"):
@@ -1885,8 +1965,8 @@ class Trellis:
                     raise ValueError(f"no setting {name!r}")
             self._changed()
         except Exception:
-            (self._cols, self._aspect_given, self._banked, share, scales, reverse, orders,
-             layers) = saved  # fmt: skip
+            (self._cols, self._aspect_given, self._banked, self._height, self._panel_height,
+             share, scales, reverse, orders, layers) = saved  # fmt: skip
             self._share, self._scales, self._reverse, self._orders = share, scales, reverse, orders
             for lr, color, shape, dash_by, second in layers:
                 lr.color, lr.shape, lr.dash_by, lr.second = color, shape, dash_by, second
@@ -4979,3 +5059,12 @@ def _order_name(order: Order | None) -> str:
     if order is None:
         return "levels"
     return "given" if order.levels is not None or order.by is None else order.by
+
+
+def _pixels(name: str, value: Any) -> Any:
+    """A height in pixels, checked: a positive number, or None."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not value > 0:
+        raise ValueError(f"{name} must be a positive number of pixels, or None; got {value!r}")
+    return value

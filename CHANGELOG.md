@@ -14,6 +14,9 @@ All notable changes to anytrellis. The format follows
   the same name in Python (`t.cols`, `t.aspect`, `t.share_x`, `t.share_y`, `t.x_scale`,
   `t.y_scale`, `t.color`, `order()`), synced both ways. A change the plot can't draw is
   refused with the reason. `controls=False` leaves it out.
+- `t.title`, `t.subtitle`, `t.caption`, `t.height` and `t.panel_height` redraw a shown
+  plot when set, and are in its code. Of a height and a panel shape (`aspect`), the one set
+  last sets the panels' height, in Python and in the settings panel.
 - **`t.code()` and "Copy as Python"**: the Python that makes the plot as it is now, the
   calls that made it with every change made by hand written in (the settings panel, the
   page bar's sort, filters and pins, the compared panel), tables by their notebook names.
