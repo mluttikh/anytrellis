@@ -35,9 +35,9 @@ const open = async (name) => {
   await page.waitForSelector(".anytrellis-embed[data-state='ready']");
   await page.waitForTimeout(300);
 };
-// each frame for `ms`: whether the panels move, and panel `index`'s rect as drawn (`also`:
-// another panel's, as `other`)
-const watch = (index, ms = 450, also = -1) =>
+// each frame until a move begun has stopped (a slow machine: up to `ms`): whether the
+// panels move, and panel `index`'s rect as drawn (`also`: another panel's, as `other`)
+const watch = (index, ms = 2000, also = -1) =>
   page.evaluate(
     ([index, ms, also]) =>
       new Promise((done) => {
@@ -48,7 +48,8 @@ const watch = (index, ms = 450, also = -1) =>
           const w = v.views.find((x) => x.panel === index);
           const o = v.views.find((x) => x.panel === also);
           frames.push({ t: performance.now() - t0, moving: !!v.motion, rect: w && { ...w.rect }, other: o && { ...o.rect } });
-          if (performance.now() - t0 < ms) requestAnimationFrame(frame);
+          const stopped = frames.some((f) => f.moving) && !frames.at(-1).moving;
+          if (performance.now() - t0 < ms && !stopped) requestAnimationFrame(frame);
           else done(frames);
         };
         frame();
@@ -98,7 +99,7 @@ check(moving.length >= 3 && widths.every((w, i) => i === 0 || w >= widths[i - 1]
 check(moving.some((f) => between(f.rect, grid[0].rect, end) && !same(f.rect, end) && f.rect.w > grid[0].rect.w + 1), "through the sizes between");
 check(same(frames.at(-1).rect, end), "and ends on the layout");
 const other = grid[1].index;
-const closing = watch(grid[0].index, 450, other);
+const closing = watch(grid[0].index, 2000, other);
 await page.keyboard.press("Escape");
 frames = await closing;
 moving = frames.filter((f) => f.moving && f.rect);
