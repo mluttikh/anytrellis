@@ -24,8 +24,16 @@ axis) is refused with the reason, and the plot stays as it was.
 A plot given `panel_height=` or `height=` has its panels' height set by it, and the panel
 shape shows it (*200 px high*). Choosing a shape lets that height go: the shape sets the
 panels' height from then on, and the code says `aspect=` instead. *200 px high* stays in
-the list, to go back to, and so does a shape of the plot's own (`aspect=0.8`, as *5:4*,
-width to height). Setting `t.panel_height`
+the list, to go back to.
+
+Every menu works that way: a choice the plot has that the list doesn't offer is listed
+too, and stays once you choose another, to go back to:
+
+- a shape of its own (`aspect=0.8`, as *5:4*, width to height);
+- sharing the list has no place for (`share_y="row"` on a wrap: per row of the wrap);
+- a colour column of many categories (`color="name"`);
+- an order of its own: given levels, descending, or of another column, as *As given* or
+  as what it is (*Median weight, descending*). Choosing it puts that order back. Setting `t.panel_height`
 or `t.height` again takes over from the shape; the latest of the two decides.
 
 ## Read it back in Python

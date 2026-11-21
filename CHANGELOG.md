@@ -17,6 +17,10 @@ All notable changes to anytrellis. The format follows
 - `t.title`, `t.subtitle`, `t.caption`, `t.height` and `t.panel_height` redraw a shown
   plot when set, and are in its code. Of a height and a panel shape (`aspect`), the one set
   last sets the panels' height, in Python and in the settings panel.
+- The settings panel keeps a choice the plot had that its lists don't offer (a shape like
+  `aspect=0.8`, `share_y="row"` on a wrap, a colour column of many categories, an order
+  of given levels or descending) after another is chosen, to go back to. Panel shapes
+  read width:height: Wide (2:1), 4:3, Square, Tall (2:3).
 - **`t.code()` and "Copy as Python"**: the Python that makes the plot as it is now, the
   calls that made it with every change made by hand written in (the settings panel, the
   page bar's sort, filters and pins, the compared panel), tables by their notebook names.

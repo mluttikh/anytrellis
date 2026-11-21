@@ -280,3 +280,64 @@ def test_a_shape_of_its_own_stays_a_choice() -> None:
     t.aspect = 0.37
     by = {s["name"]: s for sec in t.widget._spec["settings"] for s in sec["settings"]}
     assert [0.37, "Height 0.37 × width"] in by["aspect"]["options"]
+
+
+def options(t: Trellis, name: str) -> tuple[Any, list[list[Any]]]:
+    sections = t.widget._spec["settings"] if t._widget is not None else t._scene()[0]["settings"]
+    by = {s["name"]: s for sec in sections for s in sec["settings"]}
+    return by[name]["value"], by[name]["options"]
+
+
+def change(t: Trellis, **changes: Any) -> dict[str, Any]:
+    sent = Sent()
+    t.widget.send = sent
+    t.widget._on_msg(t.widget, {"type": "settings", "request": 1, "changes": changes}, [])
+    return sent.messages[-1]
+
+
+def test_a_choice_of_its_own_stays_after_another() -> None:
+    # sharing the list has no place for: a wrap's y per row
+    t = Trellis(CARS, wrap="origin", share_y="row").points(x="weight", y="mpg", color="name")
+    assert options(t, "share_y") == ("row", [[True, "Shared"], [False, "Free"],
+                                             ["sliced", "Sliced (one width)"],
+                                             ["row", "Per row"]])  # fmt: skip
+    # a colour column of 300 names, more than the list offers
+    assert options(t, "color")[0] == "name"
+    assert ["name", "name"] in options(t, "color")[1]
+    assert change(t, share_y=False, color="origin") == {"type": "answer", "request": 1}
+    assert options(t, "share_y")[0] is False
+    assert ["row", "Per row"] in options(t, "share_y")[1]
+    assert ["name", "name"] in options(t, "color")[1]
+    assert change(t, share_y="row", color="name") == {"type": "answer", "request": 1}
+    assert (t.share_y, t.color) == ("row", "name")
+    # 1.0 is Square, not a shape of its own
+    assert [o[1] for o in options(Trellis(CARS, aspect=1.0).points(x="weight", y="mpg"),
+                                  "aspect")[1]].count("Square") == 1  # fmt: skip
+
+
+def test_an_order_of_its_own_stays_after_another() -> None:
+    levels = ["Japan", "USA", "Europe"]
+    t = Trellis(CARS, wrap="origin").points(x="weight", y="mpg").order("origin", levels)
+    assert options(t, "order") == ("given", [
+        ["levels", "As the levels go"], ["median", "Median mpg"], ["mean", "Mean mpg"],
+        ["min", "Min mpg"], ["max", "Max mpg"], ["count", "Rows"], ["given", "As given"],
+    ])  # fmt: skip
+    change(t, order="median")
+    assert options(t, "order")[0] == "median"
+    assert ["given", "As given"] in options(t, "order")[1]
+    change(t, order="given")
+    assert [p["label"] for p in t.widget._spec["panels"]] == levels
+    assert f'.order("origin", {json.dumps(levels)})' in t.code()
+    # by a summary, but descending, or of another column: named as it is
+    d = (Trellis(CARS, wrap="origin").points(x="weight", y="mpg")
+         .order("origin", by="median", of="weight", descending=True))  # fmt: skip
+    assert options(d, "order")[0] == "given"
+    assert ["given", "Median weight, descending"] in options(d, "order")[1]
+    change(d, order="levels")
+    change(d, order="given")
+    assert '.order("origin", by="median", of="weight", descending=True)' in d.code()
+    # the panel's own: no extra choice
+    m = Trellis(CARS, wrap="origin").points(x="weight", y="mpg").order("origin", by="median",
+                                                                       of="mpg")  # fmt: skip
+    assert options(m, "order")[0] == "median"
+    assert "given" not in [o[0] for o in options(m, "order")[1]]

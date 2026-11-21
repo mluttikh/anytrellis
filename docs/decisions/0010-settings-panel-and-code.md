@@ -27,6 +27,11 @@ name in Python.
   colour columns with at most 30 categories, or numbers). The browser draws them and sends
   a change as one `settings` message. Python applies it through the property or method of
   the same name and sends the new spec. The browser holds no rules of its own.
+- **What the plot had stays a choice.** A value of the plot's own that a menu doesn't
+  offer (`aspect=0.8`, `share_y="row"` on a wrap, a colour column of many categories, an
+  order of given levels or descending) is listed under its name while it is the plot's,
+  and kept in the list after another is chosen, so going back is one choice: an order is
+  kept whole (its levels, summary, column and direction) and restored as it was.
 - **All or none.** A change the plot can't draw (bars on a log axis) is undone in Python,
   and the browser shows the reason.
 - **Names are Python's**: `t.cols`, `t.aspect`, `t.share_x`, `t.share_y`, `t.x_scale`,
@@ -37,8 +42,7 @@ name in Python.
   leave the plot, the panel and `code()` disagreeing.
 - **Every control does what it says.** A height given (`panel_height=`, `height=`) sets
   the panels' height over a shape, so the panel shows it as the shape (*200 px high*), and
-  choosing a shape lets the height go; the height stays a choice, to go back to, as does
-  a shape the plot was given that the list has none for (`aspect=0.8`, as *5:4*). In
+  choosing a shape lets the height go; the height stays a choice, to go back to. In
   Python alike: of `aspect` and a height, the one
   set last decides.
 - **`code()` writes the calls that made the plot**, recorded as they were made (the

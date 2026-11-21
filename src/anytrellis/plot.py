@@ -362,6 +362,12 @@ class Trellis:
         """The height and panel height a panel shape replaced, for the settings panel to
         offer again."""
         self._aspect_given = _aspect_of(aspect)
+        self._kept: dict[str, list[tuple[Any, str]]] = {}
+        """The settings panel's choices a plot had that its lists don't offer (share
+        "row" on a wrap, a colour column of many levels), kept once shown, to go back to."""
+        self._kept_orders: dict[str, Order | None] | None = None
+        """The panels' order a plot had that the panel's list doesn't offer (given
+        levels, descending, of another column), kept to go back to."""
         self._own_aspect: float | None = None
         """A panel shape given that the settings panel has no choice for (0.8), kept there
         as one once set."""
@@ -1884,10 +1890,18 @@ class Trellis:
             return None
 
         def choice(
-            name: str, label: str, value: Any, options: list[tuple[Any, str]]
+            name: str,
+            label: str,
+            value: Any,
+            options: list[tuple[Any, str]],
+            names: Callable[[Any], str] = str,
         ) -> dict[str, Any]:
-            if all(o[0] != value for o in options):
-                options = [*options, (value, str(value))]
+            """A select: its options, and a value of the plot's own that they don't have,
+            kept as an option from then on (named by ``names``)."""
+            kept = self._kept.setdefault(name, [])
+            if not _offered(value, options) and not _offered(value, kept):
+                kept.append((value, names(value)))
+            options = [*options, *(o for o in kept if not _offered(o[0], options))]
             return {"name": name, "label": label, "kind": "select", "value": value,
                     "options": [list(o) for o in options]}  # fmt: skip
 
@@ -1928,7 +1942,8 @@ class Trellis:
                 if lv is None:
                     share.append(("sliced", "Sliced (one width)"))
                 scales.append(choice(f"share_{axis}", f"Share {axis}",
-                                     _share_given(self._share[axis]), share))  # fmt: skip
+                                     _share_given(self._share[axis]), share,
+                                     lambda v: SHARE_NAMES.get(v, str(v))))  # fmt: skip
             if spec[axis]["kind"] not in ("band", "time"):  # numbers, on any scale
                 options: list[tuple[Any, str]] = [
                     ("linear", "Linear"), ("log", "Log"), ("sqrt", "Square root"),
@@ -1946,7 +1961,7 @@ class Trellis:
                 few = kind == "category" and (lazy or len(table.levels(name)) <= COLOR_LEVELS)
                 if kind == "number" or few:
                     columns.append((name, self._label(name)))
-            data.append(choice("color", "Colour by", self.color, columns))
+            data.append(choice("color", "Colour by", self.color, columns, self._label))
         facets = [*self._wrap, *self._row, *self._col]
         if facets:
             first = next((lr for lr in self._layers if lr.mark != "rule"), None)
@@ -1960,10 +1975,13 @@ class Trellis:
                     (by, f"{by.capitalize()} {name}") for by in ("median", "mean", "min", "max")
                 ]
             orders.append(("count", "Rows"))
-            given = {_order_name(self._orders.get(c)) for c in facets}
-            value = given.pop() if len(given) == 1 else "mixed"
-            if value == "given":
-                orders.append(("given", "As given"))
+            now = {c: self._orders.get(c) for c in facets}
+            value = next((v for v, _ in orders if now == self._orders_by(v, of, facets)), None)
+            if value is None:  # an order of the plot's own: kept, to go back to
+                self._kept_orders = now
+                value = "given"
+            if self._kept_orders is not None:
+                orders.append(("given", self._order_label(self._kept_orders)))
             data.append(choice("order", "Order panels by", value, orders) | {"of": of})
         sections = [{"title": t, "settings": s} for t, s in
                     (("Layout", layout), ("Scales", scales), ("Data", data)) if s]  # fmt: skip
@@ -1973,7 +1991,8 @@ class Trellis:
         """Changes from the settings panel, by name; all or none (a change the plot can't
         draw raises, and the plot is as it was)."""
         saved = (self._cols, self._aspect_given, self._banked, self._height,
-                 self._panel_height, self._let_go, self._own_aspect, dict(self._share),
+                 self._panel_height, self._let_go, self._own_aspect, self._kept_orders,
+                 {k: list(v) for k, v in self._kept.items()}, dict(self._share),
                  dict(self._scales), dict(self._reverse), dict(self._orders),
                  [(lr, lr.color, lr.shape, lr.dash_by, lr.second)
                   for lr in self._layers])  # fmt: skip
@@ -1999,8 +2018,8 @@ class Trellis:
             self._changed()
         except Exception:
             (self._cols, self._aspect_given, self._banked, self._height, self._panel_height,
-             self._let_go, self._own_aspect, share, scales, reverse, orders,
-             layers) = saved  # fmt: skip
+             self._let_go, self._own_aspect, self._kept_orders, self._kept, share, scales,
+             reverse, orders, layers) = saved  # fmt: skip
             self._share, self._scales, self._reverse, self._orders = share, scales, reverse, orders
             for lr, color, shape, dash_by, second in layers:
                 lr.color, lr.shape, lr.dash_by, lr.second = color, shape, dash_by, second
@@ -2009,18 +2028,45 @@ class Trellis:
 
     def _order_panels(self, by: str) -> None:
         """Order every facet column's levels by a summary of the plot's value per level
-        (``order(..., by=, of=)``), or (``"levels"``) as they go."""
+        (``order(..., by=, of=)``), as they go (``"levels"``), or as the plot had them
+        before (``"given"``)."""
         facets = [*self._wrap, *self._row, *self._col]
-        if by in ("levels", "given", "mixed"):
-            if by == "levels":
-                for c in facets:
-                    self._orders.pop(c, None)
-            return
-        settings = self._scene()[0].get("settings") or []
-        of = next((s.get("of") for sec in settings for s in sec["settings"]
-                   if s["name"] == "order"), None)  # fmt: skip
+        if by == "given":
+            chosen = self._kept_orders or {}
+        else:
+            settings = self._scene()[0].get("settings") or []
+            of = next((s.get("of") for sec in settings for s in sec["settings"]
+                       if s["name"] == "order"), None)  # fmt: skip
+            chosen = self._orders_by(by, of, facets)
         for c in facets:
-            self._orders[c] = Order(None, cast("Summary", by), None if by == "count" else of)
+            order = chosen.get(c)
+            if order is None:
+                self._orders.pop(c, None)
+            else:
+                self._orders[c] = order
+
+    @staticmethod
+    def _orders_by(by: str, of: str | None, facets: Sequence[str]) -> dict[str, Order | None]:
+        """Each facet column's order as the settings panel's choice ``by`` makes it."""
+        if by == "levels":
+            return dict.fromkeys(facets)
+        if by == "given":  # (not one the panel makes)
+            return {}
+        order = Order(None, cast("Summary", by), None if by == "count" else of)
+        return dict.fromkeys(facets, order)
+
+    def _order_label(self, orders: Mapping[str, Order | None]) -> str:
+        """An order the settings panel's list doesn't offer, named: by what, and how."""
+        kinds = set(orders.values())
+        if len(kinds) != 1:
+            return "As given"
+        order = kinds.pop()
+        if order is None or order.by is None:
+            return "As given"
+        name = "Rows" if order.by == "count" else order.by.capitalize()
+        if order.of is not None and order.by != "count":
+            name += f" {self._label(order.of)}"
+        return name + (", descending" if order.descending else "")
 
     @property
     def description(self) -> str:
@@ -5101,11 +5147,16 @@ COLOR_LEVELS = 30
 """The settings panel's colour columns: a category column with at most this many levels."""
 
 
-def _order_name(order: Order | None) -> str:
-    """A facet column's order, as the settings panel names it."""
-    if order is None:
-        return "levels"
-    return "given" if order.levels is not None or order.by is None else order.by
+SHARE_NAMES: dict[Any, str] = {True: "Shared", False: "Free", "row": "Per row",
+                               "col": "Per column", "page": "Per page",
+                               "sliced": "Sliced (one width)"}  # fmt: skip
+"""The settings panel's names for the ways a scale is shared."""
+
+
+def _offered(value: Any, options: Iterable[tuple[Any, str]]) -> bool:
+    """``value`` is one of ``options`` (1 and 1.0 alike, but 1 is not True)."""
+    return any(o == value and isinstance(o, bool) == isinstance(value, bool)
+               for o, _ in options)  # fmt: skip
 
 
 def _pixels(name: str, value: Any) -> Any:
