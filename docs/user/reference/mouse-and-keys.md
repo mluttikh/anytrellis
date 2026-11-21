@@ -31,6 +31,22 @@ Zoom and pan apply to every panel that shares the scale. An axis stands for its 
 scale: with `share_y="row"`, zooming the left axis of a row zooms that row. With
 `share_y="sliced"`, zooming one panel zooms every panel to its width; panning moves one.
 
+## Touch
+
+On a phone or a tablet, one finger scrolls the page past the plot, so a plot in a long
+page never traps it. The plot takes two fingers.
+
+| Gesture | Does |
+|---|---|
+| Pinch | zoom the panel under the fingers, about their midpoint: fingers side by side zoom x alone, one above the other y alone, at a slant both |
+| Two fingers moved | pan |
+| Long press | the values there, pinned (a tap lets them go) |
+| Tap | as a click: let pinned values go, pick a line's end label |
+| One finger | scroll the page; with box zoom or select on (toolbar, `z`, `s`), or in full screen, a drag as with the mouse |
+
+`u` (or the toolbar's reset) undoes a pinch as it does a zoom. The first time one finger
+scrolls the page, the plot says that two fingers pan and zoom.
+
 ## Tooltips
 
 Hovering a mark shows a tooltip. Its first line is the panel and the position along the

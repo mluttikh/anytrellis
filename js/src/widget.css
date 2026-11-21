@@ -25,6 +25,14 @@
 }
 .atr-root:focus-within {
   box-shadow: 0 0 0 1px var(--atr-border);
+}
+/* one finger scrolls the page past the plot (two pinch and pan it: view.ts), unless a
+   drag draws on it (box zoom, select) or it fills the screen */
+.atr-stage {
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none; /* a long press shows the values, not Safari's menu */
+}
+.atr-root.atr-capture .atr-stage {
   touch-action: none;
 }
 

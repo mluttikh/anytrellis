@@ -124,6 +124,34 @@ interface Drag {
 
 type Mode = "pan" | "zoom" | "select";
 
+/** Two fingers on a panel: zooming (pinched apart or together) and panning (moved). */
+interface Pinch {
+  /** The view (index in views) under the fingers when they came down. */
+  view: number;
+  /** Where the fingers were, the axes they zoom (mostly side by side: x; one above the
+   * other: y; else both), and the ranges and maps then. */
+  a: [number, number];
+  b: [number, number];
+  axes: "x" | "y" | "xy";
+  xr: Range;
+  yr: Range;
+  map: PanelMap;
+}
+
+/** A finger held down: after LONG_PRESS_MS without moving, the values there. */
+interface Press {
+  id: number;
+  x: number;
+  y: number;
+  timer: ReturnType<typeof setTimeout>;
+  moved: boolean;
+  fired: boolean;
+}
+
+/** A long press (ms), and how far a finger may move in it (px). */
+const LONG_PRESS_MS = 500;
+const PRESS_SLOP = 8;
+
 interface Snapshot {
   x: [number, Range][];
   y: [number, Range][];
@@ -277,6 +305,12 @@ export class TrellisView {
   /** The legend entry shown alone (a double-click), and its layers' instances as drawn. */
   private isolated: { index: number; level: number } | null = null;
   private isolatedSets: (InstanceSet | null)[] = [];
+  /** Fingers on the stage (pointer id: where), a pinch of two, a press of one. */
+  private touches = new Map<number, [number, number]>();
+  private pinch: Pinch | null = null;
+  private press: Press | null = null;
+  /** "Two fingers to pan and zoom" said once (one finger scrolled the page). */
+  private toldTouch = false;
   /** The pointer is over a line's end label (labels.ts). */
   private overEnd = false;
   /** Dashed lines' dashes, per set and panel, and the scales they were cut at. */
@@ -822,6 +856,7 @@ export class TrellisView {
 
   private setMode(mode: Mode): void {
     this.mode = mode;
+    this.updateCapture();
     for (const [m, b] of Object.entries(this.modeButtons) as [Mode, HTMLButtonElement][]) {
       b.setAttribute("aria-checked", String(m === mode));
       b.tabIndex = m === mode ? 0 : -1;
@@ -1142,6 +1177,7 @@ export class TrellisView {
   private fullscreenChanged(): void {
     const full = this.isFullscreen();
     this.root.classList.toggle("atr-fullscreen", full);
+    this.updateCapture();
     this.fullButton.innerHTML = full ? ICONS.collapse : ICONS.expand;
     const tip = full ? "Exit full screen (f, Esc)" : "Full screen (f)";
     this.fullButton.dataset.tip = tip;
@@ -1461,6 +1497,12 @@ export class TrellisView {
         ["Double-click one", "show it alone (Esc: all)"],
         ["Drag on a gradient", "select a range of its values"],
       ]),
+      table("Touch", [
+        ["Pinch", "zoom (fingers side by side: x; one above the other: y)"],
+        ["Two fingers", "pan"],
+        ["Long press", "the values there (a tap lets them go)"],
+        ["One finger", "scrolls the page; with box zoom or select on, or full screen: as a drag"],
+      ]),
       table("Keys", [
         ["z  s", "box zoom, select (again: pan)"],
         ["y", "fit y to the data in view"],
@@ -1654,6 +1696,17 @@ export class TrellisView {
         const focused = this.root.contains(document.activeElement);
         this.root.focus({ preventScroll: true });
         const [x, y] = this.local(e);
+        if (e.pointerType === "touch") {
+          this.touches.set(e.pointerId, [x, y]);
+          if (this.touches.size === 2) {
+            this.startPinch();
+            return;
+          }
+          if (this.touches.size > 2) return;
+          this.startPress(e.pointerId, x, y);
+          // one finger scrolls the page, unless a drag draws something or there is no page
+          if (!this.captures()) return;
+        }
         const onAxis = this.axisAt(x, y);
         const vi = onAxis ? onAxis.view : this.viewAt(x, y);
         if (vi < 0) return;
@@ -1676,6 +1729,19 @@ export class TrellisView {
       "pointermove",
       (e) => {
         const [x, y] = this.local(e);
+        if (e.pointerType === "touch" && this.touches.has(e.pointerId)) {
+          this.touches.set(e.pointerId, [x, y]);
+          if (this.pinch) {
+            this.movePinch();
+            return;
+          }
+          const p = this.press;
+          if (p && p.id === e.pointerId && !p.fired && Math.hypot(x - p.x, y - p.y) > PRESS_SLOP) {
+            p.moved = true;
+            clearTimeout(p.timer);
+          }
+          if (!this.drag || p?.fired) return;
+        }
         if (this.drag && this.spec) {
           const d = this.drag;
           const v = this.views[d.view];
@@ -1725,6 +1791,29 @@ export class TrellisView {
       { signal },
     );
     const end = (e: PointerEvent): void => {
+      if (e.pointerType === "touch" && this.touches.has(e.pointerId)) {
+        this.touches.delete(e.pointerId);
+        if (this.pinch || this.touches.size) {
+          // a pinch ends with its first finger up; the other does nothing till it lifts
+          if (this.pinch) this.pinch = null;
+          this.drag = null;
+          return;
+        }
+        const p = this.press;
+        this.press = null;
+        if (p) clearTimeout(p.timer);
+        if (p?.fired) {
+          this.drag = null; // the long press showed the values: they stay
+          return;
+        }
+        if (!this.drag) {
+          if (e.type === "pointercancel" && p?.moved !== false && !this.toldTouch) {
+            this.toldTouch = true; // one finger scrolled the page
+            this.notify("Two fingers to pan and zoom; a long press for the values", 2400);
+          } else if (e.type === "pointerup" && p && !p.moved) this.tap(...this.local(e), e.shiftKey);
+          return;
+        }
+      }
       const d = this.drag;
       if (d) stage.releasePointerCapture?.(e.pointerId);
       this.drag = null;
@@ -1764,6 +1853,16 @@ export class TrellisView {
     };
     stage.addEventListener("pointerup", end, { signal });
     stage.addEventListener("pointercancel", end, { signal });
+    // two fingers are the plot's: the page neither scrolls nor zooms under them
+    stage.addEventListener(
+      "touchmove",
+      (e) => {
+        if (e.touches.length >= 2 && e.cancelable) e.preventDefault();
+      },
+      { passive: false, signal },
+    );
+    // a long press shows the values, not the browser's menu
+    stage.addEventListener("contextmenu", (e) => this.press && e.preventDefault(), { signal });
     stage.addEventListener(
       "pointerleave",
       () => {
@@ -2047,6 +2146,100 @@ export class TrellisView {
   /** The panel a key acts on: the arrow keys' ring's, else the one under the pointer. */
   private keyPanel(): number | null {
     return this.ring ?? this.pointerPanel ?? this.focused;
+  }
+
+  /** Whether one finger draws on the plot (a box, a brush; full screen: pans) rather than
+   * scrolling the page. */
+  private captures(): boolean {
+    return this.mode !== "pan" || this.isFullscreen();
+  }
+
+  /** The stage's touch-action: one finger scrolls the page, or is the plot's. */
+  private updateCapture(): void {
+    this.root.classList.toggle("atr-capture", this.captures());
+  }
+
+  /** A finger down: after a moment held still, the values there, pinned (they stay). */
+  private startPress(id: number, x: number, y: number): void {
+    if (this.press) clearTimeout(this.press.timer);
+    const press: Press = {
+      id,
+      x,
+      y,
+      moved: false,
+      fired: false,
+      timer: setTimeout(() => {
+        if (this.press !== press || press.moved || this.pinch) return;
+        press.fired = true;
+        this.drag = null;
+        this.unpin(false);
+        this.hover(press.x, press.y);
+        if (this.tip.style.display === "block") this.pin();
+      }, LONG_PRESS_MS),
+    };
+    this.press = press;
+  }
+
+  /** A tap (one finger, not held): as a click, it lets a pinned tooltip go, or picks a
+   * line's name. */
+  private tap(x: number, y: number, add: boolean): void {
+    const label = this.endAt(x, y);
+    if (label && label.legend !== null) {
+      this.pickLegend(label.legend, label.series, add);
+      return;
+    }
+    this.unpin();
+  }
+
+  /** A second finger down: the pinch starts, on the panel under the two (a drag the first
+   * began, let go). */
+  private startPinch(): void {
+    if (this.press) clearTimeout(this.press.timer);
+    this.press = null;
+    this.drag = null;
+    this.dragBrush = null;
+    this.front_.box = null;
+    this.front_.ghosts = [];
+    this.hideTip();
+    const [a, b] = [...this.touches.values()];
+    let vi = this.viewAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    if (vi < 0) vi = this.viewAt(a[0], a[1]);
+    if (vi < 0) {
+      this.pinch = null;
+      return;
+    }
+    const v = this.views[vi];
+    const dx = Math.abs(b[0] - a[0]);
+    const dy = Math.abs(b[1] - a[1]);
+    const axes = dx > 2 * dy ? "x" : dy > 2 * dx ? "y" : "xy";
+    this.remember();
+    this.pinch = { view: vi, a: [...a], b: [...b], axes, xr: [...v.x], yr: [...v.y], map: { ...v.map } };
+    this.request();
+  }
+
+  /** The fingers moved: the panel's scales zoomed by how far apart they are now (on the
+   * axes the pinch zooms), the data under their midpoint staying under it. */
+  private movePinch(): void {
+    const p = this.pinch;
+    const spec = this.spec;
+    const v = p && this.views[p.view];
+    if (!p || !spec || !v) return;
+    const [a, b] = [...this.touches.values()];
+    const panel = spec.panels[v.panel];
+    const ratio = (now: number, then: number): number => (then > 1 ? Math.min(50, Math.max(0.02, now / then)) : 1);
+    const k =
+      p.axes === "xy" ? ratio(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.hypot(p.b[0] - p.a[0], p.b[1] - p.a[1])) : 1;
+    const kx = p.axes === "x" ? ratio(Math.abs(b[0] - a[0]), Math.abs(p.b[0] - p.a[0])) : k;
+    const ky = p.axes === "y" ? ratio(Math.abs(b[1] - a[1]), Math.abs(p.b[1] - p.a[1])) : k;
+    // a range's ends where they were on screen, seen from the midpoint now
+    const scaled = (r: Range, o: number, s: number, then: number, now: number, f: number): Range => {
+      const at = (then - o) / s;
+      return [at + (o + r[0] * s - now) / (s * f), at + (o + r[1] * s - now) / (s * f)];
+    };
+    const m = p.map;
+    this.setX(panel.xg, scaled(p.xr, m.ox, m.sx, (p.a[0] + p.b[0]) / 2, (a[0] + b[0]) / 2, kx));
+    if (!this.fitY) this.setY(panel.yg, scaled(p.yr, m.oy, m.sy, (p.a[1] + p.b[1]) / 2, (a[1] + b[1]) / 2, ky));
+    this.request();
   }
 
   /** The line-end label under a point of the stage, if any. */

@@ -150,6 +150,7 @@ jobs:
           done
           node test/zoom.mjs "$pages/sensors.html" "$shots"
           node test/zoom.mjs "$pages/years.html" "$shots"
+          node test/touch.mjs "$pages/years.html" "$shots"
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@v7

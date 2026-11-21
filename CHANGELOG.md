@@ -8,6 +8,10 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **Touch**: pinch to zoom a panel about the fingers (side by side: x alone; one above
+  the other: y alone), two fingers to pan, a long press for the values there (pinned; a
+  tap lets them go). One finger scrolls the page past the plot, unless box zoom or select
+  is on or the plot fills the screen, when it draws as a mouse drag does.
 - **A cheat sheet** in the documentation: all of anytrellis on one page, as code that runs
   (the tests run it).
 - **The documentation for AI assistants** ([llms.txt](https://llmstxt.org)):
