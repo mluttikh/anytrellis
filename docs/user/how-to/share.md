@@ -73,7 +73,7 @@ app.
 | Brushing and legend clicks | Yes, in the page |
 | `link=` within the plot | Yes |
 | The panel opened with `open()` and a selection made with `select()` | Yes, as the page opens |
-| Plots linked with `link()` | No: Python passes their selection |
+| Plots linked with `link()` | Yes, saved together with `Link.save_html` ([link plots](link.md#save-linked-plots-to-one-page)) |
 | `selected()` | No: there is no Python |
 
 ### Size

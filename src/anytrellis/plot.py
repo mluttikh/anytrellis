@@ -3541,9 +3541,10 @@ class Trellis:
 
         return mo.ui.anywidget(self.widget)
 
-    def _embed_html(self) -> str:
+    def _embed_html(self, link: dict[str, Any] | None = None) -> str:
         """The plot's data in a ``<div class="anytrellis-embed">``, for a page that loads
-        ``standalone.js`` and ``widget.css`` once (the documentation's pages)."""
+        ``standalone.js`` and ``widget.css`` once (the documentation's pages); ``link``:
+        its marks' keys in a link saved with it (``Link.to_html``)."""
         spec, buffers = self._full_scene()
         payload = {
             "spec": spec,
@@ -3554,6 +3555,7 @@ class Trellis:
             "code": self.code() if self.controls else None,
             "selection": self._current_selection(),
             "paging": self.paging,
+            "link": link,
         }
         data = json.dumps(payload).replace("</", "<\\/")
         script = f"<script type='application/json'>{data}</script>"
@@ -3561,24 +3563,7 @@ class Trellis:
 
     def to_html(self, *, title: str | None = None) -> str:
         """The plot as a standalone HTML page: data and code inside, no kernel needed."""
-        script = _STATIC / "standalone.js"
-        css = _STATIC / "widget.css"
-        if not script.exists():
-            raise FileNotFoundError(
-                "the JavaScript bundle is not built: run `npm run build` in js/"
-            )
-        embed = self._embed_html()
-        name = html.escape(title or self.title or "anytrellis")
-        return (
-            "<!doctype html><html><head><meta charset='utf-8'>"
-            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-            f"<title>{name}</title>"
-            "<style>body{margin:16px;font-family:system-ui,sans-serif;background:#fff}"
-            "@media (prefers-color-scheme: dark){body{background:#12171d}}"
-            f"{css.read_text(encoding='utf-8')}</style>"
-            f"</head><body>{embed}"
-            f"<script>{script.read_text(encoding='utf-8')}</script></body></html>"
-        )
+        return page_html(self._embed_html(), title or self.title or "anytrellis")
 
     def save_html(self, path: str | Path, *, title: str | None = None) -> Path:
         """Write ``to_html`` to a file; returns its path."""
@@ -4689,6 +4674,20 @@ class Trellis:
         shadow._scene_cache = None
         return shadow
 
+    def _saved_entries(self) -> tuple[Trellis, list[tuple[Layer, Any, Any]]]:
+        """Each layer of the saved page's spec (``_full_scene``): its user layer, summary
+        part and geometry, and the plot whose tables they index (``load="pages"``: the
+        plot reading every row)."""
+        if self._page_tables:
+            return self._every_row()._saved_entries()
+        self._full_scene()
+        sent = self._sent
+        if self._window is not None:  # as _full_scene: the start's layers with data
+            sent = [s if s[2] is not None else c
+                    for s, c in zip(self._start, self._sent, strict=True)]  # fmt: skip
+        return self, [(d.user, part, geom)
+                      for d, (_, _, geom, part) in zip(self._drawn, sent, strict=True)]  # fmt: skip
+
     def _highlight_entries(self) -> list[tuple[Layer, Any, Any]]:
         """Each spec layer's user layer, summary part and geometry, as sent."""
         self._scene()
@@ -4709,6 +4708,25 @@ class Trellis:
 
 
 # ---- helpers ------------------------------------------------------------------------------
+
+
+def page_html(body: str, title: str) -> str:
+    """A standalone HTML page of plots (``_embed_html``): the bundle and its CSS once."""
+    script = _STATIC / "standalone.js"
+    css = _STATIC / "widget.css"
+    if not script.exists():
+        raise FileNotFoundError("the JavaScript bundle is not built: run `npm run build` in js/")
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        f"<title>{html.escape(title)}</title>"
+        "<style>body{margin:16px;font-family:system-ui,sans-serif;background:#fff}"
+        "@media (prefers-color-scheme: dark){body{background:#12171d}}"
+        f"{css.read_text(encoding='utf-8')}</style>"
+        f"</head><body>{body}"
+        f"<script>{script.read_text(encoding='utf-8')}</script></body></html>"
+    )
+
 
 FROM_ZERO = ("bars", "area", "hist", "density", "barstat", "ecdf")
 """Marks drawn from zero up, which a log y axis has no place for; on a sqrt or symlog

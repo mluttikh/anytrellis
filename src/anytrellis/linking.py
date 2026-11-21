@@ -19,12 +19,19 @@ A plot reading pages (``load="pages"``) links with ``on=``: its selection is a q
 as the keys chosen; another's selection lights up the rows of its pages read, and its
 summaries count the rows of the keys chosen in the database.
 
-Python relays the selection: the plots are linked in a running kernel, not in a saved page.
+In a notebook, Python relays the selection. ``Link.save_html`` writes the plots to one page
+that links them without Python: each mark carries the keys of its rows (a row's place in
+its table, or with ``on=`` its values' code), and the page highlights the marks whose keys
+the selection chooses, as Python would.
 """
 
 from __future__ import annotations
 
+import base64
+import html
+import uuid
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -197,9 +204,99 @@ class Link:
             self._keys = (ids, list(tables), link_keys(tables, self.on))
         return self._keys[2]
 
+    def to_html(self, *, title: str | None = None, cols: int = 1) -> str:
+        """The linked plots as one standalone HTML page, linked in the browser: a selection
+        in one highlights its rows in the others, with no kernel. ``cols``: the plots side
+        by side, as many in a row."""
+        from anytrellis.plot import page_html
+
+        name = title or next((p.title for p in self.plots if p.title), "anytrellis")
+        return page_html(self._embed_html(cols), name)
+
+    def save_html(self, path: str | Path, *, title: str | None = None, cols: int = 1) -> Path:
+        """Write ``to_html`` to a file; returns its path.
+
+        ```python
+        both = at.link(scatter, counts)
+        both.save_html("cars.html")            # one under the other
+        both.save_html("cars.html", cols=2)    # side by side
+        ```
+        """
+        out = Path(path)
+        out.write_text(self.to_html(title=title, cols=cols), encoding="utf-8")
+        return out
+
+    def _embed_html(self, cols: int = 1) -> str:
+        """The plots' ``<div class="anytrellis-embed">`` elements, in a grid of ``cols``
+        columns, each with its marks' keys: a page that loads ``standalone.js`` once links
+        them (the documentation's pages)."""
+        if not (isinstance(cols, int) and cols >= 1):
+            raise ValueError(f"cols must be a whole number from 1, got {cols!r}")
+        links = saved_links(self)
+        embeds = "".join(f"<div style='min-width:0'>{p._embed_html(link)}</div>"
+                         for p, link in zip(self.plots, links, strict=True))  # fmt: skip
+        style = f"display:grid;grid-template-columns:repeat({cols},minmax(0,1fr));gap:24px"
+        return f"<div class='anytrellis-link' style='{html.escape(style)}'>{embeds}</div>"
+
     def __repr__(self) -> str:
         on = f", on={list(self.on)}" if self.on else ""
         return f"Link({len(self.plots)} plots{on})"
+
+
+def saved_links(link: Link) -> list[dict[str, Any]]:
+    """Each plot's ``link`` payload for a saved page: the group, how many keys there are,
+    and per spec layer the keys of its marks' rows (base64 uint32): a plain mark's row's
+    (``keys``, and a line's end's, ``ends``), a summary's rows' (``starts`` per mark into
+    ``members``; ``share``: a histogram's bar fills to the share selected); None: a layer
+    not linked (a rule, text, data without the link's columns)."""
+    plans = [p._saved_entries() for p in link.plots]
+    tables: dict[int, Table] = {}
+    for plot, entries in plans:
+        for user, _, geom in entries:
+            if geom is not None:
+                table = plot._table(user)
+                tables.setdefault(id(table), table)
+    keys: dict[int, np.ndarray | None] = {}
+    if link.on:
+        found = link_keys(list(tables.values()), link.on)
+        keys = dict(zip(tables, found, strict=True))
+    else:  # the same table (the same object): a row's place in it
+        offsets: dict[int, int] = {}
+        at = 0
+        for k, table in tables.items():
+            native = id(table.native)
+            if native not in offsets:
+                offsets[native] = at
+                at += table.n
+            keys[k] = offsets[native] + np.arange(table.n, dtype=np.int64)
+    size = max((int(k.max(initial=-1)) + 1 for k in keys.values() if k is not None), default=0)
+    group = uuid.uuid4().hex[:12]
+    out = []
+    for plot, entries in plans:
+        layers: list[dict[str, Any] | None] = []
+        for user, part, geom in entries:
+            k = None if geom is None or user.mark == "text" else keys.get(id(plot._table(user)))
+            if k is None or geom is None:
+                layers.append(None)
+            elif part is None:
+                ends = None if geom.rows_end is None else _b64(k[geom.rows_end])
+                layers.append({"keys": _b64(k[geom.rows]), "ends": ends})
+            else:
+                # each mark's summary row's source rows, one after another
+                starts = part.members.starts
+                first, length = starts[geom.rows], np.diff(starts)[geom.rows]
+                bounds = np.r_[0, np.cumsum(length)]
+                place = np.repeat(first - bounds[:-1], length) + np.arange(bounds[-1])
+                share = part.layer.stat == "hist" and part.layer.mark in ("bars", "rect")
+                members = k[part.members.rows[place]]
+                layers.append({"starts": _b64(bounds), "members": _b64(members),
+                               "share": bool(share)})  # fmt: skip
+        out.append({"group": group, "size": size, "layers": layers})
+    return out
+
+
+def _b64(values: np.ndarray) -> str:
+    return base64.b64encode(np.asarray(values, dtype="<u4").tobytes()).decode("ascii")
 
 
 def _chosen_keys(chosen: list[tuple[Table, np.ndarray]],

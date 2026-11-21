@@ -238,9 +238,9 @@ power.selected()                         # the rows the link's selection picks
 ```
 
 Without `on=`, the plots must draw the same table (the same object): a filtered copy is
-another table, so link it `on=` a key column. Python relays the selection, so the plots are
-linked while the kernel runs, not in a page from `save_html`. `unlink()` the returned link
-to set them apart.
+another table, so link it `on=` a key column. In a notebook Python relays the selection;
+`save_html` on the returned link writes the plots to one page that stays linked without a
+kernel. `unlink()` the link to set them apart.
 
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the

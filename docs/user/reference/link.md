@@ -7,3 +7,5 @@
       members:
         - unlink
         - clear
+        - save_html
+        - to_html
