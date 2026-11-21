@@ -96,6 +96,7 @@ from anytrellis.query import (
     combos,
     distinct,
     drawn,
+    in_polygon_expr,
     linked,
     never,
     panel_extents,
@@ -104,7 +105,16 @@ from anytrellis.query import (
     within,
 )
 from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
-from anytrellis.selection import Brush, grow, link_keys, range_in, range_out, row_mask
+from anytrellis.selection import (
+    Brush,
+    grow,
+    in_polygon,
+    link_keys,
+    range_in,
+    range_out,
+    row_mask,
+    value_out,
+)
 from anytrellis.stats import PANEL, Members, Part
 from anytrellis.stats import parts as summary_parts
 from anytrellis.styling import (
@@ -2895,39 +2905,86 @@ class Trellis:
 
     # ---- selecting ----------------------------------------------------------------------
 
-    def select(self, x: Any = None, y: Any = None, *, color: Any = None,
-               panel: Any = None) -> Self:  # fmt: skip
+    def select(self, x: Any = None, y: Any = None, *, lasso: Any = None, at: Any = None,
+               color: Any = None, panel: Any = None) -> Self:  # fmt: skip
         """Select the marks in a range of x, of y or of both, as a brush drawn in the
         browser does: in every panel, or in ``panel`` alone (a name from ``panels()``, or a
         tuple of its levels); with ``link``, also every row sharing a key with them, in all
-        panels. ``color``: only the marks of these colours, as clicking legend entries does
-        (a number colour: a range of it, ``(low, high)``, as dragging on its legend does).
-        ``select()`` clears the selection.
+        panels. ``lasso``: the marks inside a polygon, its corners ``[(x, y), ...]``, as the
+        lasso draws it. ``at``: the marks at these points ``[(x, y), ...]``, as clicking
+        them does (in ``panel``, or in every panel). ``color``: only the marks of these
+        colours, as clicking legend entries does (a number colour: a range of it, ``(low,
+        high)``, as dragging on its legend does). ``select()`` clears the selection.
 
         ```python
         t.select(x=("2026-03-05", "2026-03-08"))   # a time axis: dates, datetimes
         t.select(x=(2, 4), y=(60, 80))             # numbers
         t.select(x=["Europe", "Asia"])             # a category axis: its categories
         t.select(x=(0, 3), panel="1955")           # with link="country": follow them
+        t.select(lasso=[(1, 40), (7, 40), (4, 80)])  # inside a triangle
+        t.select(at=[(2.1, 75.3)], panel="1955")   # the mark there
         t.select(color=["Asia", "Africa"])         # a colour column's categories
         t.select(color=(1e6, 5e7))                 # a number colour: a range
         ```
         """
         self._scene()
         brush: Brush | None = None
-        if x is not None or y is not None or color is not None:
+        if lasso is not None and (x is not None or y is not None or at is not None):
+            raise ValueError("select(lasso=...): not with x=, y= or at=")
+        if at is not None and (x is not None or y is not None):
+            raise ValueError("select(at=...): not with x= or y=")
+        if any(v is not None for v in (x, y, lasso, at, color)):
             brush = {"x": self._range_in("x", x), "y": self._range_in("y", y), "panel": None}
             if color is not None:
                 brush["legend"] = self._legend_in(color)
+            index = None
             if panel is not None:
                 keys = panel if isinstance(panel, tuple) else (panel,)
                 name = " · ".join(str(k) for k in keys)
                 names = self.panels()
                 if name not in names:
                     raise ValueError(f"no panel {name!r}; the panels are {names[:8]}")
-                brush["panel"] = names.index(name)
+                index = names.index(name)
+            if lasso is not None:
+                corners = [self._corner(c, "lasso") for c in lasso]
+                if len(corners) < 3:
+                    raise ValueError("select(lasso=...): a polygon has three corners or more")
+                xs, ys = zip(*corners, strict=True)
+                brush.update(lasso=[list(c) for c in corners], x=[min(xs), max(xs)],
+                             y=[min(ys), max(ys)])  # fmt: skip
+            if at is not None:
+                points = [self._corner(c, "at") for c in at]
+                if not points:
+                    raise ValueError("select(at=...): give a point or more")
+                brush["at"] = [[px, py, index] for px, py in points]
+                brush["near"] = self._near()
+            else:
+                brush["panel"] = index
         self._set_selection(brush)
         return self
+
+    def _corner(self, point: Any, what: str) -> tuple[float, float]:
+        """A point ``(x, y)`` from Python in axis units relative to the origins (a category
+        axis: a category, or a position, 0 the first)."""
+        if isinstance(point, str) or not isinstance(point, Sequence) or len(point) != 2:
+            raise ValueError(f"select({what}=...): each point is (x, y); got {point!r}")
+        out = []
+        for axis, v in zip(("x", "y"), point, strict=True):
+            kind, levels, origin = self._axes[axis]
+            number = isinstance(v, int | float | np.number) and not isinstance(v, bool)
+            out.append(float(v) if kind == "band" and number else
+                       _scalar(v, kind, levels) - origin)  # fmt: skip
+        return out[0], out[1]
+
+    def _near(self) -> list[float]:
+        """How far from a point given to ``select(at=...)`` a mark may be: a hundred-
+        thousandth of each axis (the browser's marks are 32-bit floats)."""
+        spec, _ = self._scene()
+        out = []
+        for axis in ("x", "y"):
+            spans = [abs(p[axis][1] - p[axis][0]) for p in spec["panels"]] or [1.0]
+            out.append(max(spans) * 1e-5)
+        return out
 
     @property
     def selection(self) -> dict[str, Any] | None:
@@ -2946,6 +3003,17 @@ class Trellis:
         out["color"] = None if legend is None else legend[1]
         panel = brush.get("panel")
         out["panel"] = None if panel is None else self.panels()[int(panel)]
+        names = self.panels()
+
+        def point(c: Sequence[float]) -> tuple[Any, Any]:
+            x, y = (value_out(v, *self._axes[axis]) for axis, v in zip("xy", c[:2], strict=True))
+            return x, y
+
+        if brush.get("lasso"):
+            out["lasso"] = [point(c) for c in brush["lasso"]]
+        if brush.get("at"):
+            out["at"] = [(*point(c), None if c[2] is None else names[int(c[2])])
+                         for c in brush["at"]]  # fmt: skip
         return out
 
     def selected(self, layer: str | int | None = None) -> Any:
@@ -2987,35 +3055,65 @@ class Trellis:
             ends.append((user.x2 or user.x, user.y2 or user.y))
         named = [n for end in ends for n in end if n is not None]
         brush = self._current_selection()
-        if brush is None:
+        if brush is None or (pin and brush.get("at")):  # (a rug is not clicked)
             return nw.to_native(whole.lazy.filter(never(named[0])))
         where = drawn(whole, named[0])
-        for name in named:
-            where = where & drawn(whole, name)
-        inside = None  # any end in the brush (a segment's start or its end)
         for end in ends:
-            here = always(named[0])
             for axis, name in zip(("x", "y"), end, strict=True):
                 if name is None:
                     continue
-                kind, levels, _ = self._axes[axis]
+                kind = self._axes[axis][0]
                 scale = kind if kind in TRANSFORMS else ""
                 domain = on_scale_expr(scale, nw.col(name)) if scale else None
+                where = where & drawn(whole, name)
                 if domain is not None:  # values off the scale (0 on a log axis): not drawn
                     where = where & domain
-                r = self._absolute(axis, brush.get(axis))
-                if r is None:
+
+        def box(end: tuple[str | None, str | None], xr: tuple[float, float] | None,
+                yr: tuple[float, float] | None, bands: bool = False) -> Any:  # fmt: skip
+            """The rows whose end is in the ranges (absolute; None: any): on a category
+            axis, the categories whose centre is in them (``bands``: whose band meets
+            them, as a click on a jittered point does)."""
+            here = always(named[0])
+            for axis, name, r in (("x", end[0], xr), ("y", end[1], yr)):
+                if name is None or r is None:
                     continue
+                kind, levels, _ = self._axes[axis]
+                scale = kind if kind in TRANSFORMS else ""
                 lo, hi = sorted(r)
                 if kind == "band":
-                    chosen = [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
+                    pad = 0.5 if bands else 0.0
+                    chosen = [lv for i, lv in enumerate(levels or [])
+                              if lo <= i + pad and i - pad <= hi]  # fmt: skip
                     here = here & among_labels(whole, name, chosen)
                 else:
                     here = here & within(whole, name, lo, hi, kind, scale=scale)
-            inside = here if inside is None else inside | here
+            return here
+
+        lasso, at, near = self._shapes(brush)
+        inside = None  # any end in the brush (a segment's start or its end)
+        if at is not None:  # the marks clicked: each within near of a point, in its panel
+            for px, py, p in at:
+                xr, yr = (px - near[0], px + near[0]), (py - near[1], py + near[1])
+                here = None
+                for end in ends:
+                    one = box(end, xr, yr, bands=True)
+                    here = one if here is None else here | one
+                assert here is not None
+                if p is not None:
+                    here = here & self._panels_filter(self._grid, [p])
+                inside = here if inside is None else inside | here
+        else:
+            xr = self._absolute("x", brush.get("x"))
+            yr = self._absolute("y", brush.get("y"))
+            for end in ends:
+                here = box(end, xr, yr)
+                if lasso is not None and end[0] is not None and end[1] is not None:
+                    here = here & self._lasso_expr(end[0], end[1], lasso, xr, yr)
+                inside = here if inside is None else inside | here
         assert inside is not None
         where = where & inside
-        if brush.get("panel") is not None:
+        if brush.get("panel") is not None and at is None:
             where = where & self._panels_filter(self._grid, [int(brush["panel"])])
         legend = self._legend_out(brush)
         if legend is not None:  # only the chosen colours (another column's: none)
@@ -3034,6 +3132,50 @@ class Trellis:
         if own:
             where = where | combos(whole, self._link, own)
         return nw.to_native(linked(whole, whole.lazy.filter(where), self._link))
+
+    def _lasso_expr(self, xn: str, yn: str, poly: np.ndarray, xr: tuple[float, float] | None,
+                    yr: tuple[float, float] | None) -> Any:  # fmt: skip
+        """``load="pages"``: the rows whose (``xn``, ``yn``) is inside the lasso (absolute
+        axis units), as a query's condition: a category axis by each category's position
+        (those in the lasso's extent ``xr``, ``yr``)."""
+        import narwhals as nw
+
+        from anytrellis.summaries import _value_expr
+
+        whole = self._data
+        assert whole is not None
+        sides = []
+        for axis, name, r in (("x", xn, xr), ("y", yn, yr)):
+            kind, levels, _ = self._axes[axis]
+            if kind == "band":
+                lo, hi = sorted(r) if r is not None else (-np.inf, np.inf)
+                sides.append([(i, among_labels(whole, name, [lv]))
+                              for i, lv in enumerate(levels or []) if lo <= i <= hi])  # fmt: skip
+            else:
+                scale = kind if kind in TRANSFORMS else ""
+                sides.append(_value_expr(whole, name, scale))
+        bx, by = sides
+        if isinstance(bx, list) and isinstance(by, list):  # two category axes: each cell
+
+            def inside(i: int, j: int) -> bool:
+                return bool(in_polygon(np.array([i], float), np.array([j], float), poly)[0])
+
+            cells = [cx & cy for i, cx in bx for j, cy in by if inside(i, j)]
+            out = nw.lit(value=False)
+            for cell in cells:
+                out = out | cell
+            return out
+        if isinstance(bx, list):
+            out = nw.lit(value=False)
+            for i, cond in bx:
+                out = out | (cond & in_polygon_expr(float(i), by, poly))
+            return out
+        if isinstance(by, list):
+            out = nw.lit(value=False)
+            for j, cond in by:
+                out = out | (cond & in_polygon_expr(bx, float(j), poly))
+            return out
+        return in_polygon_expr(bx, by, poly)
 
     def _own_keys(self) -> list[tuple[Any, ...]]:
         """``load="pages"``, ``link=``: the keys of the rows the brush selects in the layers
@@ -3183,11 +3325,15 @@ class Trellis:
         y = self._absolute("y", brush.get("y"))
         panel = None if brush.get("panel") is None else int(brush["panel"])
         legend = self._legend_out(brush)
+        lasso, at, near = self._shapes(brush)
 
         def hit(lay: Layer, tb: Table, gm: Geometry) -> np.ndarray:
-            pin = pinned(lay)  # a rug: its values' axis only
+            pin = pinned(lay)  # a rug: its values' axis only (by a lasso's extent; not clicked)
+            if pin and at is not None:
+                return np.zeros(tb.n, dtype=bool)
             mask = row_mask(lay.mark, gm, tb.n, None if pin == "x" else x,
-                            None if pin == "y" else y, panel)  # fmt: skip
+                            None if pin == "y" else y, panel, None if pin else lasso, at,
+                            near)  # fmt: skip
             if legend is not None:  # only the chosen colours (another column's: none)
                 name, chosen = legend
                 want = "number" if isinstance(chosen, tuple) else "category"
@@ -3284,6 +3430,22 @@ class Trellis:
     def _range_in(self, axis: str, value: Any) -> list[float] | None:
         kind, levels, origin = self._axes[axis]
         return range_in(value, kind, levels, origin, _scalar)
+
+    def _shapes(self, brush: Brush) -> tuple[np.ndarray | None,
+                                             list[tuple[float, float, int | None]] | None,
+                                             tuple[float, float]]:  # fmt: skip
+        """A brush's lasso (its corners) and the points clicked, in absolute axis units, and
+        how far from those a mark may be."""
+        ox, oy = self._axes["x"][2], self._axes["y"][2]
+        lasso = None
+        if brush.get("lasso"):
+            lasso = np.array([[float(a) + ox, float(b) + oy] for a, b in brush["lasso"]])
+        at = None
+        if brush.get("at"):
+            at = [(float(c[0]) + ox, float(c[1]) + oy, None if c[2] is None else int(c[2]))
+                  for c in brush["at"]]  # fmt: skip
+        near = brush.get("near") or (0.0, 0.0)
+        return lasso, at, (abs(float(near[0])), abs(float(near[1])))
 
     def _absolute(self, axis: str, r: list[float] | None) -> tuple[float, float] | None:
         if r is None:

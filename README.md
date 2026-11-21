@@ -193,7 +193,10 @@ Zooming y by hand stops it. `Trellis(..., fit_y=True)` starts with it on.
 
 **Selecting.** `s` (or the toolbar) makes drag a brush, shaped like a zoom box: x, y or
 both. It selects the marks it meets, in every panel, and the rest fade: the same range
-compared across panels. Drag the brush to move it; a click or Esc clears it.
+compared across panels. Drag the brush to move it; a click on no mark, or Esc, clears it.
+`l` draws a lasso instead, for a group no box fits round. With either on, a click selects
+the mark under it, and Shift+click adds or removes one; from Python,
+`select(lasso=[(x, y), ...])` and `select(at=[(x, y)], panel=...)`.
 
 Click a colour's entry in the legend to select its marks (Shift, Cmd or Ctrl+click adds
 or removes more; a click on the only one chosen clears). With a brush too, a mark must

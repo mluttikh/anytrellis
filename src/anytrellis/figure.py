@@ -28,6 +28,7 @@ from anytrellis.codec import DTYPES, Buffers
 from anytrellis.facets import place
 from anytrellis.formats import axis_format, number_format
 from anytrellis.pages import page_list, pins_of
+from anytrellis.selection import boxes_meet_polygon, in_polygon
 from anytrellis.theme import CONTEXTS, NARROW, PRESETS
 from anytrellis.transforms import TRANSFORMS, forward, inverse
 
@@ -1076,13 +1077,22 @@ def _scene(spec: dict[str, Any], buffers: Buffers) -> tuple[list[_Marks], list[_
 
 def select(marks: list[_Marks], brush: dict[str, Any]) -> list[np.ndarray | None]:
     """Per mark layer, the instances a brush selects (None: a context layer), grown by link
-    keys and by a summary's parts, as the browser selects them."""
-    x0, x1 = sorted(brush["x"]) if brush.get("x") else (-np.inf, np.inf)
-    y0, y1 = sorted(brush["y"]) if brush.get("y") else (-np.inf, np.inf)
+    keys and by a summary's parts, as the browser selects them: in the brush (and its lasso),
+    or within ``near`` of a point clicked."""
     legend = brush.get("legend")
     if not legend or not (legend.get("levels") or legend.get("range")):
         legend = None
-    panel = brush.get("panel")
+    lasso = np.asarray(brush["lasso"], dtype=np.float64) if brush.get("lasso") else None
+    # the regions selected in: the brush, or a box round each point clicked
+    regions: list[tuple[tuple[float, float], tuple[float, float], Any, Any]] = []
+    if brush.get("at"):
+        nx, ny = (abs(float(v)) for v in brush.get("near") or (0.0, 0.0))
+        for px, py, p in brush["at"]:
+            regions.append(((px - nx, px + nx), (py - ny, py + ny), p, None))
+    else:
+        x = tuple(sorted(brush["x"])) if brush.get("x") else (-np.inf, np.inf)
+        y = tuple(sorted(brush["y"])) if brush.get("y") else (-np.inf, np.inf)
+        regions.append((x, y, brush.get("panel"), lasso))
     masks: list[np.ndarray | None] = []
     keys: list[np.ndarray] = []
     for layer in marks:
@@ -1091,36 +1101,54 @@ def select(marks: list[_Marks], brush: dict[str, Any]) -> list[np.ndarray | None
             continue
         n = len(layer.coords)
         mask = np.zeros(n, dtype=bool)
-        lo = 0 if panel is None else int(layer.starts[panel])
-        hi = n if panel is None else int(layer.starts[panel + 1])
+        pin = layer.spec.get("pin")  # a rug: its values' axis only, and not clicked
         # legend entries chosen: only the marks of their colours (a number colour's range:
         # of the values in it); none in another legend's colours
         mine = legend is not None and layer.spec["color"].get("legend") == legend["index"]
         codes = layer.codes if mine and legend is not None and legend.get("levels") else None
         values = layer.values if mine and legend is not None and legend.get("range") else None
-        if legend and codes is None and values is None:
-            hi = lo
-        c = layer.coords[lo:hi]
-        ax, ay, bx, by = c[:, 0], c[:, 1], c[:, 2], c[:, 3]
-        if layer.spec["type"] == "band" and layer.base is not None:
-            b = layer.base[lo:hi]
-            low = np.minimum.reduce([ay, by, b[:, 0], b[:, 1]])
-            high = np.maximum.reduce([ay, by, b[:, 0], b[:, 1]])
-            hit = ((np.maximum(ax, bx) >= x0) & (np.minimum(ax, bx) <= x1)
-                   & (high >= y0) & (low <= y1))  # fmt: skip
-        elif layer.kind == KIND_RECT:
-            hit = ((np.maximum(ax, bx) >= x0) & (np.minimum(ax, bx) <= x1)
-                   & (np.maximum(ay, by) >= y0) & (np.minimum(ay, by) <= y1))  # fmt: skip
-        else:
-            hit = ((ax >= x0) & (ax <= x1) & (ay >= y0) & (ay <= y1)) | (
-                (bx >= x0) & (bx <= x1) & (by >= y0) & (by <= y1))  # fmt: skip
-        if codes is not None and legend is not None:
-            hit &= np.isin(codes[lo:hi], legend["levels"])
-        if values is not None and legend is not None:
-            a, b = sorted(legend["range"])
-            v = values[lo:hi]
-            hit &= (v >= a) & (v <= b)
-        mask[lo:hi] = hit
+        for (x0, x1), (y0, y1), panel, poly in regions:
+            lo = 0 if panel is None else int(layer.starts[panel])
+            hi = n if panel is None else int(layer.starts[panel + 1])
+            if (legend and codes is None and values is None) or (pin and brush.get("at")):
+                hi = lo
+            c = layer.coords[lo:hi]
+            ax, ay, bx, by = c[:, 0], c[:, 1], c[:, 2], c[:, 3]
+            if pin:
+                hit = (ax >= x0) & (ax <= x1) if pin == "y" else (ay >= y0) & (ay <= y1)
+            elif layer.spec["type"] == "band" and layer.base is not None:
+                b = layer.base[lo:hi]
+                low = np.minimum.reduce([ay, by, b[:, 0], b[:, 1]])
+                high = np.maximum.reduce([ay, by, b[:, 0], b[:, 1]])
+                hit = ((np.maximum(ax, bx) >= x0) & (np.minimum(ax, bx) <= x1)
+                       & (high >= y0) & (low <= y1))  # fmt: skip
+                if poly is not None:
+                    i = np.flatnonzero(hit)
+                    hit[i] = boxes_meet_polygon(np.minimum(ax, bx)[i], np.maximum(ax, bx)[i],
+                                                low[i], high[i], poly)  # fmt: skip
+            elif layer.kind == KIND_RECT:
+                low, high = np.minimum(ay, by), np.maximum(ay, by)
+                hit = ((np.maximum(ax, bx) >= x0) & (np.minimum(ax, bx) <= x1)
+                       & (high >= y0) & (low <= y1))  # fmt: skip
+                if poly is not None:
+                    i = np.flatnonzero(hit)
+                    hit[i] = boxes_meet_polygon(np.minimum(ax, bx)[i], np.maximum(ax, bx)[i],
+                                                low[i], high[i], poly)  # fmt: skip
+            else:
+                start = (ax >= x0) & (ax <= x1) & (ay >= y0) & (ay <= y1)
+                end = (bx >= x0) & (bx <= x1) & (by >= y0) & (by <= y1)
+                if poly is not None:
+                    i, j = np.flatnonzero(start), np.flatnonzero(end)
+                    start[i] = in_polygon(ax[i], ay[i], poly)
+                    end[j] = in_polygon(bx[j], by[j], poly)
+                hit = start | end
+            if codes is not None and legend is not None:
+                hit &= np.isin(codes[lo:hi], legend["levels"])
+            if values is not None and legend is not None:
+                a, b = sorted(legend["range"])
+                v = values[lo:hi]
+                hit &= (v >= a) & (v <= b)
+            mask[lo:hi] |= hit
         if layer.link is not None:
             keys.append(layer.link[mask])
         masks.append(mask)
@@ -1644,7 +1672,7 @@ def _draw_note(svg: _Svg, n: dict[str, Any], v: _View, th: dict[str, str], fs: f
 
 
 def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View],
-                th: dict[str, str], texts: list[_Texts], brushes: list[Rect],
+                th: dict[str, str], texts: list[_Texts], brushes: list[Rect | Lasso],
                 marks: list[_Marks] | None = None) -> None:  # fmt: skip
     fs = lay.font_size
     look = look_of(spec)
@@ -1757,6 +1785,13 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
         svg.text(*lay.y_title, f"↑ {spec['y']['title']}", th["muted"])
 
     for b in brushes:
+        if isinstance(b, Lasso):  # its polygon, in its panel
+            path = "M" + "L".join(f"{_n(px)} {_n(py)}" for px, py in b.points) + "Z"
+            svg.open(svg.clip(b.panel))
+            svg.add(f'<path d="{path}" fill="{th["accent"]}" fill-opacity="0.07" '
+                    f'stroke="{th["accent"]}" stroke-opacity="0.8"/>')  # fmt: skip
+            svg.close()
+            continue
         svg.rect(b, th["accent"], ' fill-opacity="0.07"')
         edge = Rect(_round(b.x) + 0.5, _round(b.y) + 0.5, _round(b.w) - 1, _round(b.h) - 1)
         svg.add(f'<rect x="{_n(edge.x)}" y="{_n(edge.y)}" width="{_n(edge.w)}" '
@@ -1888,12 +1923,22 @@ def _crowded_right(lay: Layout, box: PanelBox) -> bool:
     )  # fmt: skip
 
 
-def _brush_rect(brush: dict[str, Any] | None, v: _View) -> Rect | None:
-    """The brush where it shows in view ``v`` (px), or None."""
-    if not brush or (not brush.get("x") and not brush.get("y")):
+@dataclass(frozen=True)
+class Lasso:
+    """A lasso where it shows in a panel: its corners (px), clipped to the panel."""
+
+    panel: Rect
+    points: list[tuple[float, float]]
+
+
+def _brush_rect(brush: dict[str, Any] | None, v: _View) -> Rect | Lasso | None:
+    """The brush where it shows in view ``v`` (px), or None (marks clicked: none)."""
+    if not brush or (not brush.get("x") and not brush.get("y")) or brush.get("at"):
         return None
     if brush.get("panel") is not None and brush["panel"] != v.panel:
         return None
+    if brush.get("lasso"):
+        return Lasso(v.rect, [(v.ox + a * v.sx, v.oy + b * v.sy) for a, b in brush["lasso"]])
     r = v.rect
     x0, x1, y0, y1 = r.x, r.x + r.w, r.y, r.y + r.h
     if brush.get("x"):

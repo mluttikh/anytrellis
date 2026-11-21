@@ -359,6 +359,28 @@ LINK_KEY = "__anytrellis_key"
 LINK_MISSING = "__anytrellis_missing"
 
 
+def in_polygon_expr(x: Any, y: Any, poly: Any) -> Any:
+    """A narwhals condition: the point (``x``, ``y``: expressions, or numbers) inside the
+    polygon by the even-odd rule, as ``selection.in_polygon`` tests it."""
+    import narwhals as nw
+
+    x = x if isinstance(x, nw.Expr) else nw.lit(float(x))
+    y = y if isinstance(y, nw.Expr) else nw.lit(float(y))
+    crossings = []
+    for i in range(len(poly)):
+        xi, yi = (float(v) for v in poly[i])
+        xj, yj = (float(v) for v in poly[i - 1])
+        if yi == yj:
+            continue
+        # (yi > y) != (yj > y): y from the lower end (in) to the upper (out)
+        lo, hi = min(yi, yj), max(yi, yj)
+        meets = (y >= lo) & (y < hi) & (x < (y - yi) * (xj - xi) / (yj - yi) + xi)
+        crossings.append(nw.when(meets).then(nw.lit(1)).otherwise(nw.lit(0)))
+    if not crossings:
+        return nw.lit(value=False)
+    return (nw.sum_horizontal(*crossings) % 2) == 1
+
+
 def drawn(table: Table, name: str) -> Any:
     """Rows a point is drawn for, along column ``name``: a finite number or a time (any
     category, or none)."""

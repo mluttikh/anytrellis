@@ -1,6 +1,6 @@
 # Select data and use it in Python
 
-In this tutorial you select marks with a brush and with the legend, follow countries
+In this tutorial you select marks with a brush, a lasso, a click and the legend, follow countries
 through fifty years of panels, and get the selected rows back in Python. It takes about
 ten minutes, and follows [Facets and scales](facets-and-scales.md).
 
@@ -31,8 +31,17 @@ corner of a panel: few children, long lives. The brush selects the marks inside 
 
 - Drag the brush to move it.
 - A brush shaped mostly sideways selects a range of x only; mostly up or down, of y only.
-- A click outside it, or **Esc**, clears it.
+- A click on no mark, or **Esc**, clears it.
 - Press **s** again to go back to panning.
+
+A brush is a box. For a group of marks no box fits round, press **l** (or the toolbar's
+lasso button) and draw round them: the lasso selects the marks inside its outline, in every
+panel as the brush does. Drag it from inside to move it. A bar or a tile is selected when
+the lasso meets it, a line when one of its points is inside.
+
+With either one on, a **click** on a mark selects that mark alone; Shift+click (or Cmd or
+Ctrl) adds another, or takes away one already selected. A click selects in its own panel,
+not in every panel.
 
 ## 2. Pick colours in the legend
 
@@ -83,11 +92,20 @@ print(rows["country"].unique().sort().to_list())
 ```
 
 `select()` with no arguments clears the selection, and `select(color=["South Asia"])`
-picks colours as the legend does.
+picks colours as the legend does. A lasso and clicks have their Python forms too:
+
+```python
+years.select(lasso=[(1, 70), (3, 70), (3, 82), (1, 82), (0.5, 76)])  # its corners
+years.select(at=[(1.9, 80.1)], panel="2005")  # the mark there, as a click
+```
+
+`selection` then has the lasso's corners (`"lasso"`) or the points clicked (`"at"`, each
+with its panel), and the brush's `x` and `y` are the lasso's extent.
 
 ## What you learned
 
-- **s** and a drag brush marks in every panel; a legend click picks colours.
+- **s** and a drag brush marks in every panel, **l** draws a lasso, a click picks one
+  mark; a legend click picks colours.
 - `link="column"` follows the things that column names across panels.
 - `select()` selects from Python; `selection` and `selected()` read what is selected,
   also when you selected it in the browser.

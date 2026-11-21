@@ -157,6 +157,9 @@ export interface FrontState {
   ghosts: Rect[];
   /** The selection's brush, where it shows in each panel (px). */
   brushes: Rect[];
+  /** The selection's lasso, where it shows in each panel: its corners (px), clipped to the
+   * panel. */
+  lassos: { clip: Rect; points: [number, number][] }[];
   /** Text layers, drawn over the marks. */
   texts: TextData[];
   /** Labels at the ends of lines (labels.ts: endLabels). */
@@ -393,6 +396,22 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.fillText(`↑ ${spec.y.title}`, layout.yTitle.x, layout.yTitle.y);
   }
 
+  for (const l of state.lassos) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(l.clip.x, l.clip.y, l.clip.w, l.clip.h);
+    ctx.clip();
+    ctx.beginPath();
+    l.points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.fillStyle = theme.accent;
+    ctx.globalAlpha = 0.07;
+    ctx.fill();
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = theme.accent;
+    ctx.stroke();
+    ctx.restore();
+  }
   for (const b of state.brushes) {
     ctx.fillStyle = theme.accent;
     ctx.globalAlpha = 0.07;

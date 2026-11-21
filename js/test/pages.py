@@ -1,7 +1,7 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
-channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs)."""
+channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs, lasso.mjs)."""
 
 from __future__ import annotations
 
@@ -136,6 +136,25 @@ def main(out: Path) -> None:
         x="fertility_1955", y="life_expect_1955", x2="fertility_2005", y2="life_expect_2005",
         tooltip=["country"]).save_html(out / "segments.html")  # fmt: skip
     layouts(out)
+    lassos(out)
+
+
+def lassos(out: Path) -> None:
+    """A lasso and marks clicked, selected in Python, and the rows Python selects
+    (``<name>.selected.json``): the browser selects as many marks (lasso.mjs)."""
+    import json
+
+    gapminder = load("gapminder")
+    tri = [(2.0, 50.0), (7.0, 50.0), (4.0, 80.0), (2.5, 70.0)]
+    first = gapminder.row(0, named=True)
+    for name, chosen in {"lasso": {"lasso": tri},
+                         "clicked": {"at": [(first["fertility"], first["life_expect"])],
+                                     "panel": str(first["year"])}}.items():  # fmt: skip
+        t = Trellis(gapminder, wrap="year", cols=4, panel_height=150)
+        t.points(x="fertility", y="life_expect", color="region", size=6)
+        t.select(**chosen)
+        t.save_html(out / f"{name}.html")
+        (out / f"{name}.selected.json").write_text(json.dumps(len(t.selected())))
 
 
 def layouts(out: Path) -> None:

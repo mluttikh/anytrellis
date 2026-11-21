@@ -96,8 +96,28 @@ s = await state();
 check(s.x[0][1] - s.x[0][0] < before.x[0][1] - before.x[0][0] && s.brush, "Shift+drag zooms, and the selection stays");
 await page.keyboard.press("r");
 
-// a click clears; so does Esc
-await page.mouse.click(...at(p0, 0.9, 0.9));
+// a click on no mark clears; so does Esc (a click on one selects it: lasso.mjs)
+/** A spot in the first panel with no mark within 20 px. */
+const empty = await page.evaluate(() => {
+  const v = window.anytrellisViews[0];
+  const w = v.views[0];
+  const r = v.stage.getBoundingClientRect();
+  for (let fy = 0.05; fy < 1; fy += 0.05) {
+    for (let fx = 0.05; fx < 1; fx += 0.05) {
+      const px = w.rect.x + w.rect.w * fx;
+      const py = w.rect.y + w.rect.h * fy;
+      const near = v.scene.layers.some((l) => {
+        for (let i = l.starts[w.panel]; i < l.starts[w.panel + 1]; i++) {
+          if (Math.hypot(w.map.ox + l.coords[i * 4] * w.map.sx - px, w.map.oy + l.coords[i * 4 + 1] * w.map.sy - py) < 20) return true;
+        }
+        return false;
+      });
+      if (!near) return [r.left + px, r.top + py];
+    }
+  }
+  return null;
+});
+await page.mouse.click(...empty);
 await page.waitForTimeout(100);
 s = await state();
 check(s.brush === null && s.sel === null, "a click clears the selection");

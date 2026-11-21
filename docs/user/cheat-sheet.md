@@ -217,6 +217,8 @@ t = Trellis(gapminder, wrap="year", link="country")  # a selection follows each 
 t.points(x="fertility", y="life_expect", color="region")
 t.select(x=(1, 3), panel="1955")  # as a brush in the browser; select() clears it
 t.select(color=["Europe & Central Asia"])  # as clicking the legend
+t.select(lasso=[(1, 50), (3, 50), (2, 70)])  # inside a lasso, its corners
+t.select(at=[(1.9, 80.1)], panel="2005")  # the mark there, as clicking it
 t.selection  # what is selected
 t.selected()  # the selected rows, as the same kind of table
 
@@ -300,7 +302,7 @@ Click a plot first, then:
 | --- | --- |
 | Scroll, drag | zoom x, pan (Shift+scroll: zoom y; on an axis: that axis alone) |
 | Shift+drag, ++z++ | box zoom |
-| ++s++ | drag selects |
+| ++s++, ++l++ | drag selects with a brush, a lasso; a click selects a mark |
 | Hover, click | the values there (lines by colour: every one at that x); a click pins them |
 | Double-click a panel, ++enter++ | see it alone; ++backspace++ back |
 | ++page-up++ ++page-down++ | previous or next panel, or page |

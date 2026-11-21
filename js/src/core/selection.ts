@@ -14,6 +14,10 @@
 // range too, only those meeting it); marks coloured by another column, or by none, fade.
 // Dragging on a number colour's legend (or clicking a stepped one's bin) selects a range of
 // its values, the same way.
+// A lasso is a polygon (its x and y: its bounding box) and selects as a brush does, a point
+// inside it by the even-odd rule, a bar or rect it overlaps. A click selects the marks within
+// `near` of the point clicked (each in its panel), as a brush that small would.
+// selection.py (and figure.py) select the same marks.
 
 import { KIND_RECT } from "./renderers/renderer";
 import type { LayerData, Scene } from "./scene";
@@ -28,6 +32,13 @@ export interface Brush {
   /** Only marks of these colours: levels of the category legend `index` (spec.legends),
    * or, of a number legend, values in `range`. */
   legend?: LegendChoice | null;
+  /** A lasso: its corners (axis units), in order; x and y are their bounding box. */
+  lasso?: [number, number][] | null;
+  /** Marks clicked: the points, each [x, y, panel or null: every panel] (axis units), in
+   * place of x and y. */
+  at?: [number, number, number | null][] | null;
+  /** How far from a point clicked a mark may be, on x and on y (axis units). */
+  near?: [number, number] | null;
 }
 
 export interface LegendChoice {
@@ -41,9 +52,88 @@ export function chooses(legend: LegendChoice | null | undefined): boolean {
   return !!legend && (legend.levels.length > 0 || !!legend.range);
 }
 
-/** A brush that selects something: a range, or legend entries. */
+/** A brush that selects something: a range, a lasso, marks clicked, or legend entries. */
 export function selects(brush: Brush | null): boolean {
-  return !!brush && (!!brush.x || !!brush.y || chooses(brush.legend));
+  return !!brush && (!!brush.x || !!brush.y || !!brush.at?.length || chooses(brush.legend));
+}
+
+/** Whether a point is inside a polygon, by the even-odd rule: a ray to the right crosses an
+ * edge when its ends lie either side of the point's y (one at or under it, the other over
+ * it) and it meets the edge right of the point (selection.py: in_polygon). */
+export function inPolygon(x: number, y: number, poly: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi === yj) continue;
+    if (yi > y !== yj > y && x < ((y - yi) * (xj - xi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Whether a box (x0 <= x1, y0 <= y1) overlaps a polygon: a corner inside it, one of its
+ * corners inside the box, or an edge of each crossing (selection.py: boxes_meet_polygon). */
+export function boxMeetsPolygon(x0: number, x1: number, y0: number, y1: number, poly: [number, number][]): boolean {
+  if (inPolygon(x0, y0, poly) || inPolygon(x0, y1, poly) || inPolygon(x1, y0, poly) || inPolygon(x1, y1, poly)) return true;
+  for (const [vx, vy] of poly) if (vx >= x0 && vx <= x1 && vy >= y0 && vy <= y1) return true;
+  const sides: [number, number, number, number][] = [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]];
+  const side = (ox: number, oy: number, ux: number, uy: number, vx: number, vy: number): number => Math.sign((ux - ox) * (vy - oy) - (uy - oy) * (vx - ox));
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [px, py] = poly[j];
+    const [qx, qy] = poly[i];
+    for (const [ax, ay, bx, by] of sides) {
+      if (side(px, py, qx, qy, ax, ay) * side(px, py, qx, qy, bx, by) < 0 && side(ax, ay, bx, by, px, py) * side(ax, ay, bx, by, qx, qy) < 0) return true;
+    }
+  }
+  return false;
+}
+
+/** A path with fewer corners (Ramer-Douglas-Peucker): each left out within `tol` (px) of
+ * the line between the corners kept either side of it. */
+export function simplify(path: [number, number][], tol: number): [number, number][] {
+  if (path.length < 3) return path;
+  const keep = new Uint8Array(path.length);
+  keep[0] = keep[path.length - 1] = 1;
+  const stack: [number, number][] = [[0, path.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const [ax, ay] = path[a];
+    const [bx, by] = path[b];
+    const len = Math.hypot(bx - ax, by - ay);
+    let far = -1;
+    let at = -1;
+    for (let i = a + 1; i < b; i++) {
+      const [px, py] = path[i];
+      const d = len > 0 ? Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / len : Math.hypot(px - ax, py - ay);
+      if (d > far) [far, at] = [d, i];
+    }
+    if (at >= 0 && far > tol) {
+      keep[at] = 1;
+      stack.push([a, at], [at, b]);
+    }
+  }
+  return path.filter((_, i) => keep[i]);
+}
+
+/** Where a brush selects: its ranges in its panel (and its lasso), or a box round each point
+ * clicked, in the point's panel. */
+interface Region {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  panel: number | null;
+  lasso: [number, number][] | null;
+}
+
+function regionsOf(brush: Brush): Region[] {
+  if (brush.at?.length) {
+    const [nx, ny] = (brush.near ?? [0, 0]).map(Math.abs);
+    return brush.at.map(([x, y, panel]) => ({ x0: x - nx, x1: x + nx, y0: y - ny, y1: y + ny, panel: panel ?? null, lasso: null }));
+  }
+  const [x0, x1] = brush.x ? sorted(brush.x) : [-Infinity, Infinity];
+  const [y0, y1] = brush.y ? sorted(brush.y) : [-Infinity, Infinity];
+  return [{ x0, x1, y0, y1, panel: brush.panel ?? null, lasso: brush.lasso && brush.lasso.length >= 3 ? brush.lasso : null }];
 }
 
 /** The legend entries chosen after a click on entry `level` of legend `index`: alone (again:
@@ -65,9 +155,8 @@ export interface Selection {
 
 /** The marks a brush selects, grown by link keys. */
 export function select(scene: Scene, brush: Brush): Selection {
-  const [x0, x1] = brush.x ? sorted(brush.x) : [-Infinity, Infinity];
-  const [y0, y1] = brush.y ? sorted(brush.y) : [-Infinity, Infinity];
-  const inside = (x: number, y: number): boolean => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  const regions = regionsOf(brush);
+  const clicked = !!brush.at?.length;
   const legend = chooses(brush.legend) ? brush.legend! : null;
   const chosen = new Uint8Array(65536);
   for (const l of legend?.levels ?? []) chosen[l] = 1;
@@ -85,34 +174,37 @@ export function select(scene: Scene, brush: Brush): Selection {
     const mask = new Uint8Array(n);
     const rect = layer.kind === KIND_RECT;
     const band = layer.spec.type === "band" ? layer.base : null;
-    const pin = layer.spec.pin; // a rug: its data axis only
-    const p = brush.panel ?? null;
-    const from = p === null ? 0 : (layer.starts[p] ?? 0);
+    const pin = layer.spec.pin; // a rug: its data axis only (by a lasso's extent), not clicked
     // legend entries chosen: only the marks of their colours, or (a number colour's range)
     // of the values in it; none in another legend's colours
     const mine = !!legend && layer.spec.color.legend === legend.index;
     const codes = mine && legend!.levels.length ? layer.codes : null;
     const values = mine && legend!.range ? layer.values : null;
-    const to = legend && !codes && !values ? from : p === null ? n : (layer.starts[p + 1] ?? 0);
-    for (let i = from; i < to; i++) {
-      if (codes && !chosen[codes[i]]) continue;
-      if (values && !(values[i] >= v0 && values[i] <= v1)) continue;
-      const ax = c[i * 4];
-      const ay = c[i * 4 + 1];
-      const bx = c[i * 4 + 2];
-      const by = c[i * 4 + 3];
-      let hit: boolean;
-      if (pin) {
-        hit = pin === "y" ? ax >= x0 && ax <= x1 : ay >= y0 && ay <= y1;
-      } else if (band) {
-        // a piece of band: overlapping it, from its lower line to its upper
-        const lo = Math.min(ay, by, band[i * 2], band[i * 2 + 1]);
-        const hi = Math.max(ay, by, band[i * 2], band[i * 2 + 1]);
-        hit = Math.max(ax, bx) >= x0 && Math.min(ax, bx) <= x1 && hi >= y0 && lo <= y1;
-      } else if (rect) {
-        hit = Math.max(ax, bx) >= x0 && Math.min(ax, bx) <= x1 && Math.max(ay, by) >= y0 && Math.min(ay, by) <= y1;
-      } else hit = inside(ax, ay) || inside(bx, by);
-      if (hit) mask[i] = 1;
+    for (const { x0, x1, y0, y1, panel: p, lasso } of regions) {
+      const from = p === null ? 0 : (layer.starts[p] ?? 0);
+      const to = (legend && !codes && !values) || (pin && clicked) ? from : p === null ? n : (layer.starts[p + 1] ?? 0);
+      const inside = (x: number, y: number): boolean => x >= x0 && x <= x1 && y >= y0 && y <= y1 && (!lasso || inPolygon(x, y, lasso));
+      for (let i = from; i < to; i++) {
+        if (mask[i]) continue;
+        if (codes && !chosen[codes[i]]) continue;
+        if (values && !(values[i] >= v0 && values[i] <= v1)) continue;
+        const ax = c[i * 4];
+        const ay = c[i * 4 + 1];
+        const bx = c[i * 4 + 2];
+        const by = c[i * 4 + 3];
+        let hit: boolean;
+        if (pin) {
+          hit = pin === "y" ? ax >= x0 && ax <= x1 : ay >= y0 && ay <= y1;
+        } else if (band || rect) {
+          // a bar or rect overlapping it; a piece of band, from its lower line to its upper
+          const lo = band ? Math.min(ay, by, band[i * 2], band[i * 2 + 1]) : Math.min(ay, by);
+          const hi = band ? Math.max(ay, by, band[i * 2], band[i * 2 + 1]) : Math.max(ay, by);
+          const l = Math.min(ax, bx);
+          const r = Math.max(ax, bx);
+          hit = r >= x0 && l <= x1 && hi >= y0 && lo <= y1 && (!lasso || boxMeetsPolygon(l, r, lo, hi, lasso));
+        } else hit = inside(ax, ay) || inside(bx, by);
+        if (hit) mask[i] = 1;
+      }
     }
     if (layer.link) {
       linked = true;

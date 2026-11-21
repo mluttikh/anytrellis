@@ -47,6 +47,30 @@ const stage = async (root) => {
   await page.waitForTimeout(300);
   return (await root.$(".atr-stage")).boundingBox();
 };
+/** A spot in the plot's first panel 12 px or more from any mark (a click there selects
+ * nothing: it clears), in page coordinates. */
+const emptySpot = (root) =>
+  root.evaluate((el) => {
+    const v = window.anytrellisViews.find((x) => el.contains(x.root));
+    const w = v.views[0];
+    const r = v.stage.getBoundingClientRect();
+    for (let fy = 0.05; fy < 1; fy += 0.05) {
+      for (let fx = 0.05; fx < 1; fx += 0.05) {
+        const px = w.rect.x + w.rect.w * fx;
+        const py = w.rect.y + w.rect.h * fy;
+        const near = v.scene.layers.some((l) => {
+          for (let i = l.starts[w.panel]; i < l.starts[w.panel + 1]; i++) {
+            const xs = [l.coords[i * 4], l.coords[i * 4 + 2]].map((u) => w.map.ox + u * w.map.sx);
+            const ys = [l.coords[i * 4 + 1], l.coords[i * 4 + 3]].map((u) => w.map.oy + u * w.map.sy);
+            if (px >= Math.min(...xs) - 12 && px <= Math.max(...xs) + 12 && py >= Math.min(...ys) - 12 && py <= Math.max(...ys) + 12) return true;
+          }
+          return false;
+        });
+        if (!near) return [r.left + px, r.top + py];
+      }
+    }
+    return null;
+  });
 // a brush from (fx0, fy0) to (fx1, fy1), fractions of the stage; `during` runs mid-drag
 async function brush(root, [fx0, fy0, fx1, fy1], during) {
   const b = await stage(root);
@@ -88,11 +112,11 @@ check(!mileageB.equals(mileageA), "the boxes light up");
 const [a, c, none] = (await run("print(len(power.selected()), len(scatter.selected()), power.selection is None)")).split(" ");
 check(Number(a) > 0 && a === c && none === "True", `Python: the linked plot selects the brushed rows (${a} of ${c})`);
 
-// a click in the histogram (no brush of its own) clears the link's selection
+// a click in the histogram (no brush of its own), on no bar, clears the link's selection
 const pb = await stage(power);
 await page.mouse.click(pb.x + pb.width * 0.5, pb.y + pb.height * 0.5);
 await page.keyboard.press("s");
-await page.mouse.click(pb.x + pb.width * 0.5, pb.y + pb.height * 0.5);
+await page.mouse.click(...(await emptySpot(power)));
 await page.keyboard.press("s");
 await page.waitForTimeout(1500);
 await page.mouse.move(5, 5);

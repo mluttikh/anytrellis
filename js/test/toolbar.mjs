@@ -52,6 +52,8 @@ await page.keyboard.press("ArrowRight");
 check((await mode()) === "select", "→ in the group: the next mode");
 check(await page.evaluate(() => document.activeElement?.getAttribute("aria-checked") === "true"), "and the focus moves with it");
 await page.keyboard.press("ArrowRight");
+check((await mode()) === "lasso", "→ again: the lasso");
+await page.keyboard.press("ArrowRight");
 check((await mode()) === "pan", "→ from the last: back to the first");
 await page.mouse.click(...at(p0, 0.5, 0.5));
 await page.keyboard.press("s");
