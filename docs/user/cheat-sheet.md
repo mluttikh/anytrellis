@@ -238,6 +238,7 @@ a = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
 b = Trellis(cars, wrap="origin").hist(x="horsepower")
 both = link(a, b)  # a brush in one selects in both; link(a, b, on="name") by a key
 both.clear()  # clear the selection
+html = both.to_html()  # one page of both, linked without a kernel
 both.unlink()
 ```
 

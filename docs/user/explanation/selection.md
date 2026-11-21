@@ -42,8 +42,15 @@ rows it stands for.
 `link(a, b)` connects separate plots through Python. When one plot's selection changes,
 Python works out its rows and sends each other plot which of *its* marks those rows are:
 a bit per row for points and lines, and for each histogram bar the share of its count
-that is selected. That is why linking needs a running kernel, and why a histogram's bars
-fill partly while a scatter's points are either bright or faded.
+that is selected. That is why a histogram's bars fill partly while a scatter's points are
+either bright or faded.
+
+A page saved with `Link.save_html` has no Python, so it carries the answer's ingredients
+instead: each mark's keys (the place of its row in the table, or with `on=` a number for
+its key's values), and for a summary's mark the keys of all the rows it stands for. A
+selection in one plot chooses the keys of its selected marks; every other plot lights the
+marks with a key chosen and fills each bar to the share of its keys chosen: the same
+arithmetic Python does, so the page and the notebook agree.
 
 While you drag, the brush is sent to Python every 50 milliseconds, so the other plots
 follow it as it moves.

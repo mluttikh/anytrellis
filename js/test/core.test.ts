@@ -6,6 +6,7 @@ import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
+import { LinkGroup, chosenKeys, linkHighlight, readLink } from "../src/core/savedlink";
 import { FADED, boxMeetsPolygon, filled, highlighted, inPolygon, select, selectionColors, selects, simplify, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { SHAPES, dashPieces, shapeCorners } from "../src/core/channels";
@@ -1034,5 +1035,49 @@ describe("lasso and clicks", () => {
     expect([...two.masks[0]!]).toEqual([0, 1, 1, 0]);
     const all = select(scene, { x: null, y: null, at: [[1, 1, null]], near: [0.01, 0.01] });
     expect([...all.masks[0]!]).toEqual([1, 0, 1, 0]);
+  });
+});
+
+describe("saved links", () => {
+  const b64 = (values: number[]): string => btoa(String.fromCharCode(...new Uint8Array(new Uint32Array(values).buffer)));
+  // points: rows 0, 1, 2 (keys 10, 11, 12); a histogram: bar 0 of keys 10, 11; bar 1 of 12, 13
+  const points = readLink({ group: "g", size: 20, layers: [{ keys: b64([10, 11, 12]), ends: null }, null] });
+  const hist = readLink({ group: "g", size: 20, layers: [{ starts: b64([0, 2, 4]), members: b64([10, 11, 12, 13]), share: true }] });
+  it("reads the keys and chooses those of the marks selected", () => {
+    expect([...points[0]!.keys!]).toEqual([10, 11, 12]);
+    const chosen = chosenKeys(points, [new Uint8Array([1, 0, 1]), null], 20);
+    expect([...chosen].flatMap((v, k) => (v ? [k] : []))).toEqual([10, 12]);
+    const fromBars = chosenKeys(hist, [new Uint8Array([0, 1])], 20);
+    expect([...fromBars].flatMap((v, k) => (v ? [k] : []))).toEqual([12, 13]);
+  });
+  it("highlights marks with a key chosen, and a bar's share", () => {
+    const chosen = chosenKeys(points, [new Uint8Array([1, 0, 1]), null], 20);
+    const bars = linkHighlight(hist, chosen).layers[0] as { fraction: Float32Array };
+    expect([...bars.fraction]).toEqual([0.5, 0.5]);
+    const back = linkHighlight(points, chosenKeys(hist, [new Uint8Array([1, 0])], 20));
+    expect([...(back.layers[0] as { mask: Uint8Array }).mask]).toEqual([1, 1, 0]);
+    expect(back.layers[1]).toBeNull();
+  });
+  it("lets one plot lead: the others' brushes go, and a plot added late is highlighted", () => {
+    const log: string[] = [];
+    const view = (name: string, own: (Uint8Array | null)[] | null) => ({
+      own,
+      ownSelection() { return this.own; },
+      setSelection() { log.push(`${name} cleared`); this.own = null; },
+      setHighlight(h: unknown) { log.push(`${name} ${h ? "lit" : "plain"}`); },
+    });
+    const g = new LinkGroup(20);
+    const a = view("a", [new Uint8Array([1, 0, 0]), null]);
+    const b = view("b", null);
+    g.add(a, points);
+    g.add(b, hist);
+    g.changed(a);
+    expect(log).toEqual(["a plain", "b cleared", "b lit"]);
+    const c = view("c", null);
+    g.add(c, points);
+    expect(log.at(-1)).toBe("c lit");
+    log.length = 0;
+    g.clear();
+    expect(log).toEqual(["a cleared", "a plain", "b plain", "c plain"]);
   });
 });

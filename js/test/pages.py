@@ -1,7 +1,8 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
-channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs, lasso.mjs)."""
+channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs, lasso.mjs,
+savedlink.mjs)."""
 
 from __future__ import annotations
 
@@ -137,6 +138,7 @@ def main(out: Path) -> None:
         tooltip=["country"]).save_html(out / "segments.html")  # fmt: skip
     layouts(out)
     lassos(out)
+    saved_links(out)
 
 
 def lassos(out: Path) -> None:
@@ -155,6 +157,47 @@ def lassos(out: Path) -> None:
         t.select(**chosen)
         t.save_html(out / f"{name}.html")
         (out / f"{name}.selected.json").write_text(json.dumps(len(t.selected())))
+
+
+def saved_links(out: Path) -> None:
+    """Plots linked in a saved page (savedlink.mjs): cars' weight and mpg beside a histogram
+    of horsepower per origin, with a brush made in Python and the shares Python's link fills
+    the bars to (``link-saved.json``); and a link on="country" of two plots reading DuckDB
+    (``load="pages"``), with the marks the second lights (``link-db.json``)."""
+    import json
+
+    import duckdb
+    import numpy as np
+
+    from anytrellis import link
+    from anytrellis.linking import highlight_message
+
+    cars = load("cars")
+    scatter = Trellis(cars, title="Weight and mpg").points(x="weight", y="mpg")
+    counts = Trellis(cars, wrap="origin", cols=3, title="Horsepower").hist(x="horsepower")
+    both = link(scatter, counts)
+    scatter.select(x=(2000, 3000), y=(20, 40))
+    message, buffers = highlight_message(counts._highlight_entries(), counts._highlight)
+    shares = [None if e is None or "fraction" not in e
+              else np.frombuffer(buffers[e["fraction"]], dtype=np.float32).tolist()
+              for e in message["layers"]]  # fmt: skip
+    both.save_html(out / "link-saved.html", cols=2)
+    (out / "link-saved.json").write_text(json.dumps(shares))
+    gapminder = load("gapminder")
+    rel = duckdb.from_arrow(gapminder.to_arrow())
+    years = Trellis(rel, wrap="year", rows=1, cols=3, load="pages")
+    years.points(x="fertility", y="life_expect")
+    growth = Trellis(rel, wrap="region", rows=1, cols=3, load="pages")
+    growth.line(x="year", y="pop", color="country")
+    db = link(years, growth, on="country")
+    years._scene()
+    years.select(x=(6, 9), y=(20, 40), panel="1955")
+    memory = Trellis(gapminder, wrap="year", rows=1, cols=3).points(x="fertility", y="life_expect")
+    memory.select(x=(6, 9), y=(20, 40), panel="1955")
+    chosen = memory.selected()["country"].unique().to_list()
+    db.save_html(out / "link-db.html")
+    lit = gapminder.filter(pl.col("country").is_in(chosen) & pl.col("pop").is_not_null()).height
+    (out / "link-db.json").write_text(json.dumps({"countries": len(chosen), "rows": lit}))
 
 
 def layouts(out: Path) -> None:

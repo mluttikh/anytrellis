@@ -1,7 +1,9 @@
 // Standalone plots (Trellis.save_html / to_html): the data embedded in the page, so they
 // work without a kernel. Any number per page: <div class="anytrellis-embed"> holding a
-// <script type="application/json"> with {spec, buffers (id → base64), renderer}.
+// <script type="application/json"> with {spec, buffers (id → base64), renderer}. Plots
+// saved linked (Link.save_html) carry their marks' keys and are linked here (savedlink.ts).
 
+import { LinkGroup, type SavedLink, readLink } from "./core/savedlink";
 import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
 import type { Paging, RendererPreference, TrellisSpec } from "./core/types";
@@ -20,7 +22,12 @@ interface Payload {
   paging?: Paging | null;
   /** The Python that made the plot as saved (Trellis.code), or null: controls=False. */
   code?: string | null;
+  /** Its marks' keys in a link saved with it (Link.save_html), or null. */
+  link?: SavedLink | null;
 }
+
+/** The page's links, by group. */
+const groups = new Map<string, LinkGroup>();
 
 declare global {
   interface Window {
@@ -39,13 +46,40 @@ async function start(host: HTMLElement): Promise<void> {
     const forced = new URLSearchParams(location.search).get("renderer") as RendererPreference | null;
     const renderer = forced ?? payload.renderer ?? "auto";
     const code = payload.code ?? null;
-    const view = new TrellisView(host, { source: embeddedSource(payload.buffers), renderer, code: () => code });
+    const link = payload.link ?? null;
+    let group: LinkGroup | undefined;
+    if (link) {
+      group = groups.get(link.group);
+      if (!group) groups.set(link.group, (group = new LinkGroup(link.size)));
+    }
+    // a link's other plots follow a brush as it moves: once a frame
+    let pending = false;
+    const changed = (): void => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        group?.changed(view);
+      });
+    };
+    const view = new TrellisView(host, {
+      source: embeddedSource(payload.buffers),
+      renderer,
+      code: () => code,
+      onSelect: group ? changed : undefined,
+      onBrushing: group ? changed : undefined,
+      onClear: group ? () => group!.clear() : undefined,
+    });
     (window.anytrellisViews ??= []).push(view);
     if (payload.focus) view.setFocusName(payload.focus);
     if (payload.compare) view.setCompareName(payload.compare);
     if (payload.selection) view.setSelection(payload.selection);
     if (payload.paging) view.setPaging(payload.paging);
     await view.setSpec(payload.spec);
+    if (group && link) {
+      group.add(view, readLink(link));
+      if (payload.selection) group.changed(view); // a selection saved: it leads
+    }
     // two frames: the first draw happens on the next animation frame
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     host.dataset.state = "ready";
@@ -73,8 +107,13 @@ function startAll(): void {
     (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
-        observer.unobserve(e.target);
-        void start(e.target as HTMLElement);
+        // a link's plots start together: a selection saved in one shows in the others
+        const link = e.target.closest(".anytrellis-link");
+        const group = link ? [...link.querySelectorAll<HTMLElement>(".anytrellis-embed")] : [e.target as HTMLElement];
+        for (const h of group) {
+          observer.unobserve(h);
+          void start(h);
+        }
       }
     },
     { rootMargin: NEAR },

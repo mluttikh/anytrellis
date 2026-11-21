@@ -39,6 +39,11 @@ All notable changes to anytrellis. The format follows
 - Both work with `load="pages"`: the lasso is a condition of the query (a point inside the
   polygon by the even-odd rule), the same rows memory selects, and with `save_svg` /
   `save_png`, which draw the lasso's outline.
+- **Linked plots in a saved page**: `Link.save_html(path, cols=1)` (and `to_html`) writes
+  the plots of a link to one page that stays linked without a kernel. A brush, lasso or
+  click in one highlights the same rows in the others, a histogram's bars filled to the
+  share selected, as in a notebook; the selection made in Python is saved with it. Plots
+  reading DuckDB (`load="pages"`) are saved with every row and link `on=` their keys.
 
 ### Changed
 

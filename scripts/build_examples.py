@@ -924,8 +924,9 @@ lights up when any of its rows is selected. Dragging the brush updates the other
 moves (crossfiltering). A brush drawn in another plot of the link replaces the first one,
 and a click or Esc in any of them clears the selection.
 
-Python relays the selection, so the plots stay linked while the kernel runs. `selected()`
-on any of them gives the rows the selection picks.
+In the notebook Python relays the selection; `selected()` on any of them gives the rows
+the selection picks. `save_html` on the link writes the plots to one page that stays
+linked without a kernel.
 
 """
         + HOW_TO_USE

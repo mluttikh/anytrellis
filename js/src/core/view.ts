@@ -926,6 +926,18 @@ export class TrellisView {
     if (!same) this.setBrush(brush, false);
   }
 
+  /** The marks its own selection selects, per spec layer (null: a layer with none drawn),
+   * or null: nothing of its own selected (a saved page's link reads them). */
+  ownSelection(): (Uint8Array | null)[] | null {
+    this.settleSelection();
+    if (!this.brush || !this.selection || !this.scene || !this.spec) return null;
+    const out: (Uint8Array | null)[] = this.spec.layers.map(() => null);
+    this.scene.layers.forEach((layer, i) => {
+      out[layer.index] = this.selection!.masks[i];
+    });
+    return out;
+  }
+
   /** What a linked plot's selection highlights here, or none. */
   setHighlight(highlight: Highlight | null): void {
     this.highlight = highlight;

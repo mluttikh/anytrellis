@@ -5,14 +5,10 @@ show the same rows. Points and lines of those rows stay bright while the rest fa
 histogram's bars fill to the share of their count that is selected, and a box lights up
 when any of its rows is. This is often called crossfiltering.
 
-!!! note "Linking needs a running notebook"
-
-    Python passes the selection from plot to plot, so plots are linked while the kernel
-    runs: in JupyterLab, VS Code or marimo, not on this page or in a page from
-    `save_html`. The plots below are live on their own; the Python results were made when
-    the page was built. Run the
-    [linked plots notebook](https://github.com/mluttikh/anytrellis/blob/main/examples/jupyter/07_linked_plots.ipynb)
-    to try it.
+The plots on this page are linked: brush in one (**s**, then drag) and watch the others.
+In a notebook Python passes the selection from plot to plot; on a page saved with
+[`save_html`](#save-linked-plots-to-one-page), the page does. The Python results below were
+made when the page was built.
 
 ## Plots of one table
 
@@ -28,13 +24,12 @@ scatter.points(x="weight", y="mpg", color="origin", size=5, tooltip=["name"])
 power = Trellis(cars, wrap="origin", cols=3, panel_height=130, title="Horsepower")
 power.hist(x="horsepower", binwidth=10)
 
-link(scatter, power)
+both = link(scatter, power)
 scatter
-print(scatter._embed_html())  # markdown-exec: hide
-print(power._embed_html())  # markdown-exec: hide
+print(both._embed_html())  # markdown-exec: hide
 ```
 
-In a notebook, brush the heaviest cars in the scatter (**s**, then drag): the histograms
+Brush the heaviest cars in the scatter (**s**, then drag): the histograms
 fill to the share of each bin those cars make up. A selection made in Python reaches the
 other plots the same way, and `selected()` on any plot of the link gives the rows the
 link's selection picks:
@@ -61,9 +56,9 @@ years.points(x="fertility", y="life_expect", color="region", size=4, tooltip=["c
 lives = Trellis(gapminder, panel_height=220, title="Life expectancy")
 lives.line(x="year", y="life_expect", color="region", group="country", tooltip=["country"])
 
-link(years, lives, on="country")
+by_country = link(years, lives, on="country")
 years
-print(years._embed_html())  # markdown-exec: hide
+print(by_country._embed_html())  # markdown-exec: hide
 ```
 
 ```python exec="on" source="above" result="python" session="link"
@@ -79,6 +74,24 @@ A plot reading a database a page at a time (`load="pages"`, see
 database. Its selection is read as the keys chosen, and a selection elsewhere lights up
 the rows of its pages read; its histograms fill to the share of the keys chosen, counted
 by the database.
+
+## Save linked plots to one page
+
+`save_html` on the link writes its plots to one page, linked without Python: send it, put
+it on a site, open it years later. Each mark carries the keys of its rows, and the page
+highlights the marks whose keys a selection chooses, as Python would. `cols=2` puts the
+plots side by side; a selection made in Python (`select()`) is saved with it.
+
+```python
+both = link(scatter, power)
+scatter.select(x=(4000, 5200))
+both.save_html("cars.html", cols=2)
+html = both.to_html(title="Cars")  # the page as a string
+```
+
+Plots reading a database a page at a time are saved with every row, as `save_html` on one
+of them does, so the page links them by their `on=` keys too. The page holds the keys of
+every row once per plot: a few bytes a row beside the data it already has.
 
 ## Unlink
 
