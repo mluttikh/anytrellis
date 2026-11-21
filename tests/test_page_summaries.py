@@ -69,6 +69,10 @@ MARKS: list[tuple[str, dict[str, Any], dict[str, str]]] = [
     ("bars", {"x": "sensor", "y": "w", "stat": "sum"}, {"y": "sqrt"}),
     ("bars", {"y": "sensor", "x": "v", "stat": "median"}, {}),
     ("bars", {"x": "sensor", "y": "w", "stat": "mean"}, {"y": "symlog"}),
+    ("hexbin", {"x": "t", "y": "v", "bins": 12}, {}),
+    ("hexbin", {"x": "w", "y": "v", "stat": "percent"}, {"x": "log"}),
+    ("contour", {"x": "t", "y": "v", "color": "sensor", "levels": 4}, {}),
+    ("contour", {"x": "w", "y": "v", "gridsize": 40}, {"x": "log"}),
 ]  # fmt: skip
 
 TIMES: list[tuple[str, dict[str, Any], dict[str, str]]] = [
@@ -77,6 +81,8 @@ TIMES: list[tuple[str, dict[str, Any], dict[str, str]]] = [
     ("density", {"x": "when"}, {}),
     ("smooth", {"x": "when", "y": "v", "method": "linear"}, {}),
     ("smooth", {"x": "when", "y": "v"}, {}),
+    ("hexbin", {"x": "when", "y": "v", "bins": 10}, {}),
+    ("contour", {"x": "when", "y": "v"}, {}),
 ]
 
 
@@ -228,6 +234,8 @@ BRUSHES: list[tuple[str, dict[str, Any], dict[str, Any], dict[str, str]]] = [
     ("errorbar", {"x": "sensor", "y": "v"}, {"x": ["a"]}, {}),
     ("bars", {"x": "sensor", "stat": "count"}, {"x": ["b"]}, {}),
     ("bars", {"y": "sensor", "x": "v", "stat": "mean"}, {"y": ["c"]}, {}),
+    ("hexbin", {"x": "t", "y": "v", "bins": 12}, {"x": (2, 4), "y": (-1, 1)}, {}),
+    ("hexbin", {"x": "w", "y": "v"}, {"x": (1, 3)}, {"x": "log"}),
 ]
 
 

@@ -43,7 +43,7 @@ import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
 import { type Brush, type Highlight, type LegendChoice, type Selection, chooses, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
 
 export type { Highlight } from "./selection";
-import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
+import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, layerMap, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
 import { numberFormat } from "./format";
 import { formatHeight, formatValue } from "./ticks";
 import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type TrellisSpec, isMark } from "./types";
@@ -1583,7 +1583,8 @@ export class TrellisView {
           if (v.panel === ref) continue;
           const { map, rect } = v;
           const dashed = layer.dash ? this.dashSet(layer, set, ref, start, count, map) : null;
-          draws.push({ set: dashed ?? set, start: dashed ? 0 : start, count: dashed ? dashed.count : count, clip: rect, sx: map.sx, ox: map.ox + scene.baseX[ref] * map.sx, sy: map.sy, oy: map.oy + scene.baseY[ref] * map.sy, kind: layer.kind, halfWidth: layer.halfWidth, opacity: layer.spec.opacity });
+          const at = layerMap(scene, layer.spec, ref, map, rect);
+          draws.push({ set: dashed ?? set, start: dashed ? 0 : start, count: dashed ? dashed.count : count, clip: rect, ...at, kind: layer.kind, halfWidth: layer.halfWidth, opacity: layer.spec.opacity });
         }
       }
     }
@@ -1604,10 +1605,7 @@ export class TrellisView {
           start: dashed ? 0 : start,
           count: dashed ? dashed.count : count,
           clip: rect,
-          sx: map.sx,
-          ox: map.ox + scene.baseX[p] * map.sx,
-          sy: map.sy,
-          oy: map.oy + scene.baseY[p] * map.sy,
+          ...layerMap(scene, layer.spec, p, map, rect),
           kind: layer.kind,
           halfWidth: layer.halfWidth,
           opacity: layer.spec.opacity,
@@ -2363,7 +2361,7 @@ export class TrellisView {
    * (`group=` within a colour: which one would be ambiguous). */
   private seriesAt(p: number, v: PanelView, ux: number, py: number, hit: Hit | null): Across | null {
     const spec = this.spec!;
-    const layers = this.scene!.layers.filter((l) => l.spec.type === "line" && !l.spec.context && l.codes && l.spec.color.legend !== null && l.spec.color.legend !== undefined);
+    const layers = this.scene!.layers.filter((l) => l.spec.type === "line" && !l.spec.context && !l.spec.pin && l.codes && l.spec.color.legend !== null && l.spec.color.legend !== undefined);
     if (!layers.length || (hit && !layers.includes(hit.layer))) return null;
     let at = NaN;
     let gap = Infinity;

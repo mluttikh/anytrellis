@@ -6,6 +6,19 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `hexbin(x, y, bins=30, stat="count"|"percent")`: the rows counted in hexagons, coloured
+  by their counts, the same hexagons in every panel. Hover one for its count; a brush
+  selects its rows.
+- `contour(x, y, color, levels=6, bw_adjust=1, gridsize=100)`: the lines of a
+  two-dimensional density, per panel and colour, at levels shared by the panels.
+- `rug(x=, y=, length=8)`: a tick at the panel's edge for each row's value, that stays
+  at the edge as the panel zooms. A brush selects by its values alone.
+- `segments(x, y, x2=, y2=)`: a line from (x, y) to (x2, y2) for each row.
+- All four work with `load="pages"`: the database counts the hexagons and the contours'
+  grid, and a page's rows draw the rugs and segments.
+
 ## [0.7.0] - 2026-11-21
 
 ### Added

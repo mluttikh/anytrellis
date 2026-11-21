@@ -85,6 +85,7 @@ export function select(scene: Scene, brush: Brush): Selection {
     const mask = new Uint8Array(n);
     const rect = layer.kind === KIND_RECT;
     const band = layer.spec.type === "band" ? layer.base : null;
+    const pin = layer.spec.pin; // a rug: its data axis only
     const p = brush.panel ?? null;
     const from = p === null ? 0 : (layer.starts[p] ?? 0);
     // legend entries chosen: only the marks of their colours, or (a number colour's range)
@@ -101,7 +102,9 @@ export function select(scene: Scene, brush: Brush): Selection {
       const bx = c[i * 4 + 2];
       const by = c[i * 4 + 3];
       let hit: boolean;
-      if (band) {
+      if (pin) {
+        hit = pin === "y" ? ax >= x0 && ax <= x1 : ay >= y0 && ay <= y1;
+      } else if (band) {
         // a piece of band: overlapping it, from its lower line to its upper
         const lo = Math.min(ay, by, band[i * 2], band[i * 2 + 1]);
         const hi = Math.max(ay, by, band[i * 2], band[i * 2 + 1]);

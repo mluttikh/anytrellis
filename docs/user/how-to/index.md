@@ -17,9 +17,10 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 **Layers**
 
 - [Draw lines, points and bars](marks.md)
-- [Draw areas, bands, rects and text](more-marks.md): ranges, heatmaps, labels, reference
-  lines.
-- [Show distributions](distributions.md): histograms, box plots, violins, densities and error bars.
+- [Draw areas, bands, rects, segments and text](more-marks.md): ranges, heatmaps, segments, labels,
+  reference lines.
+- [Show distributions](distributions.md): histograms, box plots, violins, densities, error
+  bars, rugs, hexagonal bins and contours.
 - [Plot every pair of columns](pairs.md): a scatterplot matrix, brushed across its panels.
 - [Fit a smooth line](smooth.md): loess or least squares, with a confidence band.
 - [Colours, legends and order](colours.md)

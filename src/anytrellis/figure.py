@@ -1296,11 +1296,16 @@ def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray
             continue
         # the spec's coordinates less the panel's base, in float32, as the GPU gets them
         c = coords[start:end].astype(np.float64)
-        bx_, by_ = float(base_x[p]), float(base_y[p])
+        pin = layer.spec.get("pin")
+        # a pinned axis (a rug's): pixels from the panel's left or bottom edge (scene.ts)
+        bx_ = 0.0 if pin == "x" else float(base_x[p])
+        by_ = 0.0 if pin == "y" else float(base_y[p])
         c32 = (c - [bx_, by_, bx_, by_]).astype(np.float32).astype(np.float64)
-        ox, oy = v.ox + bx_ * v.sx, v.oy + by_ * v.sy
-        ax, ay = ox + c32[:, 0] * v.sx, oy + c32[:, 1] * v.sy
-        bx, by = ox + c32[:, 2] * v.sx, oy + c32[:, 3] * v.sy
+        sx, sy = (1.0 if pin == "x" else v.sx), (-1.0 if pin == "y" else v.sy)
+        ox = v.rect.x if pin == "x" else v.ox + bx_ * v.sx
+        oy = v.rect.y + v.rect.h if pin == "y" else v.oy + by_ * v.sy
+        ax, ay = ox + c32[:, 0] * sx, oy + c32[:, 1] * sy
+        bx, by = ox + c32[:, 2] * sx, oy + c32[:, 3] * sy
         rgba = colors[start:end]
         keep = np.isfinite(ax + ay + bx + by) & (rgba[:, 3] > 0)
         r = v.rect

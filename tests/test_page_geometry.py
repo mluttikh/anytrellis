@@ -28,6 +28,8 @@ MARKS: list[tuple[str, dict[str, Any]]] = [
     ("line", {"x": "when", "y": "v", "step": "mid"}),
     ("text", {"x": "t", "y": "v", "text": "label"}),
     ("line", {"x": "t", "y": "v", "group": "sensor", "color": "w"}),
+    ("segments", {"x": "t", "y": "v", "x2": "w", "color": "sensor"}),
+    ("rug", {"x": "t", "y": "v", "color": "sensor"}),
 ]
 
 
@@ -37,8 +39,8 @@ def drawn(p: Trellis) -> list[dict[int, list[tuple[float, ...]]]]:
     for layer, table, geom in p._geometry:
         if geom is None or (table.n == 0 and geom.count == 0):
             continue
-        assert layer.x is not None
-        if layer.step is None:  # each instance's rows: its own (a step's risers: between)
+        # each instance's rows: its own (a step's risers: between; a segment's end: x2)
+        if layer.x is not None and layer.step is None and layer.mark != "segment":
             x = axis_values(table.column(layer.x), None)
             assert np.allclose(x[geom.rows], geom.x0, equal_nan=True)
             if geom.rows_end is not None:

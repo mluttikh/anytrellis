@@ -29,7 +29,12 @@ from anytrellis.query import _finite, always, among_labels, within
 from anytrellis.stats import (
     COUNT,
     ECDF_BINS,
+    HEX_SHAPE,
+    Binned,
+    Bins2,
     Fit,
+    HexCells,
+    HexGrid,
     Keys,
     Labels,
     Part,
@@ -43,10 +48,12 @@ from anytrellis.stats import (
     barstat_parts,
     bin_edges,
     box_parts,
+    contour_parts,
     density_grids,
     density_parts,
     ecdf_parts,
     errorbar_parts,
+    hexbin_parts,
     hist_parts,
     linear_fit,
     loess_binned,
@@ -114,6 +121,10 @@ def parts(layer: Layer, whole: Table, grid: Grid,
             return ask.barstat()
         if mark == "ecdf":
             return ask.ecdf()
+        if mark == "hexbin":
+            return ask.hexbin()
+        if mark == "contour":
+            return ask.contour()
     except _Unable:
         return None
     return None
@@ -173,6 +184,70 @@ class _Ask:
                              minlength=len(uniq)).astype(np.int64)  # fmt: skip
         return hist_parts(layer, col, color, edges, uniq, counts, len(self.grid.panels),
                           no_members(len(uniq)))  # fmt: skip
+
+    def hexbin(self) -> list[Part]:
+        layer, whole = self.layer, self.whole
+        assert layer.x is not None
+        assert layer.y is not None
+        x, y, args = layer.x, layer.y, layer.stat_args
+        xs, ys = self.scales.get("x", ""), self.scales.get("y", "")
+        cols = []
+        for name, scale in ((x, xs), (y, ys)):
+            kind = whole.kind(name)
+            if kind == "category":
+                raise ValueError(f"hexbin(): x and y must be numbers or times; {name!r} holds "
+                                 "categories")  # fmt: skip
+            cols.append(Column(name, kind, self._span(name, scale), scale=scale))
+        xc, yc = cols
+        grid = HexGrid.over(xc.values, yc.values, args["bins"], args.get("shape") or HEX_SHAPE)
+        code = grid.code_expr(self._value(x, xs), self._value(y, ys))
+        ok = self._ok(x, xs) & self._ok(y, ys)
+        groups = self._by(None)
+        found = self._read(lambda q: q.filter(ok).with_columns(code.alias(BIN))
+                           .group_by(*groups, BIN).agg(_len()))  # fmt: skip
+        p = self._panels(found)
+        cells = found.column(BIN).values.astype(np.int64)
+        keep = p >= 0
+        m = int(cells.max(initial=0)) + 1
+        key = (p * m + cells)[keep]
+        uniq, inverse = np.unique(key, return_inverse=True)
+        counts = np.bincount(inverse.ravel(), weights=found.column(N).values[keep],
+                             minlength=len(uniq)).astype(np.int64)  # fmt: skip
+        return hexbin_parts(layer, xc, yc, grid, uniq // m, uniq % m, counts,
+                            len(self.grid.panels), no_members(len(uniq)))  # fmt: skip
+
+    def contour(self) -> list[Part]:
+        layer, whole = self.layer, self.whole
+        assert layer.x is not None
+        assert layer.y is not None
+        x, y = layer.x, layer.y
+        xs, ys = self.scales.get("x", ""), self.scales.get("y", "")
+        cols = []
+        for name, scale in ((x, xs), (y, ys)):
+            kind = whole.kind(name)
+            if kind == "category":
+                raise ValueError(f"contour(): x and y must be numbers or times; {name!r} "
+                                 "holds categories")  # fmt: skip
+            cols.append(Column(name, kind, self._span(name, scale), scale=scale))
+        xc, yc = cols
+        color = self._color()
+        groups = self._by(color)
+        bins = Bins2.over(xc.values, yc.values, layer.stat_args["gridsize"])
+        last = float(bins.size - 1)
+        bx = ((self._value(x, xs) - bins.x0) / bins.wx).floor().clip(0, last)
+        by = ((self._value(y, ys) - bins.y0) / bins.wy).floor().clip(0, last)
+        ok = self._ok(x, xs) & self._ok(y, ys)
+        found = self._read(lambda q: q.filter(ok).with_columns(bx.alias(X), by.alias(Y))
+                           .group_by(*groups, X, Y).agg(_len()))  # fmt: skip
+        p = self._panels(found)
+        keep = p >= 0
+        labels = np.array(color.levels, dtype=object) if color is not None and color.levels \
+            else np.array([""], dtype=object)  # fmt: skip
+        binned = Binned(p[keep], self._color_codes(color, found)[keep],
+                        found.column(X).values[keep].astype(np.int64),
+                        found.column(Y).values[keep].astype(np.int64),
+                        found.column(N).values[keep].astype(np.float64))  # fmt: skip
+        return contour_parts(layer, xc, yc, color, labels, bins, binned)
 
     def box(self) -> list[Part]:
         import narwhals as nw
@@ -586,23 +661,16 @@ class _Ask:
         return forward(scale, np.array(found)) if scale else np.array(found)
 
     def _value(self, name: str, scale: str) -> Any:
-        """A number or time column as numbers on its axis: a transformed axis's units,
-        times in milliseconds of wall-clock time."""
-        import narwhals as nw
+        """A number or time column as numbers on its axis (``_value_expr``)."""
+        return _value_expr(self.whole, name, scale, self.layer.mark)
 
-        c = nw.col(name)
-        if self.whole.kind(name) == "time":
-            dtype = self.whole.dtype(name)
-            if isinstance(dtype, nw.Date):
-                c = c.cast(nw.Datetime("us"))
-            elif getattr(dtype, "time_zone", None) is not None:
-                c = c.dt.replace_time_zone(None)
-            epoch = dt.datetime(1970, 1, 1)  # noqa: DTZ001 - wall-clock time
-            return (c - nw.lit(epoch)).dt.total_milliseconds().cast(nw.Float64)
-        if self.whole.kind(name) != "number":
-            raise ValueError(f"{self.layer.mark}(): {name!r} holds categories")
-        value = c.cast(nw.Float64)
-        return expr(scale, value) if scale else value
+    def _test_value(self, test: Range) -> Any:
+        """The value a test of a summary row tests, of each row: a column's, or its
+        hexagon's code."""
+        if isinstance(test, HexCells):
+            assert test.grid is not None
+            return test.grid.code_expr(self._value(*test.x), self._value(*test.y))
+        return self._value(test.name, test.scale)
 
     def _ok(self, name: str, scale: str) -> Any:
         """Rows with a value drawn: finite, and on a transformed axis's scale."""
@@ -716,6 +784,10 @@ def selected(whole: Table, wheres: list[Where], panels: Callable[[list[int]], An
             if last is None:
                 terms.setdefault(head, [])
                 continue
+            if isinstance(last, HexCells):  # hexagons: their codes, tested at once
+                head = (*head, ("hex", last.grid, last.x, last.y))
+                terms.setdefault(head, []).append((float(last.lo[r]), float(last.lo[r]), False))
+                continue
             head = (*head, ("range", last.name, last.kind, last.scale))
             is_open = bool(last.open[r]) if last.open is not None else False
             terms.setdefault(head, []).append((float(last.lo[r]), float(last.hi[r]), is_open))
@@ -727,10 +799,14 @@ def selected(whole: Table, wheres: list[Where], panels: Callable[[list[int]], An
             cond = _and(cond, _drawn(whole, name, scale))
         if color is not None:
             cond = _and(cond, among_labels(whole, color[0], [color[1]]))
-        joined = keys.pop() if keys and keys[-1][0] == "range" else None
+        joined = keys.pop() if keys and keys[-1][0] in ("range", "hex") else None
         for key in keys:
             cond = _and(cond, _test(whole, key))
-        if joined is not None:
+        if joined is not None and joined[0] == "hex":
+            _, grid, (xn, xs), (yn, ys) = joined
+            code = grid.code_expr(_value_expr(whole, xn, xs), _value_expr(whole, yn, ys))
+            cond = _and(cond, code.is_in(sorted({float(lo) for lo, _, _ in ranges})))
+        elif joined is not None:
             _, name, kind, scale = joined
             either = None
             for lo, hi, is_open in _joined(ranges):
@@ -819,7 +895,7 @@ def counts(where: Where, rows: Table, panel_of: np.ndarray) -> np.ndarray:
     tests, span = _span_of(where)
     value = None if span is None else _axis_values(rows, span.name, span.scale)
     return _counted(where, tests, span, panel_of, ok, lambda name: _labels(rows, name),
-                    lambda _, t: _axis_values(rows, t.name, t.scale), value)  # fmt: skip
+                    lambda _, t: _test_values(rows, t), value)  # fmt: skip
 
 
 def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray | None:
@@ -852,7 +928,7 @@ def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray
             if isinstance(t, Labels):
                 names.append(t.name)
                 continue
-            v = ask._value(t.name, t.scale)
+            v = ask._test_value(t)
             alias = f"{VALUE}{i}"
             values[i] = alias
             extra.append(v.alias(alias))
@@ -1001,6 +1077,33 @@ def _counted(where: Where, tests: list[Range | Labels], span: Range | None,
     if weights is None:
         return np.bincount(hit[keep], minlength=n)
     return np.bincount(hit[keep], weights=weights[keep], minlength=n).round().astype(np.int64)
+
+
+def _value_expr(whole: Table, name: str, scale: str, mark: str = "") -> Any:
+    """A number or time column as numbers on its axis: a transformed axis's units, times
+    in milliseconds of wall-clock time."""
+    import narwhals as nw
+
+    c = nw.col(name)
+    if whole.kind(name) == "time":
+        dtype = whole.dtype(name)
+        if isinstance(dtype, nw.Date):
+            c = c.cast(nw.Datetime("us"))
+        elif getattr(dtype, "time_zone", None) is not None:
+            c = c.dt.replace_time_zone(None)
+        epoch = dt.datetime(1970, 1, 1)  # noqa: DTZ001 - wall-clock time
+        return (c - nw.lit(epoch)).dt.total_milliseconds().cast(nw.Float64)
+    if whole.kind(name) != "number":
+        raise ValueError(f"{mark}(): {name!r} holds categories")
+    value = c.cast(nw.Float64)
+    return expr(scale, value) if scale else value
+
+
+def _test_values(rows: Table, test: Range) -> np.ndarray:
+    """``_Ask._test_value`` of rows read."""
+    if isinstance(test, HexCells):
+        return test.codes_of(_axis_values(rows, *test.x), _axis_values(rows, *test.y))
+    return _axis_values(rows, test.name, test.scale)
 
 
 def _axis_values(rows: Table, name: str, scale: str) -> np.ndarray:

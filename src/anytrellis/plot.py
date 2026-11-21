@@ -55,8 +55,10 @@ from anytrellis.layers import (
     expand,
     jittered,
     line_geometry,
+    pinned,
     point_geometry,
     rect_geometry,
+    segment_geometry,
     series_codes,
     step_of,
 )
@@ -77,6 +79,7 @@ from anytrellis.pages import (
 )
 from anytrellis.pages import order as panel_order
 from anytrellis.query import (
+    always,
     among_labels,
     combos,
     distinct,
@@ -117,7 +120,7 @@ STRIPS = ("nested", "joined")
 EMPTY = ("draw", "blank")
 MARGINS = (False, True, "row", "col")
 LOADS = ("all", "pages")
-PAGE_MARKS = ("points", "line", "text")
+PAGE_MARKS = ("points", "line", "text", "segment", "rug")
 """The marks ``load="pages"`` draws from the plot's data (a page's rows each)."""
 _STATIC = Path(__file__).parent / "static"
 
@@ -852,6 +855,98 @@ class Trellis:
         return self._add(layer)
 
     @recorded
+    def segments(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        x2: str | None = None,
+        y2: str | None = None,
+        color: str | None = None,
+        width: float = 1.5,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        tooltip: Sequence[str] = (),
+        name: str | None = None,
+    ) -> Self:
+        """A line segment a row, from (x, y) to (x2, y2): ranges, changes from one value to
+        another (a dumbbell), or a lollipop's stick, apart from any other row.
+
+        ```python
+        Trellis(cars, wrap="origin").segments(x="name", y="mpg_1970", y2="mpg_1982")
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The start's x column.
+            y: The start's y column.
+            x2: The end's x column (default: ``x``, an upright segment).
+            y2: The end's y column (default: ``y``, a level one).
+            color: A colour column or one colour.
+            width: Line width in CSS pixels.
+            opacity: 0 to 1.
+            facet: As for ``line``.
+            tooltip: Columns shown on hover, besides x and y.
+            name: The layer's name.
+        """
+        if x2 is None and y2 is None:
+            raise ValueError("segments(): give x2, y2 or both (where each segment ends)")
+        layer = Layer("segment", name or self._name("segment"), data, x, y, color, (), facet,
+                      width=width, opacity=opacity, tooltip=list(tooltip), x2=x2,
+                      y2=y2)  # fmt: skip
+        return self._add(layer)
+
+    @recorded
+    def rug(
+        self,
+        data: Any = None,
+        *,
+        x: str | None = None,
+        y: str | None = None,
+        color: str | None = None,
+        length: float = 8.0,
+        width: float = 1.0,
+        opacity: float = 0.5,
+        facet: FacetMode = "auto",
+        name: str | None = None,
+    ) -> Self:
+        """A rug: a short tick at the panel's bottom edge for each row's x (or at its left
+        edge for each y), however the panel is zoomed. It shows each value of a margin,
+        beside a summary of them (a density, a histogram, a smooth fit).
+
+        ```python
+        Trellis(penguins, wrap="species").density(x="body_mass_g").rug(x="body_mass_g")
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The column of values along the bottom edge.
+            y: The column of values along the left edge (both: a rug at each).
+            color: A colour column or one colour.
+            length: The ticks' length in CSS pixels.
+            width: Their width in CSS pixels.
+            opacity: 0 to 1: lighter where few, darker where many overlap.
+            facet: As for ``line``.
+            name: The layer's name (both: the y rug's ends in ``"_y"``).
+
+        A brush selects the rows whose values it covers along the rug's axis.
+        """
+        if x is None and y is None:
+            raise ValueError("rug(): give x=, y= or both (the columns of values)")
+        if not length > 0:
+            raise ValueError("length must be positive")
+        made = name or self._name("rug")
+        for axis, column in (("x", x), ("y", y)):
+            if column is None:
+                continue
+            called = made if axis == "x" or x is None else f"{made}_y"
+            self._add(Layer("rug", called, data, column if axis == "x" else None,
+                            column if axis == "y" else None, color, (), facet, width=width,
+                            size=length, opacity=opacity))  # fmt: skip
+        return self
+
+    @recorded
     def text(
         self,
         data: Any = None,
@@ -950,6 +1045,104 @@ class Trellis:
         args = {"bins": bins, "binwidth": binwidth, "stat": stat, "width": width}
         return self._add(Layer("hist", name or self._name("hist"), data, x, None, color, (),
                                facet, opacity=opacity, position=position,
+                               stat_args=args))  # fmt: skip
+
+    @recorded
+    def hexbin(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        bins: int | tuple[int, int] = 30,
+        stat: str = "count",
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        name: str | None = None,
+    ) -> Self:
+        """Hexagonal bins in each panel: the rows counted in hexagons that every panel
+        shares, each coloured by its count. Where points overlap into a blot, it shows
+        where they are many and where few.
+
+        ```python
+        Trellis(diamonds, wrap="cut").hexbin(x="carat", y="price")
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column (numbers or times).
+            y: The y column (numbers or times).
+            bins: Hexagons across x's range; up y, as many as make them regular in a panel
+                of the plot's shape (``aspect=``; by default 0.62 high a unit wide). Or
+                ``(nx, ny)``: across x and up y.
+            stat: ``"count"`` (rows) or ``"percent"`` (of the panel's rows), the colour.
+            opacity: 0 to 1.
+            facet: As for ``line``; ``"exclude"``: the other panels' hexagons, in grey.
+            name: The layer's name.
+
+        The colours follow ``colormap()`` (``scale="quantile"`` shows a long tail of
+        counts). ``load="pages"``: the database counts the hexagons.
+        """
+        if stat not in ("count", "percent"):
+            raise ValueError(f"stat must be 'count' or 'percent', got {stat!r}")
+        nx, ny = (bins, 1) if isinstance(bins, int) else bins
+        if isinstance(nx, bool) or not isinstance(nx, int) or not isinstance(ny, int) or \
+                nx < 1 or ny < 1:  # fmt: skip
+            raise ValueError(f"bins must be a whole number, or (nx, ny), at least 1; got {bins!r}")
+        args = {"bins": bins if isinstance(bins, int) else (nx, ny), "stat": stat}
+        return self._add(Layer("hexbin", name or self._name("hexbin"), data, x, y, None, (),
+                               facet, opacity=opacity, stat_args=args))  # fmt: skip
+
+    @recorded
+    def contour(
+        self,
+        data: Any = None,
+        *,
+        x: str,
+        y: str,
+        color: str | None = None,
+        levels: int = 6,
+        bw_adjust: float = 1.0,
+        gridsize: int = 100,
+        width: float = 1.0,
+        opacity: float = 1.0,
+        facet: FacetMode = "auto",
+        name: str | None = None,
+    ) -> Self:
+        """Density contours in each panel (and of each colour): lines where a Gaussian
+        kernel density estimate of x and y crosses levels that every panel shares, so
+        the panels compare. Where points overlap, it shows the shape of where they are.
+
+        ```python
+        Trellis(penguins, wrap="island").contour(x="bill_length_mm", y="bill_depth_mm",
+                                                 color="species")
+        ```
+
+        Args:
+            data: The layer's table (default: the plot's).
+            x: The x column (numbers or times).
+            y: The y column (numbers or times).
+            color: A category column (contours of each) or one colour.
+            levels: How many levels: evenly spaced up to the highest density of any panel.
+            bw_adjust: The bandwidth, as a multiple of Scott's rule's (each way).
+            gridsize: Bins each way the rows are counted in before smoothing.
+            width: Line width in CSS pixels.
+            opacity: 0 to 1.
+            facet: As for ``line``; ``"exclude"``: the other panels' contours, in grey.
+            name: The layer's name.
+
+        Each group's density covers a volume of 1, so a group of few rows has contours as
+        high as one of many. ``load="pages"``: the database counts the rows in the bins.
+        """
+        if not bw_adjust > 0:
+            raise ValueError("bw_adjust must be positive")
+        if isinstance(levels, bool) or not isinstance(levels, int) or levels < 1:
+            raise ValueError(f"levels must be a whole number, at least 1; got {levels!r}")
+        if isinstance(gridsize, bool) or not isinstance(gridsize, int) or gridsize < 4:
+            raise ValueError(f"gridsize must be a whole number, at least 4; got {gridsize!r}")
+        args = {"levels": levels, "bw_adjust": bw_adjust, "gridsize": gridsize}
+        return self._add(Layer("contour", name or self._name("contour"), data, x, y, color, (),
+                               facet, width=width, opacity=opacity,
                                stat_args=args))  # fmt: skip
 
     @recorded
@@ -2638,28 +2831,41 @@ class Trellis:
 
         whole = self._data
         assert whole is not None
-        assert user.x is not None
-        assert user.y is not None
+        pin = pinned(user)  # a rug: its values' axis alone
+        # the ends of each row's mark: a segment's two, else one (a rug's: of one axis)
+        ends = [(None if pin == "x" else user.x, None if pin == "y" else user.y)]
+        if user.mark == "segment":
+            ends.append((user.x2 or user.x, user.y2 or user.y))
+        named = [n for end in ends for n in end if n is not None]
         brush = self._current_selection()
         if brush is None:
-            return nw.to_native(whole.lazy.filter(never(user.x)))
-        where = drawn(whole, user.x) & drawn(whole, user.y)
-        for axis in ("x", "y"):
-            name = getattr(user, axis)
-            kind, levels, _ = self._axes[axis]
-            scale = kind if kind in TRANSFORMS else ""
-            domain = on_scale_expr(scale, nw.col(name)) if scale else None
-            if domain is not None:  # values off the scale (0 on a log axis): not drawn
-                where = where & domain
-            r = self._absolute(axis, brush.get(axis))
-            if r is None:
-                continue
-            lo, hi = sorted(r)
-            if kind == "band":
-                chosen = [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
-                where = where & among_labels(whole, name, chosen)
-            else:
-                where = where & within(whole, name, lo, hi, kind, scale=scale)
+            return nw.to_native(whole.lazy.filter(never(named[0])))
+        where = drawn(whole, named[0])
+        for name in named:
+            where = where & drawn(whole, name)
+        inside = None  # any end in the brush (a segment's start or its end)
+        for end in ends:
+            here = always(named[0])
+            for axis, name in zip(("x", "y"), end, strict=True):
+                if name is None:
+                    continue
+                kind, levels, _ = self._axes[axis]
+                scale = kind if kind in TRANSFORMS else ""
+                domain = on_scale_expr(scale, nw.col(name)) if scale else None
+                if domain is not None:  # values off the scale (0 on a log axis): not drawn
+                    where = where & domain
+                r = self._absolute(axis, brush.get(axis))
+                if r is None:
+                    continue
+                lo, hi = sorted(r)
+                if kind == "band":
+                    chosen = [lv for i, lv in enumerate(levels or []) if lo <= i <= hi]
+                    here = here & among_labels(whole, name, chosen)
+                else:
+                    here = here & within(whole, name, lo, hi, kind, scale=scale)
+            inside = here if inside is None else inside | here
+        assert inside is not None
+        where = where & inside
         if brush.get("panel") is not None:
             where = where & self._panels_filter(self._grid, [int(brush["panel"])])
         legend = self._legend_out(brush)
@@ -2667,7 +2873,7 @@ class Trellis:
             name, chosen = legend
             want = "number" if isinstance(chosen, tuple) else "category"
             if user.color != name or name not in whole or whole.kind(name) != want:
-                where = never(user.x)
+                where = never(named[0])
             elif isinstance(chosen, tuple):
                 where = where & within(whole, name, chosen[0], chosen[1], "number")
             else:
@@ -2830,7 +3036,9 @@ class Trellis:
         legend = self._legend_out(brush)
 
         def hit(lay: Layer, tb: Table, gm: Geometry) -> np.ndarray:
-            mask = row_mask(lay.mark, gm, tb.n, x, y, panel)
+            pin = pinned(lay)  # a rug: its values' axis only
+            mask = row_mask(lay.mark, gm, tb.n, None if pin == "x" else x,
+                            None if pin == "y" else y, panel)  # fmt: skip
             if legend is not None:  # only the chosen colours (another column's: none)
                 name, chosen = legend
                 want = "number" if isinstance(chosen, tuple) else "category"
@@ -3195,9 +3403,9 @@ class Trellis:
                 continue
             if layer.mark not in (*PAGE_MARKS, *SUMMARIES):
                 raise ValueError(
-                    f"load='pages' draws lines, points, text and summaries (hist, box, ...) "
-                    f"from the plot's data; {layer.mark}() needs more rows than a page's: give "
-                    "it its own data, or use load='all'"
+                    "load='pages' draws lines, points, segments, rugs, text and summaries "
+                    f"(hist, box, ...) from the plot's data; {layer.mark}() needs more rows "
+                    "than a page's: give it its own data, or use load='all'"
                 )
             if layer.facet in ("all", "exclude"):
                 raise ValueError(f"load='pages': {layer.name} draws every panel's rows "
@@ -3387,7 +3595,8 @@ class Trellis:
     def _page_summary(self, layer: Layer, grid: Grid, scales: dict[str, str]) -> list[Part]:
         """``load="pages"``: a summary layer's parts, every panel's: from the database, or
         (a summary it doesn't compute) from every row of the columns it draws, read once."""
-        key = (tuple(p.keys for p in grid.panels), tuple(sorted(scales.items())))
+        key = (tuple(p.keys for p in grid.panels), tuple(sorted(scales.items())),
+               layer.stat_args.get("shape"))  # fmt: skip
         made = self._queried.get(id(layer))
         if made is not None and made[0] == key:
             return made[1]
@@ -3428,9 +3637,9 @@ class Trellis:
         for layer in self._layers:
             if not self._on_page(layer) or layer.mark in SUMMARIES:
                 continue  # (a summary's: of its parts, every panel's)
-            x, y = layer.x, layer.y
-            assert x is not None
-            assert y is not None
+            pin = pinned(layer)  # (a rug: its values' axis only)
+            x = () if pin == "x" or layer.x is None else (layer.x, *_ends(layer, "x"))
+            y = () if pin == "y" or layer.y is None else (layer.y, *_ends(layer, "y"))
             key = ("extents", keys, x, y, tuple(sorted(scales.items())))
             found = whole.memo(key, lambda x=x, y=y: panel_extents(whole, keys, x, y, scales))
             if not found.names:
@@ -3539,7 +3748,10 @@ class Trellis:
         # every layer as the plain layers it draws: a summary (hist, box, ...) as its parts
         drawn: list[_Drawn] = []
         scales = {axis: s for axis, s in self._scales.items() if s in TRANSFORMS}
+        shape = self._aspect_given if isinstance(self._aspect_given, int | float) else None
         for layer in self._layers:
+            if layer.mark == "hexbin":  # hexagons regular in panels of the plot's shape
+                layer.stat_args["shape"] = shape
             if layer.mark == "rule":
                 table = (self._data or Table({})) if layer.data is None else \
                     _scaled(layer, self._tables[id(layer)], scales)  # fmt: skip
@@ -3640,10 +3852,13 @@ class Trellis:
                 value = "y" if d.user.mark in FROM_ZERO else None
             if value is not None and scales.get(value) in ("sqrt", "symlog"):
                 geom = _transformed(geom, value, scales[value])
-            extents["x"].add(geom.panel, geom.x0)
-            extents["x"].add(geom.panel, geom.x1)
-            extents["y"].add(geom.panel, geom.y0)
-            extents["y"].add(geom.panel, geom.y1)
+            pin = pinned(layer)  # a rug's pixels from the edge: not the axis's
+            if pin != "x":
+                extents["x"].add(geom.panel, geom.x0)
+                extents["x"].add(geom.panel, geom.x1)
+            if pin != "y":
+                extents["y"].add(geom.panel, geom.y0)
+                extents["y"].add(geom.panel, geom.y1)
             if geom.base0 is not None and geom.base1 is not None:
                 extents["y"].add(geom.panel, geom.base0)
                 extents["y"].add(geom.panel, geom.base1)
@@ -4321,16 +4536,19 @@ TIP_HISTORY = 32
 
 def _plain_indices(drawn: list[_Drawn]) -> dict[int, int]:
     """Per drawn layer (by id), the layers drawn in a default colour before it (a summary's
-    parts: one)."""
+    parts: one). A rug takes the colour of the layer before it (the marks it sits under),
+    and uses none up."""
     out: dict[int, int] = {}
     plain = 0
     last: Layer | None = None
     for d in drawn:
         if last is not None and d.user is not last:
-            plain += last.mark != "text" and last.color is None and last.facet != "exclude"
+            plain += last.mark not in ("text", "rug") and last.color is None and \
+                last.facet != "exclude"  # fmt: skip
         last = d.user if d.layer.mark != "rule" else last
-        out.setdefault(id(d.layer), plain)
-        out.setdefault(id(d.user), plain)
+        index = max(plain - 1, 0) if d.user.mark == "rug" else plain
+        out.setdefault(id(d.layer), index)
+        out.setdefault(id(d.user), index)
     return out
 
 
@@ -4406,6 +4624,8 @@ def _axis(
     levels: dict[str, None] = {}
     for layer in marks:
         name = getattr(layer, axis)
+        if name is None:  # a rug of the other axis's values
+            continue
         column = table_of(layer).column(name)
         kinds.setdefault(column.kind, []).append(f"{layer.name}.{axis}={name!r}")
         if column.kind == "category":
@@ -4647,11 +4867,11 @@ def _geometry(
     rows: the layers stay the same from page to page). ``panel_of``: each row's panel, if
     known. ``kept``: a page turned: the geometry of the panels still read, kept, and only
     that of the rows read now made."""
-    assert layer.x is not None
-    assert layer.y is not None
     if panel_of is None:
         panel_of = grid.assign(table)
     if layer.mark == "line":
+        assert layer.x is not None
+        assert layer.y is not None
         rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet, grid.also)
         if len(panel) and np.bincount(panel).max() > THIN:
             x = axis_values(table.column(layer.x), x_levels)
@@ -4792,10 +5012,40 @@ def _horizontal(x_levels: list[str] | None, y_levels: list[str] | None) -> bool:
     return y_levels is not None and x_levels is None
 
 
+def _ends(layer: Layer, axis: str) -> tuple[str, ...]:
+    """A segment's other end's column on the axis (none: its start's)."""
+    end = getattr(layer, f"{axis}2", None) if layer.mark == "segment" else None
+    return () if end is None else (end,)
+
+
+def _rug(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
+         y_levels: list[str] | None, colors: _ColorScales,
+         panel_of: np.ndarray | None) -> Geometry:  # fmt: skip
+    """A rug's ticks: each row's value on its axis, and on the other from the panel's edge
+    to ``length`` pixels in (``layers.pinned``)."""
+    on_x = layer.x is not None
+    name = layer.x if on_x else layer.y
+    assert name is not None
+    values = axis_values(table.column(name), x_levels if on_x else y_levels)
+    rows, panel = expand(panel_of, table.n, len(grid.panels), layer.facet, grid.also)
+    v = values[rows]
+    keep = np.isfinite(v)
+    order = np.argsort(panel[keep], kind="stable")
+    rows, panel, v = rows[keep][order], panel[keep][order], v[keep][order]
+    edge, tip = np.zeros(len(v)), np.full(len(v), float(layer.size))
+    geom = Geometry(panel, v, edge, v.copy(), tip, rows) if on_x else \
+        Geometry(panel, edge, v, tip, v.copy(), rows)  # fmt: skip
+    geom.rows_end = rows.copy()
+    _paint(layer, table, geom, colors)
+    return geom
+
+
 def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
            y_levels: list[str] | None, colors: _ColorScales, steps: dict[str, float],
            panel_of: np.ndarray | None) -> Geometry:  # fmt: skip
     """A plain layer's instances of these rows, coloured."""
+    if layer.mark == "rug":
+        return _rug(layer, table, grid, x_levels, y_levels, colors, panel_of)
     assert layer.x is not None
     assert layer.y is not None
     x = axis_values(table.column(layer.x), x_levels)
@@ -4820,6 +5070,10 @@ def _marks(layer: Layer, table: Table, grid: Grid, x_levels: list[str] | None,
             if y_levels is not None:
                 y = jittered(y, np.arange(len(y)), layer.jitter, 2)
         geom = point_geometry(rows, panel, x, y)
+    elif layer.mark == "segment":
+        x2 = axis_values(table.column(layer.x2), x_levels) if layer.x2 else x
+        y2 = axis_values(table.column(layer.y2), y_levels) if layer.y2 else y
+        geom = segment_geometry(rows, panel, x, y, x2, y2)
     elif layer.mark == "rect":
         x2 = axis_values(table.column(layer.x2), x_levels) if layer.x2 else None
         y2 = axis_values(table.column(layer.y2), y_levels) if layer.y2 else None
@@ -4876,6 +5130,11 @@ def _layer_spec(
     index: int,
 ) -> dict[str, Any]:
     """A layer in the spec; ``index`` counts the layers drawn in a default colour before it."""
+    pin = pinned(layer)  # a rug's pixels from the edge: not from the axis's origin
+    if pin == "x":
+        x_origin = 0.0
+    elif pin == "y":
+        y_origin = 0.0
     coords = np.stack(
         [geom.x0 - x_origin, geom.y0 - y_origin, geom.x1 - x_origin, geom.y1 - y_origin], axis=1
     )
@@ -4898,7 +5157,8 @@ def _layer_spec(
             components=2,
         )  # fmt: skip
     return {
-        "type": layer.mark,
+        "type": "line" if layer.mark in ("segment", "rug") else layer.mark,
+        "pin": pin,
         "name": layer.name,
         "count": geom.count,
         "base": base,

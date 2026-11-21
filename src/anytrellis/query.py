@@ -136,26 +136,34 @@ def span(table: Table, name: str, scale: str = "") -> tuple[float, float] | None
     return float(lo[0]), float(hi[0])
 
 
-def panel_extents(table: Table, keys: Sequence[str], x: str, y: str,
+def panel_extents(table: Table, keys: Sequence[str], x: Sequence[str], y: Sequence[str],
                   scales: Mapping[str, str]) -> Table:  # fmt: skip
     """Per combination of the facet columns ``keys``: the low and high x and y of the rows
-    drawn (``x_lo``, ``x_hi``, ``y_lo``, ``y_hi``: those with both; on a transformed axis,
-    those on its scale), of number and time columns (a category axis's are left out), as
-    read."""
+    drawn (``x_lo``, ``x_hi``, ``y_lo``, ``y_hi``: of the rows with every one of the
+    columns ``x`` and ``y`` finite, a segment's two ends, or none, a rug's other axis; on
+    a transformed axis, those on its scale), of number and time columns (a category axis's
+    are left out), as read."""
     import narwhals as nw
 
     from anytrellis.transforms import on_scale_expr
 
-    drawn = always(x)
+    drawn = always([*x, *y][0])
     aggs = []
-    for axis, name in (("x", x), ("y", y)):
-        if table.kind(name) == "category":  # every row has a category (or "(missing)")
+    for axis, given in (("x", x), ("y", y)):
+        names = [n for n in given if table.kind(n) != "category"]  # (every row has one)
+        if not names:
             continue
-        drawn = drawn & _finite(table, name)
-        domain = on_scale_expr(scales[axis], nw.col(name)) if axis in scales else None
-        if domain is not None:
-            drawn = drawn & domain
-        aggs += [nw.col(name).min().alias(f"{axis}_lo"), nw.col(name).max().alias(f"{axis}_hi")]
+        for name in names:
+            drawn = drawn & _finite(table, name)
+            domain = on_scale_expr(scales[axis], nw.col(name)) if axis in scales else None
+            if domain is not None:
+                drawn = drawn & domain
+        lo = [nw.col(n).min() for n in names]
+        hi = [nw.col(n).max() for n in names]
+        aggs += [
+            (nw.min_horizontal(*lo) if len(lo) > 1 else lo[0]).alias(f"{axis}_lo"),
+            (nw.max_horizontal(*hi) if len(hi) > 1 else hi[0]).alias(f"{axis}_hi"),
+        ]
     if not aggs:
         return Table({})
     found = table.lazy.filter(drawn).group_by(*keys).agg(*aggs).collect()

@@ -122,8 +122,9 @@ export function buildScene(spec: TrellisSpec, source: DataSource, previous?: Sce
     const n = l.count;
     const f32 = new Float32Array(n * 4);
     for (let p = 0; p < np; p++) {
-      const bx = baseX[p];
-      const by = baseY[p];
+      // a pinned axis (a rug's): pixels from the panel's edge, not data from its base
+      const bx = l.pin === "x" ? 0 : baseX[p];
+      const by = l.pin === "y" ? 0 : baseY[p];
       for (let i = starts[p]; i < starts[p + 1]; i++) {
         f32[i * 4] = coords[i * 4] - bx;
         f32[i * 4 + 1] = coords[i * 4 + 1] - by;
@@ -213,6 +214,19 @@ export interface PanelMap {
   oy: number;
 }
 
+/** Where a layer's instances of panel `p` go on screen in `rect` (its map): data mapped by
+ * the panel's scales (from the panel's own origin, `baseX`, `baseY`), and a pinned axis
+ * (a rug's) in pixels from the panel's left or bottom edge. */
+export function layerMap(scene: Scene, spec: MarkLayerSpec, p: number, map: PanelMap, rect: { x: number; y: number; w: number; h: number }): PanelMap {
+  const pin = spec.pin;
+  return {
+    sx: pin === "x" ? 1 : map.sx,
+    ox: pin === "x" ? rect.x : map.ox + scene.baseX[p] * map.sx,
+    sy: pin === "y" ? -1 : map.sy,
+    oy: pin === "y" ? rect.y + rect.h : map.oy + scene.baseY[p] * map.sy,
+  };
+}
+
 /** A panel's map from its view (`x`, `y`: the axis units shown) to its rect. */
 export function panelMap(r: { x: number; y: number; w: number; h: number }, x: [number, number], y: [number, number], reverseX = false, reverseY = false): PanelMap {
   const sx = (reverseX ? -r.w : r.w) / (x[1] - x[0] || 1);
@@ -246,7 +260,7 @@ export function pick(scene: Scene, p: number, map: PanelMap, px: number, py: num
   let best: Hit | null = null;
   for (let li = scene.layers.length - 1; li >= 0; li--) {
     const layer = scene.layers[li];
-    if (layer.spec.context) continue;
+    if (layer.spec.context || layer.spec.pin) continue; // a rug: not hovered
     const c = layer.coords;
     const radii = layer.radii;
     for (let i = layer.starts[p]; i < layer.starts[p + 1]; i++) {
@@ -341,7 +355,7 @@ export function yExtent(scene: Scene, p: number, x0: number, x1: number): { lo: 
     }
   };
   for (const layer of scene.layers) {
-    if (layer.spec.context) continue;
+    if (layer.spec.context || layer.spec.pin) continue; // a rug: its ticks are not data's
     const c = layer.coords;
     const rect = layer.kind === KIND_RECT;
     for (let i = layer.starts[p]; i < layer.starts[p + 1]; i++) {

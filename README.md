@@ -19,8 +19,9 @@ pip install "anytrellis[png]"        # with resvg-py, for save_png
 ```
 
 Status: early development (0.7). One panel per level of the facet columns, every panel
-drawn with the same layers (lines, points, bars, areas, rects, text, histograms, box plots,
-violins, densities, error bars, reference rules), on shared scales unless told otherwise.
+drawn with the same layers (lines, points, bars, areas, rects, segments, text, rugs,
+histograms, box plots, violins, densities, error bars, hexagonal bins, contours, reference
+rules), on shared scales unless told otherwise.
 Every panel goes into one canvas, so a grid of hundreds of panels and millions of marks
 stays interactive; long lines and dense points go to the browser at the level of detail
 its pixels need, and in more as you zoom in.
@@ -57,6 +58,7 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `area(x, y, color, group, position="stack"\|"identity")` | the area under a line, stacked like bars |
 | `band(x, ymin, ymax, color, group)` | a band between two lines (a range, an interval) |
 | `rect(x, y, color, width=1, height=1)` / `rect(x, y, x2=, y2=)` | a cell per row (a heatmap), or a box between two corners |
+| `segments(x, y, x2=, y2=, color, width=1.5)` | a line per row from (x, y) to (x2, y2) |
 | `text(x, y, text, color, size, align, dx, dy, repel=False)` | a label per row; `repel=True` keeps them apart |
 | `rule(x=..., y=...)` | reference lines across every panel |
 | `annotate(text, x=, y=, panel=, dx=, dy=)` | a note at a data position, in one panel or every one |
@@ -66,6 +68,9 @@ Each mark is a method that adds a layer; layers draw in the order they were adde
 | `density(x, color, fill=False, bw_adjust=1)` | a kernel density curve per panel and colour |
 | `ecdf(x, color, stat="proportion"\|"percent"\|"count", complementary=False)` | the cumulative distribution per panel and colour, as steps |
 | `errorbar(x, y, color, extent="ci"\|"se"\|"sd"\|"range")` / `errorbar(x, ymin=, ymax=)` | a mean and its interval per position, or intervals you computed |
+| `rug(x=, y=, color, length=8)` | a tick at the panel's edge per value, beside a summary |
+| `hexbin(x, y, bins=30, stat="count"\|"percent")` | rows counted in hexagons, coloured by count |
+| `contour(x, y, color, levels=6, bw_adjust=1)` | the lines of a 2-D density per panel and colour |
 | `smooth(x, y, color, method="loess"\|"linear", se=True)` | a fitted line per panel and colour, with a confidence band |
 | `horizon(x, y, bands=3, origin=0, step=None)` | a horizon chart per panel: a series in bands, for many series in little height |
 
@@ -84,8 +89,8 @@ shows (`t.description`; `alt=` says it your way), and saved SVGs carry it as the
 `redundant=True` gives a colour column's categories a shape each on points and a dash each
 on lines, so colour doesn't carry them alone.
 
-`hist`, `box`, `violin`, `density`, `ecdf`, `errorbar`, `smooth` and `bars(stat=...)`
-summarise each panel's rows in
+`hist`, `box`, `violin`, `density`, `ecdf`, `errorbar`, `smooth`, `hexbin`, `contour`
+and `bars(stat=...)` summarise each panel's rows in
 Python, and are drawn as bars, boxes, violins, lines, bands and points. A histogram's bins are the same in every panel (round widths
 by default), and so are a density's x values, so the panels compare. `stat="percent"`
 and `"density"` scale each panel's counts. With `facet="exclude"` a summary covers the

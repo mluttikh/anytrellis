@@ -21,10 +21,11 @@ from anytrellis.data import Column, Table
 
 Mark = Literal[
     "line", "points", "bars", "area", "band", "rect", "text", "rule", "hist", "box", "density",
-    "smooth", "violin", "errorbar", "horizon", "barstat", "ecdf",
+    "smooth", "violin", "errorbar", "horizon", "barstat", "ecdf", "segment", "hexbin",
+    "contour", "rug",
 ]  # fmt: skip
 SUMMARIES = ("hist", "box", "density", "smooth", "violin", "errorbar", "horizon", "barstat",
-             "ecdf")  # fmt: skip
+             "ecdf", "hexbin", "contour")  # fmt: skip
 """Marks drawn from a summary of their rows ("barstat": ``bars(stat=...)``)."""
 FacetMode = Literal["auto", "include", "all", "exclude"]
 Position = Literal["stack", "fill", "dodge", "identity"]
@@ -358,6 +359,28 @@ def point_geometry(rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.nda
     order = np.argsort(panel, kind="stable")
     rows, panel, xs, ys = rows[order], panel[order], xs[order], ys[order]
     return Geometry(panel, xs, ys, xs.copy(), ys.copy(), rows)
+
+
+def pinned(layer: Layer) -> str | None:
+    """The axis whose coordinates are pixels from the panel's edge, not data: a rug's of x
+    values, ``"y"`` (its ticks up from the bottom); of y values, ``"x"``."""
+    if layer.mark != "rug":
+        return None
+    return "y" if layer.x is not None else "x"
+
+
+def segment_geometry(rows: np.ndarray, panel: np.ndarray, x: np.ndarray, y: np.ndarray,
+                     x2: np.ndarray, y2: np.ndarray) -> Geometry:  # fmt: skip
+    """A segment a row, from (x, y) to (x2, y2): drawn as a line's segment, both its ends
+    the row's."""
+    x0, y0, x1, y1 = x[rows], y[rows], x2[rows], y2[rows]
+    keep = np.isfinite(x0) & np.isfinite(y0) & np.isfinite(x1) & np.isfinite(y1)
+    order = np.argsort(panel[keep], kind="stable")
+    rows = rows[keep][order]
+    g = Geometry(panel[keep][order], x0[keep][order], y0[keep][order], x1[keep][order],
+                 y1[keep][order], rows)  # fmt: skip
+    g.rows_end = rows.copy()
+    return g
 
 
 def bar_geometry(
