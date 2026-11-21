@@ -23,6 +23,8 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 - [Plot every pair of columns](pairs.md): a scatterplot matrix, brushed across its panels.
 - [Fit a smooth line](smooth.md): loess or least squares, with a confidence band.
 - [Colours, legends and order](colours.md)
+- [Make a plot readable by everyone](accessibility.md): a description for screen readers,
+  shapes and dashes besides colour.
 
 **Working with plots**
 

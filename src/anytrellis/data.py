@@ -114,6 +114,18 @@ class Table:
         assert self._n is not None
         return self._n
 
+    def count(self) -> int:
+        """The number of rows, without reading them (a lazy table: counted in the
+        database, once)."""
+        if self._n is not None or self._lazy is None:
+            return self.n
+        import narwhals as nw
+
+        def counted() -> int:
+            return int(self._lazy.select(nw.len().alias("n")).collect()["n"][0])
+
+        return self.memo(("count",), counted)
+
     @property
     def lazy(self) -> Any:
         """The query of a lazy table (a narwhals ``LazyFrame``), or None."""

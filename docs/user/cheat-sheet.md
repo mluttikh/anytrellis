@@ -48,6 +48,9 @@ Trellis(cars, wrap="origin", aspect=1)  # square panels; aspect="bank": slopes a
 Trellis(cars, wrap="origin", panel_height=150)  # or height=600, the whole plot
 Trellis(cars, wrap="origin", fit_y=True)  # y follows the data in view as x zooms
 Trellis(cars, wrap="origin", panel_buttons=False)  # no open, pin, compare buttons on hover
+Trellis(cars, wrap="origin", redundant=True)  # a colour column also as shapes and dashes
+Trellis(cars, wrap="origin", alt="Heavier cars use more fuel.")  # for screen readers
+Trellis(cars, wrap="origin").points(x="weight", y="mpg").description  # the one made for it
 
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
 t.share(x=True, y="row")  # as share_x=, share_y=
@@ -175,6 +178,7 @@ set_theme("framed")  # every plot from now on
 set_theme(strip_fill=True)  # the minimal theme, one setting changed
 set_theme(context="talk")  # text, lines and points 1.5 times: "paper", "notebook", "poster"
 set_theme(font_size=14)  # px; "auto": 12, 11 in narrow panels, 13 in an opened one
+set_theme(redundant=True)  # every plot: colour columns also as shapes and dashes
 get_theme()
 set_theme()  # back to minimal
 ```

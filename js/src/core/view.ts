@@ -380,6 +380,8 @@ export class TrellisView {
   ) {
     this.root = el("div", "atr-root");
     this.root.tabIndex = 0;
+    // a figure, named by its description (Python's, or alt=): the canvases say nothing
+    this.root.setAttribute("role", "figure");
     this.header = el("div", "atr-header");
     this.heading = el("div", "atr-heading");
     this.toolbar = el("div", "atr-toolbar");
@@ -516,6 +518,8 @@ export class TrellisView {
     const old = this.spec;
     const openName = this.pendingFocus ?? (old && this.focused !== null ? panelName(old, this.focused) : null);
     this.spec = spec;
+    if (spec.description) this.root.setAttribute("aria-label", spec.description);
+    else this.root.removeAttribute("aria-label");
     this.detail.clear(); // Python sends them again for the view shown
     this.unpin();
     this.isolated = null;
@@ -2902,7 +2906,7 @@ export class TrellisView {
     const { width, height } = this.imageSize();
     const svg = new SvgContext(width, height, pageMeasure());
     this.paint(svg.context);
-    return svg.toString(this.theme.bg);
+    return svg.toString(this.theme.bg, { title: this.spec?.title, description: this.spec?.description });
   }
 
   /** Show or hide the Export menu (its toolbar button, e): what this page can do. */

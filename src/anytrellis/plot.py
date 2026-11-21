@@ -23,6 +23,7 @@ import numpy as np
 from anytrellis.channels import DASHES, SIZE_RANGE, Channels, dash_units, shape_code
 from anytrellis.codec import Buffers
 from anytrellis.data import Table, number_label
+from anytrellis.describe import Axis, describe, facet_phrase
 from anytrellis.detail import (
     DENSE,
     START_WIDTH,
@@ -33,7 +34,7 @@ from anytrellis.detail import (
     Shown,
 )
 from anytrellis.facets import Grid, Order, Panel, Summary, build_grid, ordered_levels, strip_texts
-from anytrellis.formats import number_format, time_format
+from anytrellis.formats import axis_format, number_format, time_format
 from anytrellis.layers import (
     FACET_MODES,
     STACKED,
@@ -99,7 +100,7 @@ from anytrellis.summaries import linked_counts
 from anytrellis.summaries import parts as queried_parts
 from anytrellis.summaries import selected as summaries_selected
 from anytrellis.theme import Theme, theme_of
-from anytrellis.transforms import SCALES, TRANSFORMS, forward, on_scale_expr, scalar
+from anytrellis.transforms import SCALES, TRANSFORMS, forward, inverse, on_scale_expr, scalar
 
 if TYPE_CHECKING:
     from anytrellis.widget import TrellisWidget
@@ -233,6 +234,15 @@ class Trellis:
             their side, tab10. Every theme but classic leaves a time axis untitled unless
             ``x_title`` is given.
         renderer: ``"auto"`` (WebGPU, then WebGL2, then Canvas 2D), or one of them.
+        redundant: A colour column also gives points their shapes and lines their dashes
+            (a category column: one legend shows both), so colour doesn't carry it alone,
+            for readers who don't tell the colours apart or print in grey. A layer's own
+            ``shape=`` or ``dash=`` wins. Default: the theme's (``set_theme(redundant=True)``
+            for every plot).
+        alt: The plot's description for screen readers, in place of the one made from what
+            it shows ("Scatter of mpg against weight, one panel per origin (3), coloured by
+            cylinders. 398 rows. ..."; ``description``). Saved images and pages carry it
+            too.
     """
 
     def __init__(
@@ -270,8 +280,12 @@ class Trellis:
         load: str = "all",
         theme: str | Theme | None = None,
         renderer: str = "auto",
+        redundant: bool | None = None,
+        alt: str | None = None,
     ) -> None:
         self.theme: Theme = theme_of(theme)
+        self.redundant = bool(self.theme.redundant if redundant is None else redundant)
+        self.alt = alt
         named = _named_colors(palette)  # a dict: a colour per category
         if isinstance(palette, Mapping):
             palette = None
@@ -1541,6 +1555,28 @@ class Trellis:
         percent, ``"40%"``."""
         return ".0%" if self._shares == axis else None
 
+    @property
+    def description(self) -> str:
+        """The plot's description for screen readers: ``alt=``, else one made from what it
+        shows (its marks, panels, colours, rows and ranges)."""
+        return self._scene()[0]["description"]
+
+    def _describe(self, grid: Grid, pages: dict[str, Any] | None, spec: dict[str, Any],
+                  spans: dict[str, tuple[float, float] | None],
+                  levels: tuple[list[str] | None, list[str] | None]) -> str:  # fmt: skip
+        """The description made from what the plot shows (describe.py)."""
+        axes = []
+        for axis, lv in zip(("x", "y"), levels, strict=True):
+            a = spec[axis]
+            span = spans[axis] if self._shares != axis else None
+            fmt = axis_format(a["kind"], a["format"])
+            axes.append(Axis(a["title"], a["kind"], lv, *(span or (None, None)), fmt))
+        per = pages["rows"] * pages["cols"] if pages and not pages.get("grid") else None
+        facets = facet_phrase(self._label, self._wrap, self._row, self._col, self._page,
+                              len(grid.panels), grid.rows, grid.cols, per)  # fmt: skip
+        rows = self._data.count() if self._data is not None else None
+        return describe(self._layers, self._label, facets, rows, axes[0], axes[1])
+
     def _axis_format(self, axis: str, kind: AxisKind) -> str | None:
         """An axis's format (``format()``), checked against what the axis holds."""
         spec = self._formats.get(axis)
@@ -2602,6 +2638,12 @@ class Trellis:
             if layer.color is not None and layer.color not in table and not is_color(layer.color):
                 raise ValueError(f"color={layer.color!r} is neither a column nor a colour")
             self._tables[id(layer)] = table
+            if self.redundant and layer.color is not None and layer.color in table:
+                # the colour column also as shape or dash (Channels: when it holds categories)
+                if layer.mark == "points" and layer.shape is None:
+                    layer.shape, layer.second = layer.color, True
+                elif layer.mark == "line" and layer.dash_by is None and not layer.dash:
+                    layer.dash_by, layer.second = layer.color, True
         self._layers.append(layer)
         return self._changed()
 
@@ -3122,6 +3164,7 @@ class Trellis:
                 )
         xg = group_ids(grid, self._share["x"])
         yg = group_ids(grid, self._share["y"])
+        spans = {axis: _span(extents[axis], scales.get(axis)) for axis in ("x", "y")}
         xd = domains(
             extents["x"],
             xg,
@@ -3216,6 +3259,8 @@ class Trellis:
             "pages": pages,
             "theme": self.theme.spec(),
         }
+        spec["description"] = self.alt if self.alt is not None else self._describe(
+            grid, pages, spec, spans, (x_levels, y_levels))  # fmt: skip
         spec["notes"] = self._note_specs(spec, (x_kind, y_kind), (x_levels, y_levels))
         # dense points' cells: over each panel's domain, sized for the panel's pixels
         cell_details = [(i, dt) for i, dt in details if isinstance(dt, PointDetail)]
@@ -4359,7 +4404,7 @@ def _marker_spec(layer: Layer, geom: Geometry, buffers: Buffers) -> dict[str, An
     if layer.mark != "points":
         return None
     shape = 0
-    if layer.shape is not None and geom.shapes is None:
+    if layer.shape is not None and geom.shapes is None and not layer.second:
         shape = shape_code(layer.shape)
     if not shape and geom.shapes is None and geom.sizes is None:
         return None
@@ -4515,3 +4560,14 @@ def _text(value: Any) -> str:
     if isinstance(value, np.datetime64):
         return str(value).replace("T", " ")
     return str(value)
+
+
+def _span(extent: Extent, scale: str | None) -> tuple[float, float] | None:
+    """The data's range on an axis, over every panel, in its values (a scale undone)."""
+    lo = float(np.nanmin(extent.lo, initial=np.inf))
+    hi = float(np.nanmax(extent.hi, initial=-np.inf))
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return None
+    if scale is not None:
+        lo, hi = (float(v) for v in inverse(scale, np.array([lo, hi])))
+    return lo, hi

@@ -1176,6 +1176,9 @@ class _Svg:
         self.out: list[str] = []
         self.defs: list[str] = []
         self._clips: dict[tuple[str, ...], str] = {}
+        self.title = ""
+        self.description = ""
+        """For screen readers: the plot's title and description (export.ts ``label``)."""
 
     def add(self, element: str) -> None:
         self.out.append(element)
@@ -1216,9 +1219,15 @@ class _Svg:
     def __str__(self) -> str:
         defs = f"<defs>{''.join(self.defs)}</defs>" if self.defs else ""
         w, h = _n(self.width), _n(self.height)
+        role, about = "", ""
+        if self.title or self.description:
+            role = ' role="img"'
+            about = f"<title>{escape(self.title or self.description)}</title>"
+            if self.title and self.description:
+                about += f"<desc>{escape(self.description)}</desc>"
         return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-                f'viewBox="0 0 {w} {h}" font-family="{FONT}" font-size="{_n(self.fs)}">'
-                f"{defs}{''.join(self.out)}</svg>")  # fmt: skip
+                f'viewBox="0 0 {w} {h}" font-family="{FONT}" font-size="{_n(self.fs)}"{role}>'
+                f"{about}{defs}{''.join(self.out)}</svg>")  # fmt: skip
 
 
 def grid_axes(spec: dict[str, Any]) -> tuple[bool, bool]:
@@ -2214,6 +2223,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
 
     total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box
     svg = _Svg(width, total if height is None else float(height), lay.font_size)
+    svg.title, svg.description = spec.get("title") or "", spec.get("description") or ""
     svg.add(f'<rect width="100%" height="100%" fill="{th["bg"]}"/>')
     if header:
         svg.text(8, 1 + header / 2, fit(spec["title"], width - 16, title_size), th["text"],

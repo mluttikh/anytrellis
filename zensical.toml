@@ -41,6 +41,7 @@ nav = [
     { "Plot every pair of columns" = "how-to/pairs.md" },
     { "Fit a smooth line" = "how-to/smooth.md" },
     { "Colours, legends and order" = "how-to/colours.md" },
+    { "Make a plot readable by everyone" = "how-to/accessibility.md" },
     { "Link plots" = "how-to/link.md" },
     { "Plot large data" = "how-to/large.md" },
     { "Page through many panels" = "how-to/pages.md" },

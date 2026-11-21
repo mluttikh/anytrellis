@@ -245,6 +245,8 @@ export interface TrellisSpec {
   legend_position?: "auto" | "top" | "bottom" | "right" | "none";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
+  /** The plot's description for screen readers (Python's, or alt=): the figure's label. */
+  description?: string;
   /** A panel's buttons (open, pin, compare) on the panel under the pointer (absent: yes). */
   panel_buttons?: boolean;
   /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */

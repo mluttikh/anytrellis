@@ -79,6 +79,11 @@ legend. `tooltip=[...]` adds columns to
 what hovering shows (a box: to its outliers'); every mark but `text` and `rule` can be
 selected.
 
+For screen readers, every plot is a figure labelled with a sentence made from what it
+shows (`t.description`; `alt=` says it your way), and saved SVGs carry it as their title.
+`redundant=True` gives a colour column's categories a shape each on points and a dash each
+on lines, so colour doesn't carry them alone.
+
 `hist`, `box`, `violin`, `density`, `ecdf`, `errorbar`, `smooth` and `bars(stat=...)`
 summarise each panel's rows in
 Python, and are drawn as bars, boxes, violins, lines, bands and points. A histogram's bins are the same in every panel (round widths
