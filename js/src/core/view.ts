@@ -368,6 +368,8 @@ export class TrellisView {
   /** A zoom given before the spec came (Python's show_view, a saved page's). */
   private pendingZoom: Zoom | null = null;
   private savedViews: Record<string, SavedView> = {};
+  /** The view last shown or kept (of views alike, the bar names it). */
+  private lastView: string | null = null;
   /** The zoom the bar's view name was found for. */
   private zoomKey = "";
   private gridHeight = 0;
@@ -770,6 +772,7 @@ export class TrellisView {
       if (user) this.opts.onCompare?.(this.compareName);
       this.updateTools();
     }
+    this.lastView = name;
     this.setZoom(zoom ?? null);
     this.notify(`View: ${name}`);
     this.updateHeader();
@@ -780,6 +783,7 @@ export class TrellisView {
   private keepView(name: string): void {
     const had = name in this.savedViews;
     this.savedViews = { ...this.savedViews, [name]: this.currentView() };
+    this.lastView = name;
     this.opts.onViews?.(this.keptViews);
     this.notify(had ? `View ${name} kept again, as shown now` : `View ${name} kept`);
     this.updateHeader();
@@ -793,8 +797,8 @@ export class TrellisView {
     this.updateHeader();
   }
 
-  /** The view kept that the plot shows (its sort, filters, pins, opened and compared
-   * panels and zoom; any page), or null. */
+  /** The view kept that the plot shows (its page, sort, filters, pins, opened and
+   * compared panels and zoom), or null. */
   private viewShown(): string | null {
     const spec = this.spec;
     if (!spec) return null;
@@ -816,9 +820,11 @@ export class TrellisView {
         .map(([k, r]) => `${k}:${round(r[0])}:${round(r[1])}`)
         .sort();
     const key = (v: SavedView): string =>
-      JSON.stringify([v.sort ?? null, !!v.descending, v.name ?? "", Object.entries(v.where ?? {}).filter(([, c]) => c !== null && c !== "").sort(), v.pinned ?? [], v.open ?? null, v.compare ?? null, zoomed(v.zoom)]);
+      JSON.stringify([v.page ?? 0, v.sort ?? null, !!v.descending, v.name ?? "", Object.entries(v.where ?? {}).filter(([, c]) => c !== null && c !== "").sort(), v.pinned ?? [], v.open ?? null, v.compare ?? null, zoomed(v.zoom)]);
     const want = key(now);
-    return Object.keys(this.savedViews).find((n) => key(this.savedViews[n]) === want) ?? null;
+    const same = Object.keys(this.savedViews).filter((n) => key(this.savedViews[n]) === want);
+    // views alike: the one last shown or kept
+    return this.lastView !== null && same.includes(this.lastView) ? this.lastView : (same[0] ?? null);
   }
 
   /** Zoom to these ranges (Python's show_view; null or none given: as the plot starts). */

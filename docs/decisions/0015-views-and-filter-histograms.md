@@ -29,8 +29,8 @@ where the panels lie.
   starts until the browser reports one), and a saved page opens on it.
 - **The Views menu lives in the page bar**, beside the filters it restores: the views to
   show and delete, and a name to keep the one shown. The bar names the view the plot shows
-  (its state, page aside, equal to the view's, the zoom to six digits), so a reader sees
-  when they've left it.
+  (its state, the page too, equal to the view's, the zoom to six digits; of views alike,
+  the one last shown or kept), so a reader sees when they've left it.
 - **A link names a view**: `#view=<name>` on a saved page shows it on each plot that has
   it, at once and when the link changes. Views kept in a saved page last until it closes:
   the page has nowhere to write them that its other readers would see.

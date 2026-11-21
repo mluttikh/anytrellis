@@ -58,8 +58,8 @@ A view keeps what the bar and the plot show: the sort, the filters and pins, the
 panel opened or compared, and the zoom. The **Views** button at the right of the bar lists
 the views kept; click one to show it again. Type a name under them and press *Keep* to keep
 the view shown (a name used again replaces that view), and **×** deletes one. While the
-plot shows a view, the button carries its name; sort, filter or zoom elsewhere and it says
-*Views* again.
+plot shows a view, the button carries its name; turn the page, sort, filter or zoom
+elsewhere and it says *Views* again.
 
 ```python
 plot.sort_panels("trend temp", descending=True).filter_panels(rows=(100, None))

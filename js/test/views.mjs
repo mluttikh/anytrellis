@@ -89,6 +89,26 @@ check(s.kept.includes("mine") && s.label !== "Views", `the reader keeps one ("mi
 await page.click(".atr-view-drop[aria-label='Delete the view mine']");
 s = await state();
 check(!s.kept.includes("mine"), "and deletes it");
+
+// two views a page apart: the bar names the one shown
+const keep = async (name) => {
+  if (await page.$eval(".atr-views", (m) => m.hidden)) await page.click(".atr-views-button");
+  await page.fill(".atr-view-save input", name);
+  await page.press(".atr-view-save input", "Enter");
+  await page.waitForTimeout(100);
+  await page.keyboard.press("Escape");
+};
+await keep("one");
+await page.click(".atr-pager [aria-label='Next page']");
+await page.waitForTimeout(150);
+check((await state()).label === "Views", "a page turned: no longer that view");
+await keep("two");
+await showView("one");
+s = await state();
+check(s.label === "one" && s.paging.page === 0, `a view a page before the other: named so (${s.label})`);
+await showView("two");
+s = await state();
+check(s.label === "two" && s.paging.page === 1, `and the other (${s.label})`);
 await page.keyboard.press("Escape");
 check(await page.$eval(".atr-views", (m) => m.hidden), "Esc closes the menu");
 
