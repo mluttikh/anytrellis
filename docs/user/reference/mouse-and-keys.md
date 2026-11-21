@@ -15,6 +15,12 @@ shortcuts don't also act on them.
 | Drag | an axis | pan that axis alone |
 | Double-click | an axis | reset that axis |
 | Shift+drag | a panel | box zoom: sideways zooms x, up or down zooms y, otherwise both |
+| Drag | a panel, select on (`s`) | a brush: the marks in it selected, in every panel (with `link=`: in its panel, and their keys in all) |
+| Draw round | a panel, lasso on (`l`) | a lasso: the marks inside its outline selected, as a brush selects them |
+| Drag | inside the brush or the lasso | move it |
+| Click | a mark, select or lasso on | select that mark (and with `link=`, its key in every panel) |
+| Shift, Cmd or Ctrl+click | a mark, select or lasso on | add it to the marks clicked, or take it away |
+| Click | no mark, select or lasso on | clear the selection |
 | Hover | a mark | its values, a crosshair in every panel that shares x, and the pointer's x and y on the axes |
 | Hover | lines coloured by category | every series at the nearest x, top to bottom |
 | Click | a panel, with a tooltip shown | pin the tooltip: it stays, to compare with the next one and to copy from |
@@ -42,7 +48,7 @@ page never traps it. The plot takes two fingers.
 | Two fingers moved | pan |
 | Long press | the values there, pinned (a tap lets them go) |
 | Tap | as a click: let pinned values go, pick a line's end label |
-| One finger | scroll the page; with box zoom or select on (toolbar, `z`, `s`), or in full screen, a drag as with the mouse |
+| One finger | scroll the page; with box zoom, select or the lasso on (toolbar, `z`, `s`, `l`), or in full screen, a drag as with the mouse |
 
 `u` (or the toolbar's reset) undoes a pinch as it does a zoom. The first time one finger
 scrolls the page, the plot says that two fingers pan and zoom.
@@ -62,8 +68,9 @@ shows the line you hover instead.
 The crosshair's x and y are written on the axes, so you can read them in every panel along
 the row and column.
 
-A click pins the tooltip: not the first, which gives the plot the keys, and not in select
-mode, where a click clears the selection. It stays
+A click pins the tooltip: not the first, which gives the plot the keys, and not with select
+or the lasso on, where a click selects the mark under it (or, on none, clears the
+selection). It stays
 where it is while you hover on, so you can compare two points, and you can select and copy
 its text. A click away from the marks, ++esc++ or its
 × unpins it, and so does zooming, panning or opening a panel.
@@ -77,6 +84,7 @@ its text. A click away from the marks, ++esc++ or its
 | ++z++ | drag draws a zoom box, and back (Shift+drag always does) |
 | ++y++ | fit y to the data in view, and keep fitting it as x changes; again to stop |
 | ++s++ | drag draws a selection brush, and back |
+| ++l++ | drag draws a lasso, and back |
 | ++esc++ | unpin the tooltip; with none, show every legend entry again; then let the arrow keys' ring go; then stop comparing; then clear the selection; then back to all panels |
 | ++left++ ++right++ ++up++ ++down++ | move a ring from panel to panel (its name is said) |
 | ++enter++ | open the panel the ring is on, or the one under the pointer |

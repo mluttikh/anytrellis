@@ -6,7 +6,7 @@ import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
-import { FADED, filled, highlighted, select, selectionColors, selects, toggleLegend } from "../src/core/selection";
+import { FADED, boxMeetsPolygon, filled, highlighted, inPolygon, select, selectionColors, selects, simplify, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { SHAPES, dashPieces, shapeCorners } from "../src/core/channels";
 import { drawMarks } from "../src/core/renderers/canvas2d";
@@ -991,5 +991,48 @@ describe("place", () => {
     expect(cells(7, 3, 3, "lb")).toEqual(["g  ", "def", "abc"]);
     expect(cells(7, 3, 3, "tr")).toEqual(["gda", " eb", " fc"]);
     expect(cells(7, 3, 3, "br")).toEqual([" fc", " eb", "gda"]);
+  });
+});
+
+describe("lasso and clicks", () => {
+  const triangle: [number, number][] = [[0, 0], [4, 0], [0, 4]];
+  it("tests points by the even-odd rule, as selection.py does", () => {
+    expect(inPolygon(1, 1, triangle)).toBe(true);
+    expect(inPolygon(3, 3, triangle)).toBe(false);
+    // a bow tie: its middle crossing, each wing inside
+    const bow: [number, number][] = [[0, 0], [2, 2], [4, 0], [4, 4], [2, 2], [0, 4]];
+    expect(inPolygon(0.5, 2, bow)).toBe(true);
+    expect(inPolygon(2, 0.5, bow)).toBe(false);
+  });
+  it("finds boxes overlapping a polygon without a corner inside either", () => {
+    expect(boxMeetsPolygon(-1, 5, 1, 1.2, triangle)).toBe(true); // a thin box across it
+    expect(boxMeetsPolygon(0.5, 1, 0.5, 1, triangle)).toBe(true); // inside
+    expect(boxMeetsPolygon(-1, 10, -1, 10, triangle)).toBe(true); // round it
+    expect(boxMeetsPolygon(5, 6, 5, 6, triangle)).toBe(false);
+  });
+  it("simplifies a path to the corners that matter", () => {
+    const wiggly: [number, number][] = Array.from({ length: 101 }, (_, i) => [i, i % 2 ? 0.2 : 0]);
+    expect(simplify(wiggly, 1)).toEqual([[0, 0], [100, 0]]);
+    expect(simplify([[0, 0], [5, 5], [10, 0]], 1)).toHaveLength(3);
+  });
+  it("selects in a lasso: points inside, bars it meets", () => {
+    const points = layer("points", [1, 1, 1, 1, 3, 3, 3, 3], KIND_CAPSULE, 2);
+    const bars = layer("bars", [2.5, 0, 3.5, 0.5, 3.5, 3.5, 4, 4], KIND_RECT, 0);
+    const scene = { layers: [points, bars] } as unknown as Scene;
+    const s = select(scene, { x: [0, 4], y: [0, 4], lasso: triangle });
+    expect([...s.masks[0]!]).toEqual([1, 0]);
+    expect([...s.masks[1]!]).toEqual([1, 0]); // the first crosses its edge; the second is past it
+    expect(selects({ x: null, y: null, at: [[1, 1, null]] })).toBe(true);
+  });
+  it("selects the marks clicked, each in its panel", () => {
+    const l = layer("points", [1, 1, 1, 1, 5, 5, 5, 5, 1, 1, 1, 1, 9, 9, 9, 9], KIND_CAPSULE, 2);
+    l.starts = new Uint32Array([0, 2, 4]);
+    const scene = { layers: [l] } as unknown as Scene;
+    const one = select(scene, { x: null, y: null, at: [[1, 1, 1]], near: [0.01, 0.01] });
+    expect([...one.masks[0]!]).toEqual([0, 0, 1, 0]);
+    const two = select(scene, { x: null, y: null, at: [[1, 1, 1], [5, 5, 0]], near: [0.01, 0.01] });
+    expect([...two.masks[0]!]).toEqual([0, 1, 1, 0]);
+    const all = select(scene, { x: null, y: null, at: [[1, 1, null]], near: [0.01, 0.01] });
+    expect([...all.masks[0]!]).toEqual([1, 0, 1, 0]);
   });
 });

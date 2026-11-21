@@ -30,6 +30,20 @@ All notable changes to anytrellis. The format follows
   along those lines; `t.space`.
 - `repeat=[...]`: columns stacked as rows of panels, each on its own y scale: the data
   melted into `measure` and `value` (in the query, for a database).
+- **Lasso selection**: `l` (or the toolbar's lasso) draws round the marks to select;
+  dragged from inside, it moves. From Python, `select(lasso=[(x, y), ...])`;
+  `selection["lasso"]` has its corners.
+- **Click selection**: with select or the lasso on, a click selects the mark under it
+  (with `link=`, its key in every panel), Shift+click adds or removes one, a click on no
+  mark clears. From Python, `select(at=[(x, y)], panel=...)`; `selection["at"]`.
+- Both work with `load="pages"`: the lasso is a condition of the query (a point inside the
+  polygon by the even-odd rule), the same rows memory selects, and with `save_svg` /
+  `save_png`, which draw the lasso's outline.
+
+### Changed
+
+- With select on, a click on a mark selects it; a click on no mark still clears the
+  selection.
 
 ## [0.7.0] - 2026-11-21
 

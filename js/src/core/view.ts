@@ -40,7 +40,8 @@ import { Pager } from "./pager";
 import { pageLabels, pageList, panelOrder, pinsOf } from "./pages";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
-import { type Brush, type Highlight, type LegendChoice, type Selection, chooses, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
+import { type Brush, type Highlight, type LegendChoice, type Selection, chooses, filled, highlighted, inPolygon, select, selectionColors, selects, simplify, toggleLegend } from "./selection";
+import { KIND_RECT } from "./renderers/renderer";
 
 export type { Highlight } from "./selection";
 import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, layerMap, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
@@ -116,7 +117,9 @@ type Range = [number, number];
 type Axis = "x" | "y";
 
 interface Drag {
-  kind: "pan" | "box" | "brush" | "move" | Axis;
+  kind: "pan" | "box" | "brush" | "lasso" | "move" | Axis;
+  /** A lasso being drawn: the pointer's path (px). */
+  path?: [number, number][];
   /** The view (index in views) where it started. */
   view: number;
   x: number;
@@ -128,7 +131,10 @@ interface Drag {
   focused: boolean;
 }
 
-type Mode = "pan" | "zoom" | "select";
+type Mode = "pan" | "zoom" | "select" | "lasso";
+const MODES: Mode[] = ["pan", "zoom", "select", "lasso"];
+/** A lasso's most corners: more, and it is simplified (a query tests each). */
+const LASSO_CORNERS = 64;
 
 /** Two fingers on a panel: zooming (pinched apart or together) and panning (moved). */
 interface Pinch {
@@ -237,6 +243,7 @@ const ICONS = {
   compare: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="4" width="7" height="7" rx="1" stroke-dasharray="1.6 1.4" /><rect x="7" y="5" width="7" height="7" rx="1" /></svg>',
   box: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" stroke-dasharray="2 1.6" /><path d="m10.5 10.5 3 3" /></svg>',
   select: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="7" rx="1" stroke-dasharray="2 1.6" /><path d="M6 8h4" /></svg>',
+  lasso: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5c3.3 0 5.5 1.7 5.5 3.7S11.3 9.9 8 9.9 2.5 8.2 2.5 6.2 4.7 2.5 8 2.5Z" stroke-dasharray="2 1.6" /><path d="M5.2 9.3c-.7 1.5-.3 3 1.3 4.2" /></svg>',
   export: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M5 7l3 3 3-3M2.5 10.5v3h11v-3" /></svg>',
   settings: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 11.5h11" /><circle cx="6" cy="4.5" r="1.8" /><circle cx="10.5" cy="11.5" r="1.8" /></svg>',
   fitY: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10M3 13.5h10M8 5v6M6 7l2-2 2 2M6 9l2 2 2-2" /></svg>',
@@ -289,7 +296,7 @@ export class TrellisView {
   private views: PanelView[] = [];
   private frameRequested = false;
   private frameId = 0;
-  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], texts: [], ends: [], ring: null };
+  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], lassos: [], texts: [], ends: [], ring: null };
   /** A tooltip pinned by a click (null: none), and the views it was pinned in. */
   private pinned: HTMLDivElement | null = null;
   private pinnedAt = "";
@@ -401,8 +408,9 @@ export class TrellisView {
     this.resetButton = button(ICONS.reset, "Reset zoom (r)", () => this.resetZoom());
     const panButton = button(ICONS.pan, "Pan: drag moves the view", () => this.setMode("pan"));
     this.boxButton = button(ICONS.box, "Box zoom: drag a box (z; Shift+drag at any time)", () => this.setMode("zoom"));
-    this.selectButton = button(ICONS.select, "Select: drag a brush (s)", () => this.setMode("select"));
-    this.modeButtons = { pan: panButton, zoom: this.boxButton, select: this.selectButton };
+    this.selectButton = button(ICONS.select, "Select: drag a brush, or click marks (s)", () => this.setMode("select"));
+    const lassoButton = button(ICONS.lasso, "Lasso: draw round the marks to select, or click them (l)", () => this.setMode("lasso"));
+    this.modeButtons = { pan: panButton, zoom: this.boxButton, select: this.selectButton, lasso: lassoButton };
     const modes = el("div", "atr-segmented");
     modes.setAttribute("role", "radiogroup");
     modes.setAttribute("aria-label", "Drag");
@@ -414,7 +422,7 @@ export class TrellisView {
     }
     // a radio group: the arrows move along it, choosing as they go
     modes.addEventListener("keydown", (e) => {
-      const order: Mode[] = ["pan", "zoom", "select"];
+      const order = MODES;
       const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
       if (!step) return;
       const next = order[(order.indexOf(this.mode) + step + order.length) % order.length];
@@ -894,8 +902,10 @@ export class TrellisView {
       mode === "zoom"
         ? "Drag a box to zoom (z or Shift+drag: pan)"
         : mode === "select"
-          ? "Drag to select (s: back to panning; Shift+drag: box zoom)"
-          : "Drag pans (Shift+drag: box zoom)",
+          ? "Drag to select, or click marks (s: back to panning; Shift+drag: box zoom)"
+          : mode === "lasso"
+            ? "Draw round the marks to select, or click them (l: back to panning)"
+            : "Drag pans (Shift+drag: box zoom)",
     );
   }
 
@@ -946,7 +956,7 @@ export class TrellisView {
     // what is selected (counted in the header), and what is drawn so: with a legend entry
     // hovered, its marks (in the range brushed)
     this.selection = b ? select(scene, b) : (shared?.selection ?? null);
-    const shown = this.preview ? select(scene, { x: b?.x ?? null, y: b?.y ?? null, panel: b?.panel ?? null, legend: this.preview }) : this.selection!;
+    const shown = this.preview ? select(scene, b ? { ...b, legend: this.preview } : { x: null, y: null, panel: null, legend: this.preview }) : this.selection!;
     const old = this.selectionSets;
     this.selectionSets = scene.layers.map((layer, i) => {
       const mask = shown.masks[i];
@@ -968,7 +978,7 @@ export class TrellisView {
   /** The brush where it shows in view `v` (px, in the panel), or null. */
   private brushRect(v: PanelView): Rect | null {
     const b = this.brush;
-    if (!b || (!b.x && !b.y) || (b.panel !== null && b.panel !== undefined && b.panel !== v.panel)) return null;
+    if (!b || (!b.x && !b.y) || b.lasso || b.at?.length || (b.panel !== null && b.panel !== undefined && b.panel !== v.panel)) return null;
     const r = v.rect;
     let x0 = r.x;
     let x1 = r.x + r.w;
@@ -987,6 +997,67 @@ export class TrellisView {
       y1 = Math.min(y1, Math.max(a, c));
     }
     return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  }
+
+  /** Whether (x, y) (px) is in the brush where it shows in view `v`: its box, its lasso. */
+  private inBrush(v: PanelView, x: number, y: number): boolean {
+    const b = this.brush;
+    if (b?.lasso && (b.panel === null || b.panel === undefined || b.panel === v.panel)) {
+      return inPolygon((x - v.map.ox) / v.map.sx, (y - v.map.oy) / v.map.sy, b.lasso);
+    }
+    const br = this.brushRect(v);
+    return !!br && x >= br.x && x <= br.x + br.w && y >= br.y && y <= br.y + br.h;
+  }
+
+  /** A lasso from the path drawn in views[d.view]: in the panel, at most LASSO_CORNERS
+   * corners, in axis units (null: too small to select in). */
+  private lassoOf(d: Drag): Brush | null {
+    const v = this.views[d.view];
+    if (!v || !d.path || d.path.length < 3) return null;
+    const r = v.rect;
+    const clamp = (p: [number, number]): [number, number] => [Math.min(r.x + r.w, Math.max(r.x, p[0])), Math.min(r.y + r.h, Math.max(r.y, p[1]))];
+    let path = d.path.map(clamp);
+    for (let tol = 1; path.length > LASSO_CORNERS; tol *= 1.6) path = simplify(d.path.map(clamp), tol);
+    if (path.length < 3) return null;
+    const lasso = path.map(([px, py]): [number, number] => [(px - v.map.ox) / v.map.sx, (py - v.map.oy) / v.map.sy]);
+    const xs = lasso.map((c) => c[0]);
+    const ys = lasso.map((c) => c[1]);
+    const linked = this.scene?.layers.some((l) => l.link) ?? false;
+    return {
+      x: [Math.min(...xs), Math.max(...xs)],
+      y: [Math.min(...ys), Math.max(...ys)],
+      lasso,
+      panel: linked ? v.panel : null,
+      legend: this.brush?.legend ?? null,
+    };
+  }
+
+  /** A click at (x, y) (px) in views[vi]: the mark under it selected (with `add`: added to
+   * those clicked, or taken away), or, on no mark, the selection cleared. */
+  private clickSelect(vi: number, x: number, y: number, add: boolean): void {
+    const v = this.views[vi];
+    const scene = this.scene;
+    const picked = v && scene ? pick(scene, v.panel, v.map, x, y, HOVER_RADIUS) : null;
+    const hit = picked && this.hidden(picked.layer, picked.instance) ? null : picked;
+    if (!hit || !v) {
+      if (add) return;
+      if (this.brush) this.setBrush(null, true); // (a linked plot's too)
+      else if (this.highlight) this.opts.onClear?.();
+      return;
+    }
+    // a bar, a tile or a band: where it was clicked; a point or a line: its point there
+    let ux = (x - v.map.ox) / v.map.sx;
+    let uy = (y - v.map.oy) / v.map.sy;
+    if (hit.layer.kind !== KIND_RECT && hit.layer.spec.type !== "band") {
+      const pt = hitPoint(hit, v.map, x, y, barsAlongY(this.spec!));
+      [ux, uy] = [pt.x, pt.y];
+    }
+    // half a pixel either way: that mark (and any drawn on it)
+    const near: [number, number] = [0.5 / Math.abs(v.map.sx), 0.5 / Math.abs(v.map.sy)];
+    const before = add && this.brush?.at ? this.brush.at : [];
+    const same = (p: [number, number, number | null]): boolean => p[2] === v.panel && Math.abs(p[0] - ux) <= near[0] && Math.abs(p[1] - uy) <= near[1];
+    const at = before.some(same) ? before.filter((p) => !same(p)) : [...before, [ux, uy, v.panel] as [number, number, number | null]];
+    this.setBrush(at.length ? { x: null, y: null, panel: null, legend: this.brush?.legend ?? null, at, near } : null, true);
   }
 
   /** A brush from a drag in views[d.view], shaped as a zoom box would be. */
@@ -1404,6 +1475,9 @@ export class TrellisView {
     const ringed = this.focused === null ? views.find((v) => v.panel === this.ring) : undefined;
     this.front_.ring = ringed ? ringed.rect : null;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
+    const lasso = this.brush?.lasso;
+    const own = (v: PanelView): boolean => this.brush?.panel === null || this.brush?.panel === undefined || this.brush.panel === v.panel;
+    this.front_.lassos = lasso ? views.filter(own).map((v) => ({ clip: v.rect, points: lasso.map(([a, b]): [number, number] => [v.map.ox + a * v.map.sx, v.map.oy + b * v.map.sy]) })) : [];
     drawFront(front, this.spec, this.lay, views, this.panelTheme(), this.front_);
     this.updateChips();
     this.reportView();
@@ -1516,10 +1590,10 @@ export class TrellisView {
     cols.append(
       table("Mouse", [
         ["Scroll", "zoom x (Shift: y; over an axis: that axis)"],
-        ["Drag", "pan, draw a zoom box or select, as the mode on the left of the toolbar says"],
+        ["Drag", "pan, draw a zoom box, select with a brush or a lasso, as the mode on the left of the toolbar says"],
         ["Shift+drag", "box zoom"],
         ["Hover", "the values there; lines by colour: every one at that x"],
-        ["Click", "pin the tooltip, to compare (Esc: unpin)"],
+        ["Click", "pin the tooltip, to compare (Esc: unpin); selecting: select the mark (Shift: add one)"],
         ["Double-click", "open a panel (an axis: reset it)"],
         ["A panel's buttons", "open it, pin it, compare every panel with it"],
         ["Hover a legend entry", "its marks stand out"],
@@ -1534,7 +1608,7 @@ export class TrellisView {
         ["One finger", "scrolls the page; with box zoom or select on, or full screen: as a drag"],
       ]),
       table("Keys", [
-        ["z  s", "box zoom, select (again: pan)"],
+        ["z  s  l", "box zoom, select, lasso (again: pan)"],
         ["y", "fit y to the data in view"],
         ["r  u", "reset the zoom, undo the last"],
         ["Esc", "unpin, clear the selection, close a panel"],
@@ -1744,12 +1818,11 @@ export class TrellisView {
         if (onAxis) kind = onAxis.axis;
         else if (this.mode === "zoom") kind = e.shiftKey ? "pan" : "box";
         else if (e.shiftKey) kind = "box";
-        else if (this.mode === "select") {
-          const br = this.brushRect(v);
-          kind = br && x >= br.x && x <= br.x + br.w && y >= br.y && y <= br.y + br.h ? "move" : "brush";
+        else if (this.mode === "select" || this.mode === "lasso") {
+          kind = this.inBrush(v, x, y) ? "move" : this.mode === "lasso" ? "lasso" : "brush";
           this.dragBrush = this.brush;
         } else kind = "pan";
-        this.drag = { kind, view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false, focused };
+        this.drag = { kind, view: vi, x, y, xr: [...v.x], yr: [...v.y], moved: false, focused, path: kind === "lasso" ? [[x, y]] : undefined };
         stage.setPointerCapture(e.pointerId);
       },
       { signal },
@@ -1795,12 +1868,21 @@ export class TrellisView {
             this.opts.onBrushing?.(this.brush);
             return;
           }
+          if (d.kind === "lasso" && d.path) {
+            const last = d.path[d.path.length - 1];
+            if (Math.hypot(x - last[0], y - last[1]) >= 2) d.path.push([x, y]);
+            this.front_.hovers = [];
+            this.setBrush(this.lassoOf(d), false);
+            this.opts.onBrushing?.(this.brush);
+            return;
+          }
           if (d.kind === "move" && this.dragBrush) {
             const b = this.dragBrush;
             const mx = (x - d.x) / v.map.sx;
             const my = (y - d.y) / v.map.sy;
             this.front_.hovers = [];
-            this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null, legend: b.legend ?? null }, false);
+            const lasso = b.lasso ? b.lasso.map(([a, c]): [number, number] => [a + mx, c + my]) : null;
+            this.setBrush({ x: b.x ? [b.x[0] + mx, b.x[1] + mx] : null, y: b.y ? [b.y[0] + my, b.y[1] + my] : null, panel: b.panel ?? null, legend: b.legend ?? null, lasso }, false);
             this.opts.onBrushing?.(this.brush);
             return;
           }
@@ -1854,19 +1936,24 @@ export class TrellisView {
       }
       // a click (not a drag) pins the tooltip shown, or unpins one; not the click that gives
       // the plot the keys
+      // selecting: a click selects the mark under it (Shift, Cmd or Ctrl: adds it, or takes
+      // it away), or clears the selection
+      const selecting = this.mode === "select" || this.mode === "lasso";
+      if (d && !d.moved && e.type === "pointerup" && selecting && (d.kind === "brush" || d.kind === "lasso" || d.kind === "move" || d.kind === "box")) {
+        this.dragBrush = null;
+        this.front_.box = null;
+        this.front_.ghosts = [];
+        this.clickSelect(d.view, ...this.local(e), e.shiftKey || e.metaKey || e.ctrlKey);
+        return;
+      }
       if (d && !d.moved && d.focused && e.type === "pointerup" && (d.kind === "pan" || d.kind === "box")) {
         if (this.tip.style.display === "block") this.pin();
         else this.unpin();
       }
-      if (d?.kind === "brush" || d?.kind === "move") {
+      if (d?.kind === "brush" || d?.kind === "lasso" || d?.kind === "move") {
         this.dragBrush = null;
         if (e.type === "pointercancel") return;
-        if (!d.moved) {
-          // a click clears the selection (a linked plot's too)
-          if (this.brush) this.setBrush(null, true);
-          else if (this.highlight) this.opts.onClear?.();
-          return;
-        }
+        if (!d.moved) return;
         this.opts.onSelect?.(this.brush); // its count: in the selection's chip
         return;
       }
@@ -1981,6 +2068,9 @@ export class TrellisView {
         return true;
       case "s":
         this.setMode(this.mode === "select" ? "pan" : "select");
+        return true;
+      case "l":
+        this.setMode(this.mode === "lasso" ? "pan" : "lasso");
         return true;
       case "y":
         if (this.spec?.y.kind === "band") return false;
@@ -2909,7 +2999,7 @@ export class TrellisView {
     ctx.clip();
     drawBack(ctx, this.spec, views, this.panelTheme());
     drawMarks(ctx, this.markDraws(views));
-    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts, ends: this.endsOf(views, ctx), ring: null };
+    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, lassos: this.front_.lassos, texts: this.scene.texts, ends: this.endsOf(views, ctx), ring: null };
     drawFront(ctx, this.spec, this.lay, views, this.panelTheme(), front);
     ctx.restore();
     if (shownLegends(this.spec) && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);
