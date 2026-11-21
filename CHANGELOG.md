@@ -8,6 +8,17 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **A plot in one call**: `at.line(df, x=, y=, wrap=)` and `at.points`, `at.bars`,
+  `at.area`, `at.hist`, `at.density`, `at.box`, `at.violin`, `at.ecdf`, `at.hexbin`: each
+  argument goes to `Trellis()` or to the mark by its name, an unknown one an error that
+  says what was meant.
+- **pandas' `df.plot`**: `pd.options.plotting.backend = "anytrellis"`. No x: the index; no
+  y or several: one series a column; `by=` facets; `logy=`, `xlabel=`, `figsize=` and
+  others as in pandas. `anytrellis.shortcuts.plot(df, kind=...)` does the same for any
+  table.
+- **`df.trellis`** on pandas and Polars tables, the shortcuts as methods, after `import
+  anytrellis.pandas` or `import anytrellis.polars`.
+
 - **Sizes for print and PDF**: `save_svg`, `save_png` and the new `save_pdf` take `width=`
   and `height=` as lengths (`"180mm"`, `"18cm"`, `"7in"`, `"500pt"`) as well as CSS pixels;
   `save_png` takes `dpi=` (instead of `scale=`) and records it in the PNG, and the SVG says

@@ -41,6 +41,10 @@ png = ["resvg-py>=0.5.0"]
 # Trellis.save_pdf: a vector PDF of the plot's SVG
 pdf = ["vl-convert-python>=1.7"]
 
+# pd.options.plotting.backend = "anytrellis": df.plot(...) draws with anytrellis
+[project.entry-points.pandas_plotting_backends]
+anytrellis = "anytrellis.shortcuts"
+
 [project.urls]
 Homepage = "https://github.com/mluttikh/anytrellis"
 Documentation = "https://mluttikh.github.io/anytrellis/"
