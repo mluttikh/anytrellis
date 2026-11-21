@@ -125,8 +125,11 @@ const svgFacts = (page, text) =>
   // the clipboard: a PNG, and an SVG with a PNG beside it (a browser without a clipboard,
   // as some headless ones: said, and skipped)
   const clipboard = () => page.evaluate(async () => (await navigator.clipboard.read()).flatMap((i) => i.types)).catch((err) => String(err));
+  // the copy done (the notice no longer "Making the image…"), however slow the machine
+  const copied = () => page.waitForFunction(() => !/Making/.test(document.querySelector(".atr-notice")?.textContent ?? ""), null, { timeout: 10000 }).catch(() => {});
   await choose(page, "copy", "");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
+  await copied();
   let types = await clipboard();
   if (typeof types === "string") console.log(`skip the clipboard: ${types}`);
   else {
@@ -135,7 +138,8 @@ const svgFacts = (page, text) =>
     check(/Copied/.test(notice), `the plot says it was copied ("${notice}")`);
     if (offered.includes("copy-svg")) {
       await choose(page, "copy-svg", "");
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(100);
+      await copied();
       types = await clipboard();
       check(Array.isArray(types) && types.includes("image/svg+xml") && types.includes("image/png"), `Copy as vector puts an SVG and a PNG on it (${types})`);
     }
