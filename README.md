@@ -277,6 +277,10 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 
 These keys stay in the plot, so JupyterLab's own shortcuts don't also act on them.
 
+On a phone or tablet, one finger scrolls the page and the plot takes two: pinch to zoom
+(fingers side by side zoom x alone), move two fingers to pan, and press and hold for the
+values there.
+
 ## Sharing
 
 `t.save_html("plot.html")` writes a page with the data inside, which opens without Python.
