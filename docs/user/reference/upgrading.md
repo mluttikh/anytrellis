@@ -4,6 +4,31 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
+## 0.7.0
+
+No code stops working. Tooltips have a title line and a row a value, and in the minimal
+and framed themes text is a pixel smaller in narrow panels and larger in an opened one
+(`Theme(font_size=12)` keeps it at 12 px).
+
+**Of a panel shape and a height set after the plot is made, the later one decides.** A
+height given to the constructor still sets the panels' height over `aspect=` given with
+it; but `t.aspect = 1` now lets a height go, and `t.panel_height = 200` lets a shape go,
+as the new settings panel does:
+
+```python
+t = Trellis(cars, wrap="origin", panel_height=200)
+
+# 0.6: the panels stay 200 px high
+t.aspect = 1
+
+# now: square panels; to keep the height, set it again
+t.panel_height = 200
+```
+
+`t.title`, `t.subtitle`, `t.caption`, `t.height` and `t.panel_height` now redraw a shown
+plot when set, and a height that isn't a positive number of pixels is refused
+(`ValueError`).
+
 ## 0.6.0
 
 No code stops working; the default look changes.

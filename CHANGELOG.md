@@ -6,6 +6,8 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-21
+
 ### Added
 
 - **A settings panel** in the toolbar (or `,`): the columns, the panels' shape, how the
@@ -448,7 +450,8 @@ The first release.
 - `anytrellis.datasets.load`: six small example datasets, with their sources and licences
   in `datasets/SOURCES.md`; example notebooks for Jupyter and marimo.
 
-[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/mluttikh/anytrellis/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/mluttikh/anytrellis/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mluttikh/anytrellis/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mluttikh/anytrellis/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mluttikh/anytrellis/compare/v0.3.0...v0.4.0
