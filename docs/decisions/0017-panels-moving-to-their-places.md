@@ -28,7 +28,7 @@ grow from where it was, and none of it when the browser asks for reduced motion.
   the opened panel (`setFocus`), from Python or the reader. A resize, a zoom or a new spec
   from Python never animates.
 - **250 ms, slow at both ends** (cubic). Keys and the pointer work meanwhile; hit testing
-  uses the rects drawn. What is shown is reported to Python (`view`) once the panels stop.
+  uses the rects drawn. A step among the marks (0016) puts the panels in place at once. What is shown is reported to Python (`view`) once the panels stop.
 - **Reduced motion**: `prefers-reduced-motion: reduce` turns it off; the browser's setting,
   not the plot's, so it holds in every notebook and page.
 - `figure.py` draws images, which have nothing to animate (0003 unchanged).

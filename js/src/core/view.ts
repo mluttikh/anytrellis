@@ -1893,6 +1893,7 @@ export class TrellisView {
       this.notify("No marks in this panel");
       return;
     }
+    this.motion = null; // a panel still on its way: in its place, the mark found there
     const here = this.panelViews().find((w) => w.panel === p);
     if (!here) return;
     const k = this.markAt?.panel === p ? stops.indexOf(this.markAt.stop) : -1;
