@@ -79,6 +79,12 @@ export interface ViewOptions {
   onPaging?: (paging: Paging) => void;
   /** Layers in detail were drawn (Python sends a highlight for them again). */
   onDetail?: () => void;
+  /** The settings panel's changes, by name: Python applies them and sends the new spec
+   * (rejects with what went wrong; the plot stays as it was). Absent (a saved page): the
+   * panel offers "Copy as Python" alone. */
+  onSettings?: (changes: Record<string, unknown>) => Promise<void>;
+  /** The Python that makes the plot as it is now (Trellis.code), or null. */
+  code?: () => string | null;
 }
 
 /** A layer Python sends in more detail for the view shown (a long line thinned less, dense
@@ -232,6 +238,7 @@ const ICONS = {
   box: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" stroke-dasharray="2 1.6" /><path d="m10.5 10.5 3 3" /></svg>',
   select: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="7" rx="1" stroke-dasharray="2 1.6" /><path d="M6 8h4" /></svg>',
   export: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M5 7l3 3 3-3M2.5 10.5v3h11v-3" /></svg>',
+  settings: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 11.5h11" /><circle cx="6" cy="4.5" r="1.8" /><circle cx="10.5" cy="11.5" r="1.8" /></svg>',
   fitY: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10M3 13.5h10M8 5v6M6 7l2-2 2 2M6 9l2 2 2-2" /></svg>',
 };
 
@@ -305,6 +312,10 @@ export class TrellisView {
   /** The legend entry shown alone (a double-click), and its layers' instances as drawn. */
   private isolated: { index: number; level: number } | null = null;
   private isolatedSets: (InstanceSet | null)[] = [];
+  private readonly settingsButton: HTMLButtonElement;
+  private readonly settingsPanel: HTMLDivElement;
+  /** Settings sent to Python, not yet answered: the panel waits. */
+  private settingsBusy = false;
   /** Fingers on the stage (pointer id: where), a pinch of two, a press of one. */
   private touches = new Map<number, [number, number]>();
   private pinch: Pinch | null = null;
@@ -432,7 +443,16 @@ export class TrellisView {
     this.exportMenu = el("div", "atr-export");
     this.exportMenu.setAttribute("role", "menu");
     this.exportMenu.hidden = true;
-    this.toolbar.append(this.backButton, modes, this.fitButton, this.resetButton, this.exportButton, this.helpButton, this.fullButton);
+    this.settingsButton = button(ICONS.settings, "Settings: layout, scales, colour, order; Copy as Python (,)", () => this.toggleSettings());
+    this.settingsButton.setAttribute("aria-haspopup", "dialog");
+    this.settingsButton.setAttribute("aria-expanded", "false");
+    this.settingsButton.hidden = true;
+    this.settingsPanel = el("div", "atr-settings");
+    this.settingsPanel.setAttribute("role", "dialog");
+    this.settingsPanel.setAttribute("aria-label", "Settings");
+    this.settingsPanel.tabIndex = -1;
+    this.settingsPanel.hidden = true;
+    this.toolbar.append(this.backButton, modes, this.fitButton, this.resetButton, this.settingsButton, this.exportButton, this.helpButton, this.fullButton);
     this.header.append(this.heading, this.chips, this.toolbar);
     this.pager = new Pager((paging) => this.setPaging(paging, true));
     this.pager.el.hidden = true;
@@ -460,7 +480,7 @@ export class TrellisView {
     this.tools.append(this.openTool, this.pinTool, this.compareTool);
     for (const type of ["pointerdown", "pointermove", "pointerup", "dblclick", "wheel"]) this.tools.addEventListener(type, (e) => e.stopPropagation());
     this.stage.append(this.back, this.front, this.tools, this.tip, this.status, this.notice, this.empty);
-    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.help);
+    this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.settingsPanel, this.help);
     host.append(this.root);
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
@@ -518,6 +538,11 @@ export class TrellisView {
     const old = this.spec;
     const openName = this.pendingFocus ?? (old && this.focused !== null ? panelName(old, this.focused) : null);
     this.spec = spec;
+    this.settingsButton.hidden = !spec.settings && !this.opts.code?.();
+    if (!this.settingsPanel.hidden) {
+      if (this.settingsButton.hidden) this.toggleSettings(false);
+      else this.fillSettings();
+    }
     if (spec.description) this.root.setAttribute("aria-label", spec.description);
     else this.root.removeAttribute("aria-label");
     this.detail.clear(); // Python sends them again for the view shown
@@ -1467,6 +1492,7 @@ export class TrellisView {
     if (!show) return;
     this.hideTip();
     this.toggleExport(false);
+    this.toggleSettings(false);
     this.fillHelp();
     this.help.focus();
   }
@@ -1516,7 +1542,7 @@ export class TrellisView {
         ["Enter", "open the panel reached (or under the pointer)"],
         ["p  c", "pin it first on every page, compare every panel with it"],
         ["Page Up / Down", "the previous / next panel or page"],
-        ["e  f", "export, full screen"],
+        ["e  ,  f", "export, settings (and Copy as Python), full screen"],
         ["?", "these keys"],
       ]),
     );
@@ -1656,6 +1682,7 @@ export class TrellisView {
       (e) => {
         const path = e.composedPath();
         if (!this.exportMenu.hidden && !path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
+        if (!this.settingsPanel.hidden && !path.includes(this.settingsPanel) && !path.includes(this.settingsButton)) this.toggleSettings(false);
         if (!this.help.hidden && !path.includes(this.help) && !path.includes(this.helpButton)) this.toggleHelp(false);
         if (this.pager.menuOpen && !path.includes(this.pager.el)) this.pager.toggleMenu(false);
       },
@@ -1937,6 +1964,10 @@ export class TrellisView {
       case "e":
         this.toggleExport();
         return true;
+      case ",":
+        if (this.settingsButton.hidden) return false;
+        this.toggleSettings();
+        return true;
       case "?":
         this.toggleHelp();
         return true;
@@ -1996,6 +2027,11 @@ export class TrellisView {
         }
         if (!this.exportMenu.hidden) {
           this.toggleExport(false);
+          return true;
+        }
+        if (!this.settingsPanel.hidden) {
+          this.toggleSettings(false);
+          this.settingsButton.focus();
           return true;
         }
         if (this.pager.menuOpen) {
@@ -2915,6 +2951,7 @@ export class TrellisView {
     this.exportButton.setAttribute("aria-expanded", String(show));
     if (!show) return;
     this.toggleHelp(false);
+    this.toggleSettings(false);
     this.hideTip();
     const actions: [string, string, ExportHow][] = [];
     if (canCopyImages()) actions.push(["Copy image", "a PNG, to paste into slides", "copy"]);
@@ -2939,6 +2976,109 @@ export class TrellisView {
       }),
     );
     (this.exportMenu.firstElementChild as HTMLElement | null)?.focus();
+  }
+
+  // ---- settings -------------------------------------------------------------------------
+
+  /** Show or hide the settings panel (its toolbar button). */
+  private toggleSettings(show = this.settingsPanel.hidden): void {
+    this.settingsPanel.hidden = !show;
+    this.settingsButton.setAttribute("aria-expanded", String(show));
+    if (!show) return;
+    this.toggleHelp(false);
+    this.toggleExport(false);
+    this.hideTip();
+    this.fillSettings();
+    (this.settingsPanel.querySelector("select, button") as HTMLElement | null)?.focus();
+  }
+
+  /** The panel's controls, from the spec's settings: a change goes to Python, which draws
+   * the plot again (or says why it can't). A saved page: "Copy as Python" alone. */
+  private fillSettings(): void {
+    const spec = this.spec;
+    const sections = this.opts.onSettings ? (spec?.settings ?? []) : [];
+    const focused = (document.activeElement as HTMLElement | null)?.dataset?.setting;
+    const parts: HTMLElement[] = [];
+    for (const section of sections) {
+      const box = el("div", "atr-settings-section");
+      box.append(el("div", "atr-settings-title", section.title));
+      for (const s of section.settings) {
+        const row = el("label", "atr-settings-row");
+        const name = el("span", "atr-settings-label", s.label);
+        row.append(name);
+        if (s.kind === "stepper") {
+          const value = Number(s.shown ?? s.value ?? 1);
+          const down = el("button", "atr-step", "−");
+          const shown = el("span", "atr-step-value", String(value));
+          const up = el("button", "atr-step", "+");
+          down.type = up.type = "button";
+          down.dataset.setting = `${s.name}-`;
+          up.dataset.setting = `${s.name}+`;
+          down.setAttribute("aria-label", `Fewer ${s.label.toLowerCase()}`);
+          up.setAttribute("aria-label", `More ${s.label.toLowerCase()}`);
+          down.disabled = this.settingsBusy || value <= (s.min ?? 1);
+          up.disabled = this.settingsBusy || value >= (s.max ?? Infinity);
+          down.addEventListener("click", () => this.changeSetting(s.name, value - 1));
+          up.addEventListener("click", () => this.changeSetting(s.name, value + 1));
+          const stepper = el("span", "atr-stepper");
+          stepper.append(down, shown, up);
+          row.append(stepper);
+        } else {
+          const select = el("select", "atr-select");
+          select.dataset.setting = s.name;
+          const options = s.options ?? [];
+          const current = JSON.stringify(s.value ?? null);
+          options.forEach(([value, label], i) => {
+            const o = el("option", "", label);
+            o.value = String(i);
+            o.selected = JSON.stringify(value ?? null) === current;
+            select.append(o);
+          });
+          select.disabled = this.settingsBusy;
+          select.addEventListener("change", () => this.changeSetting(s.name, options[Number(select.value)]?.[0] ?? null));
+          row.append(select);
+        }
+        box.append(row);
+      }
+      parts.push(box);
+    }
+    if (!this.opts.onSettings && spec?.settings) parts.push(el("div", "atr-settings-note", "In a notebook, this panel changes the layout, scales, colour and order. Here, copy the plot's Python."));
+    const code = this.opts.code?.() ?? null;
+    if (code) {
+      const actions = el("div", "atr-settings-actions");
+      const copy = el("button", "atr-settings-copy", "Copy as Python");
+      copy.type = "button";
+      copy.dataset.setting = "copy";
+      copy.addEventListener("click", () => {
+        copyText(code).then(
+          () => this.notify("Copied the plot's Python"),
+          () => this.notify("Could not copy: select the code below", 2400),
+        );
+      });
+      const text = el("pre", "atr-code", code);
+      text.tabIndex = 0;
+      text.setAttribute("aria-label", "The plot's Python");
+      actions.append(copy);
+      parts.push(actions, text);
+    }
+    this.settingsPanel.replaceChildren(...parts);
+    if (focused) (this.settingsPanel.querySelector(`[data-setting="${focused}"]`) as HTMLElement | null)?.focus();
+  }
+
+  /** A setting changed: Python draws the plot again; the panel waits for it. */
+  private changeSetting(name: string, value: unknown): void {
+    const send = this.opts.onSettings;
+    if (!send || this.settingsBusy) return;
+    this.settingsBusy = true;
+    this.settingsPanel.setAttribute("aria-busy", "true");
+    this.fillSettings();
+    send({ [name]: value })
+      .catch((err: unknown) => this.notify(`Can't: ${err instanceof Error ? err.message : String(err)}`, 4000))
+      .finally(() => {
+        this.settingsBusy = false;
+        this.settingsPanel.removeAttribute("aria-busy");
+        if (!this.settingsPanel.hidden) this.fillSettings();
+      });
   }
 
   /** Export the plot as shown: to the clipboard, a download, or a file Python saves. */
@@ -3078,4 +3218,23 @@ function legendSwatch(lg: LegendSpec, i: number): HTMLElement {
 /** How many legends the plot shows (not those whose levels label the lines' ends). */
 function shownLegends(spec: TrellisSpec): number {
   return spec.legends.filter((lg) => !lg.direct).length;
+}
+
+/** Text to the clipboard: the async API, else a selected text area (older browsers, frames
+ * without the permission). */
+function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).catch(() => copyByCommand(text));
+  return copyByCommand(text);
+}
+
+function copyByCommand(text: string): Promise<void> {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  return ok ? Promise.resolve() : Promise.reject(new Error("no clipboard"));
 }

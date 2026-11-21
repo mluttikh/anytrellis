@@ -159,6 +159,11 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       model.set("paging", paging);
       model.save_changes();
     },
+    // the settings panel: Python applies the changes and sends the new spec
+    onSettings: async (changes) => {
+      await ask(model, s, { type: "settings", changes });
+    },
+    code: () => (model.get("_code") as string | null) || null,
     // layers in detail drawn: keep only the buffers drawn, and highlight them again
     onDetail: () => {
       const spec = model.get("_spec") as TrellisSpec;

@@ -31,6 +31,11 @@ buffers, drawn in the browser. This module is the protocol between them.
   width, height], ...]}``: the plot's width, each scale group's range as shown (relative to
   the origins) and the panels shown (their size in CSS px), sent a moment after they
   change; ``Trellis.save_png`` and ``save_svg`` draw that view.
+* ``{"type": "settings", "request", "changes": {name: value}}``: the settings panel's
+  changes (``Trellis._apply_settings``: each the property or method of that name); the new
+  ``_spec`` follows, and Python answers ``{"type": "answer", "request"}``, with ``error``
+  when the plot can't draw them (it is then as it was). ``_code`` (synced) is
+  ``Trellis.code()``, kept current for "Copy as Python".
 * ``{"type": "detail", "layers": [{"index", "of", "layer"}, ...]}`` (Python to the browser):
   layers of many rows (``anytrellis.detail``) for the view reported, in more detail where it
   is zoomed in: spec layer ``index`` is drawn as ``layer`` instead, while the spec's has
@@ -83,6 +88,9 @@ class TrellisWidget(anywidget.AnyWidget):
     paging = traitlets.Dict({}).tag(sync=True)
     #: Send the brush while it is dragged, not only on release (a linked plot).
     _live = traitlets.Bool(False).tag(sync=True)
+    #: ``Trellis.code()``, kept current: the settings panel's "Copy as Python" copies it at
+    #: once (a clipboard write must happen in the click).
+    _code = traitlets.Unicode("").tag(sync=True)
 
     def __init__(self, plot: Trellis, state: dict[str, Any]) -> None:
         self._plot = plot
@@ -99,10 +107,12 @@ class TrellisWidget(anywidget.AnyWidget):
 
     def _on_paging(self, change: dict[str, Any]) -> None:
         self._plot._paging = Paging(**change["new"])  # turned in the browser: save_html keeps it
+        self._plot._sync_code()  # its sort, filters and pins
         self._plot._send_detail()  # the data of the panels around the page shown
 
     def _on_compare(self, change: dict[str, Any]) -> None:
         self._plot._compare = change["new"]  # chosen in the browser: save_html keeps it
+        self._plot._sync_code()
         self._plot._send_detail()  # a panel of another page: its data
 
     def _on_focus(self, change: dict[str, Any]) -> None:
@@ -138,6 +148,13 @@ class TrellisWidget(anywidget.AnyWidget):
             self._plot._send_highlight()
         elif kind == "clear":  # a click in a linked plot with no brush of its own
             self._plot._clear_link()
+        elif kind == "settings":  # the settings panel: the plot drawn again, or as it was
+            answer = {"type": "answer", "request": content.get("request")}
+            try:
+                self._plot._apply_settings(dict(content.get("changes") or {}))
+            except Exception as err:  # the browser says what went wrong
+                answer["error"] = str(err)
+            self.send(answer)
 
     def _send_buffer(self, buffer_id: str) -> None:
         _, buffers = self._plot._scene()

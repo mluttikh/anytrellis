@@ -8,6 +8,16 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **A settings panel** in the toolbar (or `,`): the columns, the panels' shape, how the
+  scales are shared, log, square-root and symlog scales, the colour column and the
+  panels' order (by the median, mean, extremes or rows), each the property or method of
+  the same name in Python (`t.cols`, `t.aspect`, `t.share_x`, `t.share_y`, `t.x_scale`,
+  `t.y_scale`, `t.color`, `order()`), synced both ways. A change the plot can't draw is
+  refused with the reason. `controls=False` leaves it out.
+- **`t.code()` and "Copy as Python"**: the Python that makes the plot as it is now, the
+  calls that made it with every change made by hand written in (the settings panel, the
+  page bar's sort, filters and pins, the compared panel), tables by their notebook names.
+  Run, it makes the same plot. Saved pages keep "Copy as Python".
 - **A description for screen readers**: every plot gets a sentence made from what it
   shows ("Scatter of mpg against weight, one panel per origin (3), coloured by cylinders.
   406 rows. mpg from 9 to 46.6; weight from 1613 to 5140."), `t.description`. The plot is

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 import numpy as np
 
 from anytrellis.channels import DASHES, SIZE_RANGE, Channels, dash_units, shape_code
+from anytrellis.code import Call, call_text, chained, literal, recorded, recorded_init
 from anytrellis.codec import Buffers
 from anytrellis.data import Table, number_label
 from anytrellis.describe import Axis, describe, facet_phrase
@@ -239,12 +240,24 @@ class Trellis:
             for readers who don't tell the colours apart or print in grey. A layer's own
             ``shape=`` or ``dash=`` wins. Default: the theme's (``set_theme(redundant=True)``
             for every plot).
+        controls: The settings panel (its toolbar button): the columns, the panels' shape,
+            the scales and how they are shared, the colour column and the panels' order,
+            each the property or method of the same name (``t.share_y``), and "Copy as
+            Python" (``code()``). ``False`` leaves it out (a page to publish).
         alt: The plot's description for screen readers, in place of the one made from what
             it shows ("Scatter of mpg against weight, one panel per origin (3), coloured by
             cylinders. 398 rows. ..."; ``description``). Saved images and pages carry it
             too.
     """
 
+    _given: Call
+    """The call that made the plot (``code``)."""
+    _calls: list[Call]
+    """The calls that built it since, as recorded."""
+    _recording: bool
+    """Inside a recorded call: the calls it makes are not recorded."""
+
+    @recorded_init
     def __init__(
         self,
         data: Any = None,
@@ -282,10 +295,12 @@ class Trellis:
         renderer: str = "auto",
         redundant: bool | None = None,
         alt: str | None = None,
+        controls: bool = True,
     ) -> None:
         self.theme: Theme = theme_of(theme)
         self.redundant = bool(self.theme.redundant if redundant is None else redundant)
         self.alt = alt
+        self.controls = bool(controls)
         named = _named_colors(palette)  # a dict: a colour per category
         if isinstance(palette, Mapping):
             palette = None
@@ -340,10 +355,7 @@ class Trellis:
         self._tables: dict[int, Table] = {}
         self.height = height
         self.panel_height = panel_height
-        if aspect is not None and aspect != "bank" and \
-                not (isinstance(aspect, int | float) and aspect > 0):  # fmt: skip
-            raise ValueError(f"aspect must be positive or 'bank', got {aspect!r}")
-        self.aspect = aspect
+        self._aspect_given = _aspect_of(aspect)
         self._banked: float | None = None
         """``aspect="bank"`` with ``load="pages"``: the aspect banked from the rows read
         first, kept so that turning the pages doesn't change the panels' shape."""
@@ -429,6 +441,7 @@ class Trellis:
 
     # ---- layers -------------------------------------------------------------------------
 
+    @recorded
     def line(
         self,
         data: Any = None,
@@ -495,6 +508,7 @@ class Trellis:
                       step=step, dash=pattern, dash_by=by, label=label)  # fmt: skip
         return self._add(layer)
 
+    @recorded
     def points(
         self,
         data: Any = None,
@@ -556,6 +570,7 @@ class Trellis:
                       size_range=(lo, hi))  # fmt: skip
         return self._add(layer)
 
+    @recorded
     def bars(
         self,
         data: Any = None,
@@ -638,6 +653,7 @@ class Trellis:
                                facet, opacity=opacity, position=position, bar_width=width,
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def area(
         self,
         data: Any = None,
@@ -678,6 +694,7 @@ class Trellis:
                                _names(group), facet, opacity=opacity, position=position,
                                tooltip=list(tooltip)))  # fmt: skip
 
+    @recorded
     def band(
         self,
         data: Any = None,
@@ -715,6 +732,7 @@ class Trellis:
                                _names(group), facet, opacity=opacity, y2=ymax,
                                tooltip=list(tooltip)))  # fmt: skip
 
+    @recorded
     def smooth(
         self,
         data: Any = None,
@@ -772,6 +790,7 @@ class Trellis:
                                facet, width=width, opacity=opacity,
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def rect(
         self,
         data: Any = None,
@@ -816,6 +835,7 @@ class Trellis:
                       rect_height=height)  # fmt: skip
         return self._add(layer)
 
+    @recorded
     def text(
         self,
         data: Any = None,
@@ -866,6 +886,7 @@ class Trellis:
                       dx=dx, dy=dy, repel=bool(repel))  # fmt: skip
         return self._add(layer)
 
+    @recorded
     def hist(
         self,
         data: Any = None,
@@ -915,6 +936,7 @@ class Trellis:
                                facet, opacity=opacity, position=position,
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def ecdf(
         self,
         data: Any = None,
@@ -959,6 +981,7 @@ class Trellis:
                                facet, width=width, opacity=opacity,
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def box(
         self,
         data: Any = None,
@@ -1013,6 +1036,7 @@ class Trellis:
                                position=position, tooltip=list(tooltip),
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def density(
         self,
         data: Any = None,
@@ -1057,6 +1081,7 @@ class Trellis:
                                (), facet, width=width, opacity=opacity,
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def horizon(
         self,
         data: Any = None,
@@ -1101,6 +1126,7 @@ class Trellis:
         return self._add(Layer("horizon", name or self._name("horizon"), data, x, y,
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def violin(
         self,
         data: Any = None,
@@ -1174,6 +1200,7 @@ class Trellis:
                                position=position, tooltip=list(tooltip),
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def errorbar(
         self,
         data: Any = None,
@@ -1276,6 +1303,7 @@ class Trellis:
                                position=position, tooltip=list(tooltip),
                                stat_args=args))  # fmt: skip
 
+    @recorded
     def rule(
         self,
         data: Any = None,
@@ -1325,6 +1353,7 @@ class Trellis:
                       color=color, width=width, dash=list(dash))  # fmt: skip
         return self._add(layer)
 
+    @recorded
     def annotate(
         self,
         text: str,
@@ -1411,6 +1440,7 @@ class Trellis:
             out.append({**note, **pos, "panels": panels, "size": size, "color": color})
         return out
 
+    @recorded
     def share(self, x: bool | str | None = None, y: bool | str | None = None) -> Self:
         """Share scales across panels: ``True`` (all), ``"row"``, ``"col"``, ``"page"``,
         ``False`` (each panel its own) or ``"sliced"`` (each its own range, all as wide as the
@@ -1421,6 +1451,7 @@ class Trellis:
             self._share["y"] = share_mode(y)
         return self._changed()
 
+    @recorded
     def scale(self, x: str | Sequence[str] | None = None,
               y: str | Sequence[str] | None = None) -> Self:  # fmt: skip
         """The axes' scales, as ``Trellis(x_scale=...)``: ``"linear"``, ``"log"``,
@@ -1440,6 +1471,7 @@ class Trellis:
             self._scales["y"], self._reverse["y"] = _scale(y)
         return self._changed()
 
+    @recorded
     def limits(self, x: tuple[Any, Any] | None = None, y: tuple[Any, Any] | None = None) -> Self:
         """The axes' ranges, ``(low, high)``, either end ``None`` for the data's own:
         ``t.limits(y=(0, None))`` starts y at 0. Times as dates or datetimes (``("2026-03-01",
@@ -1462,6 +1494,7 @@ class Trellis:
                 self._limits[axis] = (lo, hi)
         return self._changed()
 
+    @recorded
     def format(self, x: str | None = None, y: str | None = None, *,
                color: str | None = None) -> Self:  # fmt: skip
         """How values are written on the axes, in tooltips and at a colour legend's ends:
@@ -1490,6 +1523,7 @@ class Trellis:
             self._formats[name] = spec
         return self._changed()
 
+    @recorded
     def legend(self, position: str | None = None, *,
                title: str | Mapping[str, str] | None = None) -> Self:  # fmt: skip
         """Where the legend goes, and its title.
@@ -1555,6 +1589,325 @@ class Trellis:
         percent, ``"40%"``."""
         return ".0%" if self._shares == axis else None
 
+    # ---- settings (the settings panel's, by the same names) ---------------------------------
+
+    @property
+    def cols(self) -> int | None:
+        """A wrap's columns (``None``: about the square root of the panels; 6 a page)."""
+        return self._cols
+
+    @cols.setter
+    def cols(self, cols: int | None) -> None:
+        if cols is not None and (not isinstance(cols, int) or isinstance(cols, bool) or cols < 1):
+            raise ValueError(f"cols must be at least 1, got {cols!r}")
+        self._cols = cols
+        self._changed()
+
+    @property
+    def aspect(self) -> float | str | None:
+        """Each panel's height as a multiple of its width, ``"bank"``, or ``None`` (as the
+        plot's height and the panels fit)."""
+        return self._aspect_given
+
+    @aspect.setter
+    def aspect(self, aspect: float | str | None) -> None:
+        self._aspect_given = _aspect_of(aspect)
+        self._banked = None
+        self._changed()
+
+    @property
+    def share_x(self) -> bool | str:
+        """How panels share the x scale, as ``Trellis(share_x=...)`` takes it."""
+        return _share_given(self._share["x"])
+
+    @share_x.setter
+    def share_x(self, share: bool | str) -> None:
+        self.share(x=share)
+
+    @property
+    def share_y(self) -> bool | str:
+        """How panels share the y scale, as ``Trellis(share_y=...)`` takes it."""
+        return _share_given(self._share["y"])
+
+    @share_y.setter
+    def share_y(self, share: bool | str) -> None:
+        self.share(y=share)
+
+    @property
+    def x_scale(self) -> str | tuple[str, str]:
+        """The x scale, as ``Trellis(x_scale=...)`` takes it."""
+        return _scale_given(self._scales["x"], self._reverse["x"])
+
+    @x_scale.setter
+    def x_scale(self, scale: str | Sequence[str]) -> None:
+        self.scale(x=scale)
+
+    @property
+    def y_scale(self) -> str | tuple[str, str]:
+        """The y scale, as ``Trellis(y_scale=...)`` takes it."""
+        return _scale_given(self._scales["y"], self._reverse["y"])
+
+    @y_scale.setter
+    def y_scale(self, scale: str | Sequence[str]) -> None:
+        self.scale(y=scale)
+
+    @property
+    def color(self) -> str | None:
+        """The colour column of the layers drawing the plot's data (their ``color=``), or
+        None. Setting it recolours each of them that has no colour of its own (a layer
+        given one colour, ``color="#888"``, keeps it); ``None``: none."""
+        layers = self._recolored()
+        return next((lr.color for lr in layers if lr.color is not None), None)
+
+    @color.setter
+    def color(self, column: str | None) -> None:
+        table = self._data
+        if column is not None and (table is None or column not in table):
+            raise ValueError(f"color={column!r} is not a column of the plot's data")
+        layers = self._recolored()
+        if not layers:
+            raise ValueError("no layer draws the plot's data in a colour column")
+        for layer in layers:
+            if layer.second:  # redundant: the shape or dash follows the colour
+                layer.shape = column if layer.mark == "points" else layer.shape
+                layer.dash_by = column if layer.mark == "line" else layer.dash_by
+                layer.second = column is not None
+            layer.color = column
+            if column is not None and self.redundant and not layer.second:
+                self._second(layer)
+        self._changed()
+
+    def _recolored(self) -> list[Layer]:
+        """The layers ``color`` sets: drawing the plot's data, coloured by a column or not
+        at all (not in one colour of their own)."""
+        table = self._data
+        if table is None:
+            return []
+        return [lr for lr in self._layers
+                if lr.data is None and lr.mark not in ("rule", "horizon")
+                and (lr.color is None or lr.color in table)]  # fmt: skip
+
+    def _second(self, layer: Layer) -> None:
+        """``redundant``: the colour column as the shape of points, the dash of lines (a
+        layer's own shape or dash kept)."""
+        if layer.mark == "points" and layer.shape is None:
+            layer.shape, layer.second = layer.color, True
+        elif layer.mark == "line" and layer.dash_by is None and not layer.dash:
+            layer.dash_by, layer.second = layer.color, True
+
+    def code(self) -> str:
+        """The Python that makes this plot as it is now: the calls that made it, with what
+        was changed by hand written in (in the settings panel, the page bar, on a panel).
+        The settings panel's "Copy as Python" copies the same. A table is written as the
+        name it has in the notebook (else ``data``).
+
+        ```python
+        print(t.code())
+        # (
+        #     Trellis(cars, wrap="origin", share_y="row")
+        #     .points(x="weight", y="mpg", color="cylinders")
+        # )
+        ```
+        """
+        given = self._given
+        if given.name == "Pairs":  # pairs(): made whole by its call
+            from anytrellis.pairs import pairs
+
+            return call_text("pairs", given.args, _given_only(pairs, given.kwargs))
+        kwargs = _given_only(Trellis.__init__, given.kwargs)
+        settings = (
+            ("cols", self._cols, None),
+            ("aspect", self._aspect_given, None),
+            ("share_x", self.share_x, True),
+            ("share_y", self.share_y, True),
+            ("x_scale", self.x_scale, "linear"),
+            ("y_scale", self.y_scale, "linear"),
+        )
+        for name, value, default in settings:
+            if value == default:
+                kwargs.pop(name, None)
+            else:
+                kwargs[name] = value
+        calls: list[str] = []
+        if self._categories:
+            calls.append(call_text("as_category", sorted(self._categories), {}))
+        for c in self._calls:
+            if c.name in ("share", "scale", "order", "as_category"):
+                continue  # written from what they set, above and below
+            kw = dict(c.kwargs)
+            layer = c.layer
+            if layer is not None and layer.color != kw.get("color"):
+                if layer.color is None:
+                    kw.pop("color", None)
+                else:
+                    kw["color"] = layer.color
+            calls.append(call_text(c.name, c.args, kw))
+        for column, order in self._orders.items():
+            if order.levels is not None:
+                calls.append(call_text("order", [column, list(order.levels)], {}))
+            else:
+                kw = {"by": order.by, "of": order.of}
+                if order.descending:
+                    kw["descending"] = True
+                calls.append(call_text("order", [column], {k: v for k, v in kw.items()
+                                                           if v is not None}))  # fmt: skip
+        paging = self._paging
+        if paging.get("sort"):
+            kw = {"descending": True} if paging.get("descending") else {}
+            calls.append(call_text("sort_panels", [paging["sort"]], kw))
+        where = {k: v for k, v in (paging.get("where") or {}).items() if v not in (None, "")}
+        if paging.get("name") or where:
+            args = [paging["name"]] if paging.get("name") else []
+            if all(k.isidentifier() for k in where):
+                calls.append(call_text("filter_panels", args, where))
+            else:
+                calls.append(
+                    f"filter_panels({', '.join([*map(literal, args), '**' + literal(where)])})"
+                )
+        if paging.get("pinned"):
+            calls.append(call_text("pin", list(paging["pinned"]), {}))
+        if self.compared is not None:
+            calls.append(call_text("compare", [self.compared], {}))
+        return chained(call_text("Trellis", given.args, kwargs), calls)
+
+    def _sync_code(self) -> None:
+        """The widget's copy of ``code()`` (the settings panel copies it at once)."""
+        if self._widget is not None:
+            self._widget._code = self.code()
+
+    def _settings(
+        self,
+        spec: dict[str, Any],
+        grid: Grid,
+        pages: dict[str, Any] | None,
+        levels: tuple[list[str] | None, list[str] | None],
+    ) -> list[dict[str, Any]] | None:
+        """The settings panel's sections and their settings, each a property or method of
+        the same name: its value, and the choices (value and label) it offers."""
+        if not self.controls or self._given.name == "Pairs":
+            return None
+
+        def choice(
+            name: str, label: str, value: Any, options: list[tuple[Any, str]]
+        ) -> dict[str, Any]:
+            if all(o[0] != value for o in options):
+                options = [*options, (value, str(value))]
+            return {"name": name, "label": label, "kind": "select", "value": value,
+                    "options": [list(o) for o in options]}  # fmt: skip
+
+        many = len(grid.panels) > 1
+        layout: list[dict[str, Any]] = []
+        if self._wrap:
+            cols = int(spec["grid"]["cols"])
+            most = 12 if pages else max(1, len(grid.panels))
+            layout.append({"name": "cols", "label": "Columns", "kind": "stepper",
+                           "value": self._cols if self._cols is not None else cols,
+                           "shown": cols, "min": 1, "max": most})  # fmt: skip
+        shapes: list[tuple[Any, str]] = [(None, "Auto"), (0.5, "Wide (1:2)"), (0.75, "4:3"),
+                                         (1, "Square"), (1.5, "Tall (3:2)")]  # fmt: skip
+        if any(lr.mark in ("line", "smooth") for lr in self._layers):
+            shapes.append(("bank", "Banked to 45°"))
+        layout.append(choice("aspect", "Panel shape", self._aspect_given, shapes))
+        scales: list[dict[str, Any]] = []
+        for axis, lv in zip(("x", "y"), levels, strict=True):
+            if many:
+                share: list[tuple[Any, str]] = [(True, "Shared"), (False, "Free")]
+                if self._row or self._col:
+                    share += [("row", "Per row"), ("col", "Per column")]
+                if pages:
+                    share.append(("page", "Per page"))
+                if lv is None:
+                    share.append(("sliced", "Sliced (one width)"))
+                scales.append(choice(f"share_{axis}", f"Share {axis}",
+                                     _share_given(self._share[axis]), share))  # fmt: skip
+            if spec[axis]["kind"] not in ("band", "time"):  # numbers, on any scale
+                options: list[tuple[Any, str]] = [
+                    ("linear", "Linear"), ("log", "Log"), ("sqrt", "Square root"),
+                    ("symlog", "Symlog"),
+                ]  # fmt: skip
+                scales.append(choice(f"{axis}_scale", f"{axis} scale", self._scales[axis], options))
+        data: list[dict[str, Any]] = []
+        table = self._data
+        if table is not None and self._recolored():
+            columns: list[tuple[Any, str]] = [(None, "None")]
+            for name in table.names:
+                kind = table.kind(name)
+                # (a database's: listed without counting its levels)
+                lazy = table.lazy is not None
+                few = kind == "category" and (lazy or len(table.levels(name)) <= COLOR_LEVELS)
+                if kind == "number" or few:
+                    columns.append((name, self._label(name)))
+            data.append(choice("color", "Colour by", self.color, columns))
+        facets = [*self._wrap, *self._row, *self._col]
+        if facets:
+            first = next((lr for lr in self._layers if lr.mark != "rule"), None)
+            numbers = {a: spec[a]["kind"] not in ("band", "time") for a in ("x", "y")}
+            of = first.y if first is not None and first.y is not None and numbers["y"] \
+                else (first.x if first is not None and numbers["x"] else None)  # fmt: skip
+            orders: list[tuple[Any, str]] = [("levels", "As the levels go")]
+            if of is not None:
+                name = self._label(of)
+                orders += [
+                    (by, f"{by.capitalize()} {name}") for by in ("median", "mean", "min", "max")
+                ]
+            orders.append(("count", "Rows"))
+            given = {_order_name(self._orders.get(c)) for c in facets}
+            value = given.pop() if len(given) == 1 else "mixed"
+            if value == "given":
+                orders.append(("given", "As given"))
+            data.append(choice("order", "Order panels by", value, orders) | {"of": of})
+        sections = [{"title": t, "settings": s} for t, s in
+                    (("Layout", layout), ("Scales", scales), ("Data", data)) if s]  # fmt: skip
+        return sections or None
+
+    def _apply_settings(self, changes: Mapping[str, Any]) -> None:
+        """Changes from the settings panel, by name; all or none (a change the plot can't
+        draw raises, and the plot is as it was)."""
+        saved = (self._cols, self._aspect_given, self._banked, dict(self._share),
+                 dict(self._scales), dict(self._reverse), dict(self._orders),
+                 [(lr, lr.color, lr.shape, lr.dash_by, lr.second)
+                  for lr in self._layers])  # fmt: skip
+        try:
+            for name, value in changes.items():
+                if name == "cols":
+                    self._cols = None if value is None else int(value)
+                elif name == "aspect":
+                    self._aspect_given, self._banked = _aspect_of(value), None
+                elif name in ("share_x", "share_y"):
+                    self._share[name[-1]] = share_mode(value)
+                elif name in ("x_scale", "y_scale"):
+                    self._scales[name[0]], _ = _scale(value)
+                elif name == "color":
+                    self.color = value
+                elif name == "order":
+                    self._order_panels(value)
+                else:
+                    raise ValueError(f"no setting {name!r}")
+            self._changed()
+        except Exception:
+            (self._cols, self._aspect_given, self._banked, share, scales, reverse, orders,
+             layers) = saved  # fmt: skip
+            self._share, self._scales, self._reverse, self._orders = share, scales, reverse, orders
+            for lr, color, shape, dash_by, second in layers:
+                lr.color, lr.shape, lr.dash_by, lr.second = color, shape, dash_by, second
+            self._changed()
+            raise
+
+    def _order_panels(self, by: str) -> None:
+        """Order every facet column's levels by a summary of the plot's value per level
+        (``order(..., by=, of=)``), or (``"levels"``) as they go."""
+        facets = [*self._wrap, *self._row, *self._col]
+        if by in ("levels", "given", "mixed"):
+            if by == "levels":
+                for c in facets:
+                    self._orders.pop(c, None)
+            return
+        settings = self._scene()[0].get("settings") or []
+        of = next((s.get("of") for sec in settings for s in sec["settings"]
+                   if s["name"] == "order"), None)  # fmt: skip
+        for c in facets:
+            self._orders[c] = Order(None, cast("Summary", by), None if by == "count" else of)
+
     @property
     def description(self) -> str:
         """The plot's description for screen readers: ``alt=``, else one made from what it
@@ -1593,6 +1946,7 @@ class Trellis:
                              "d3-format string such as ',.0f'")  # fmt: skip
         return spec
 
+    @recorded
     def as_category(self, *columns: str) -> Self:
         """Read number columns as categories: their distinct values are the levels, in
         order (``-10, -2, 3``), labelled as numbers (``4``, not ``4.0``), rows without a
@@ -1608,6 +1962,7 @@ class Trellis:
         self._read = None  # rows read with the columns as numbers: read again
         return self._changed()
 
+    @recorded
     def order(
         self,
         column: str,
@@ -1697,6 +2052,7 @@ class Trellis:
         self._compare = name
         if self._widget is not None:
             self._widget.compare_panel = name
+        self._sync_code()
         self._send_detail()  # a panel of another page: its data
 
     def pin(self, *panels: str) -> Self:
@@ -1751,6 +2107,7 @@ class Trellis:
 
     # ---- pages --------------------------------------------------------------------------
 
+    @recorded
     def panel_stats(self, data: Any) -> Self:
         """Statistics of each panel, to sort and filter a paged wrap's panels by: a table
         with the facet columns and one row per panel; each other column is a statistic
@@ -1906,6 +2263,7 @@ class Trellis:
         self._paging = state  # ty: ignore[invalid-assignment]
         if self._widget is not None:
             self._widget.paging = state
+        self._sync_code()
         self._send_detail()  # the data of the panels around the page shown
         return self
 
@@ -2489,7 +2847,7 @@ class Trellis:
 
             spec, _ = self._scene()
             state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus,
-                     "compare_panel": self._compare,
+                     "compare_panel": self._compare, "_code": self.code(),
                      "selection": self._selection, "paging": dict(self._paging),
                      "_live": self._link_group is not None}  # fmt: skip
             self._widget = TrellisWidget(self, state)
@@ -2514,6 +2872,7 @@ class Trellis:
             "renderer": self.renderer,
             "focus": self.focused,
             "compare": self.compared,
+            "code": self.code() if self.controls else None,
             "selection": self._current_selection(),
             "paging": self.paging,
         }
@@ -2639,11 +2998,7 @@ class Trellis:
                 raise ValueError(f"color={layer.color!r} is neither a column nor a colour")
             self._tables[id(layer)] = table
             if self.redundant and layer.color is not None and layer.color in table:
-                # the colour column also as shape or dash (Channels: when it holds categories)
-                if layer.mark == "points" and layer.shape is None:
-                    layer.shape, layer.second = layer.color, True
-                elif layer.mark == "line" and layer.dash_by is None and not layer.dash:
-                    layer.dash_by, layer.second = layer.color, True
+                self._second(layer)  # shape or dash too (Channels: when it holds categories)
         self._layers.append(layer)
         return self._changed()
 
@@ -2655,6 +3010,7 @@ class Trellis:
         if self._widget is not None:
             spec, _ = self._scene()
             self._widget._spec = spec
+            self._sync_code()
         if self._link_group is not None and self._link_group.source is not None:
             self._link_group.relay()  # the selected rows, or the marks showing them, changed
         return self
@@ -2788,6 +3144,7 @@ class Trellis:
         """The grid's spec as its strips show it (a pairs plot: its columns' labels)."""
         return grid
 
+    @recorded
     def colormap(self, colormap: str | Sequence[str] | None = None, *, scale: str | None = None,
                  midpoint: float | None = None, bins: int | None = None) -> Self:  # fmt: skip
         """How number colour columns take their colours.
@@ -2837,8 +3194,8 @@ class Trellis:
                 y_levels: list[str] | None) -> float | None:  # fmt: skip
         """The panels' height as a multiple of their width: ``aspect``, or (``"bank"``) the
         one banking the plot's lines to 45 degrees."""
-        if not isinstance(self.aspect, str):
-            return self.aspect
+        if not isinstance(self._aspect_given, str):
+            return self._aspect_given
         if self._banked is not None:
             return self._banked
         # the smooths' fits (a trend, not the noise around it); without them, the lines
@@ -3261,6 +3618,7 @@ class Trellis:
         }
         spec["description"] = self.alt if self.alt is not None else self._describe(
             grid, pages, spec, spans, (x_levels, y_levels))  # fmt: skip
+        spec["settings"] = self._settings(spec, grid, pages, (x_levels, y_levels))
         spec["notes"] = self._note_specs(spec, (x_kind, y_kind), (x_levels, y_levels))
         # dense points' cells: over each panel's domain, sized for the panel's pixels
         cell_details = [(i, dt) for i, dt in details if isinstance(dt, PointDetail)]
@@ -4571,3 +4929,53 @@ def _span(extent: Extent, scale: str | None) -> tuple[float, float] | None:
     if scale is not None:
         lo, hi = (float(v) for v in inverse(scale, np.array([lo, hi])))
     return lo, hi
+
+
+def _aspect_of(aspect: Any) -> float | str | None:
+    """An aspect checked: positive, ``"bank"`` or None."""
+    number = isinstance(aspect, int | float) and not isinstance(aspect, bool)
+    if aspect is not None and aspect != "bank" and not (number and aspect > 0):
+        raise ValueError(f"aspect must be positive or 'bank', got {aspect!r}")
+    return aspect
+
+
+def _share_given(share: Share) -> bool | str:
+    """A share mode as ``Trellis(share_x=...)`` takes it."""
+    return True if share == "all" else False if share == "none" else share
+
+
+def _scale_given(scale: str, reverse: bool) -> str | tuple[str, str]:
+    """A scale as ``Trellis(x_scale=...)`` takes it."""
+    if not reverse:
+        return scale
+    return "reverse" if scale == "linear" else (scale, "reverse")
+
+
+def _given_only(function: Callable[..., Any], kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """The arguments that differ from ``function``'s defaults (``code()``: what was
+    given)."""
+    import inspect
+
+    params = inspect.signature(function).parameters
+    out = {}
+    for name, value in kwargs.items():
+        default = params[name].default if name in params else inspect.Parameter.empty
+        try:
+            if default is not inspect.Parameter.empty and type(value) is type(default) \
+                    and value == default:  # fmt: skip
+                continue
+        except (TypeError, ValueError):  # values that don't compare plainly (arrays)
+            pass
+        out[name] = value
+    return out
+
+
+COLOR_LEVELS = 30
+"""The settings panel's colour columns: a category column with at most this many levels."""
+
+
+def _order_name(order: Order | None) -> str:
+    """A facet column's order, as the settings panel names it."""
+    if order is None:
+        return "levels"
+    return "given" if order.levels is not None or order.by is None else order.by
