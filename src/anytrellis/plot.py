@@ -209,6 +209,9 @@ class Trellis:
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
+        panel_buttons: Show a panel's buttons (open, pin, compare) when the pointer is on
+            it. ``False`` leaves them out; double-click, Enter, ``p`` and ``c`` still do
+            the same.
         link: Column(s) that identify a thing across panels (a country, a station): a
             selection grows to every row sharing them, in all panels and layers that have
             the columns. Select a few countries in 1955 and see them in every year.
@@ -262,6 +265,7 @@ class Trellis:
         empty: str = "draw",
         margins: bool | str = False,
         fit_y: bool = False,
+        panel_buttons: bool = True,
         link: str | Sequence[str] | None = None,
         load: str = "all",
         theme: str | Theme | None = None,
@@ -370,6 +374,7 @@ class Trellis:
             raise ValueError("strip_label= names facet panels: give row=, col= or wrap=")
         self.strip_label = strip_label
         self.fit_y = bool(fit_y)
+        self.panel_buttons = bool(panel_buttons)
         self._link = _names(link)
         self._selection: Brush | None = None
         self._axes: dict[str, tuple[AxisKind, list[str] | None, float]] = {}
@@ -3207,6 +3212,7 @@ class Trellis:
             "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
             "legend_position": self._legend["position"],
             "fit_y": self.fit_y,
+            "panel_buttons": self.panel_buttons,
             "pages": pages,
             "theme": self.theme.spec(),
         }

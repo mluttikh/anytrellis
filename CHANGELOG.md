@@ -59,7 +59,8 @@ All notable changes to anytrellis. The format follows
   with every page.
 - **Moving between panels with the keys**: the arrow keys move a ring from panel to panel
   (its name is said to screen readers), Enter opens it, `p` pins it, `c` compares with it,
-  Esc lets it go. Pointing at a panel shows its buttons: open, pin, compare.
+  Esc lets it go. Pointing at a panel shows its buttons: open, pin, compare
+  (`Trellis(..., panel_buttons=False)` leaves them out; the keys still work).
 - **Names at the ends of lines**: `line(color="country", label="end")` writes each
   series' name at the end of its line, in its colour, in place of the legend: once in the
   plot, in the panel where the line ends rightmost, moved apart where lines end close

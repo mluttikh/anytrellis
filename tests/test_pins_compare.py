@@ -141,6 +141,11 @@ def test_from_the_database_the_pinned_and_compared_come_with_each_page() -> None
     assert svg.count('stroke="#b8bec6"') == 6  # s030 (on another page): in all six
 
 
+def test_panel_buttons_can_be_left_out() -> None:
+    assert paged(20)._scene()[0]["panel_buttons"] is True
+    assert paged(20, panel_buttons=False)._scene()[0]["panel_buttons"] is False
+
+
 def test_a_view_started_after_a_page_turn_gets_the_panels_shown() -> None:
     t = paged(60).show_page(5).compare("s055")  # before the plot is first shown
     sent = Sent()

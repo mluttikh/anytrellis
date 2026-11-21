@@ -19,7 +19,7 @@ shortcuts don't also act on them.
 | Hover | lines coloured by category | every series at the nearest x, top to bottom |
 | Click | a panel, with a tooltip shown | pin the tooltip: it stays, to compare with the next one and to copy from |
 | Double-click | a panel | see it alone |
-| Hover | a panel | its buttons at its top right: open it, pin it first on every page (a paged wrap), compare every panel with it |
+| Hover | a panel | its buttons at its top right: open it, pin it first on every page (a paged wrap), compare every panel with it (`Trellis(..., panel_buttons=False)` leaves them out) |
 | Hover | a legend entry | its marks stand out in every panel, the others fade |
 | Click | a legend entry | select that colour's marks |
 | Shift, Cmd or Ctrl+click | a legend entry | add or remove a colour |

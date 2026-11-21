@@ -232,7 +232,8 @@ showed. From Python: `t.open("station 3")` (a grid's panel: `t.open("north", "s1
 `t.close()`, `t.focused`, and `t.panels()` lists the names. The arrow keys move a ring
 between panels (Enter opens). A panel's buttons, shown when you point at it, open it, pin
 it and compare: *Compare with this* (or `c`) draws its marks in grey in every other panel,
-a reference chosen as you go (`t.compare("Japan")`, `t.compare()`).
+a reference chosen as you go (`t.compare("Japan")`, `t.compare()`);
+`Trellis(..., panel_buttons=False)` leaves the buttons out.
 
 **Many panels.** A wrap of more than 100 panels shows them a page at a time (6 by 4;
 `rows=` and `cols=` set it, `rows="all"` turns it off), with a bar to turn the pages

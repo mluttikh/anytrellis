@@ -245,6 +245,8 @@ export interface TrellisSpec {
   legend_position?: "auto" | "top" | "bottom" | "right" | "none";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
+  /** A panel's buttons (open, pin, compare) on the panel under the pointer (absent: yes). */
+  panel_buttons?: boolean;
   /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */
   theme?: LookName | (Partial<Look> & { base?: LookName });
   /** A wrap shown a page at a time (null: all its panels at once). */

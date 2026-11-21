@@ -296,7 +296,9 @@ default the colour column's label; with several colour columns, give a dict by c
 Double-click a panel to see it alone, or use the button that shows at its top right when
 you point at it; Page Up and Page Down step through the others at the same zoom, and
 Backspace goes back. The arrow keys move a ring from panel to panel, and Enter opens the
-one it is on (or the one under the pointer). From Python:
+one it is on (or the one under the pointer). `Trellis(..., panel_buttons=False)` leaves
+the buttons out (for a page to publish, say); the double-click and the keys still work.
+From Python:
 
 ```python exec="on" source="above" result="python" session="layout"
 plot = Trellis(penguins, wrap="island").points(x="flipper_length_mm", y="body_mass_g")

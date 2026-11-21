@@ -111,6 +111,18 @@ check(s.pinned.length === 2 && s.page[1] === box.index, `its pin button pins it 
 await page.click(".atr-panel-tools button:nth-child(2)");
 s = await state();
 check(s.pinned.length === 1, "again: unpinned");
+// panel_buttons=False: none, the keys as before
+await page.evaluate(() => {
+  const v = window.anytrellisViews[0];
+  v.spec.panel_buttons = false;
+});
+await page.mouse.move(box.x + 5, box.y + 5);
+s = await state();
+check(s.tools === null, "panel_buttons=False: no buttons on the panel");
+await page.evaluate(() => {
+  const v = window.anytrellisViews[0];
+  v.spec.panel_buttons = true;
+});
 // Enter opens the ringed panel
 await page.evaluate(() => window.anytrellisViews[0].root.focus());
 await page.keyboard.press("ArrowRight");

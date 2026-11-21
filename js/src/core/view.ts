@@ -1981,7 +1981,7 @@ export class TrellisView {
   private updateTools(): void {
     const spec = this.spec;
     const box = this.lay?.panels.find((b) => b.index === this.toolPanel);
-    if (!spec || !box || spec.panels.length < 2 || this.drag) {
+    if (!spec || !box || spec.panels.length < 2 || this.drag || spec.panel_buttons === false) {
       this.tools.hidden = true;
       return;
     }

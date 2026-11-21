@@ -47,6 +47,7 @@ Trellis(cars, wrap="origin", share_x="row", y_scale="log")  # also "sqrt", "syml
 Trellis(cars, wrap="origin", aspect=1)  # square panels; aspect="bank": slopes at 45°
 Trellis(cars, wrap="origin", panel_height=150)  # or height=600, the whole plot
 Trellis(cars, wrap="origin", fit_y=True)  # y follows the data in view as x zooms
+Trellis(cars, wrap="origin", panel_buttons=False)  # no open, pin, compare buttons on hover
 
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
 t.share(x=True, y="row")  # as share_x=, share_y=
