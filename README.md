@@ -357,6 +357,11 @@ sheet (`docs/user/cheat-sheet.md`, whose code the tests run) lacks. It then writ
 `llms.txt`, `llms-full.txt` and each page as Markdown into the site
 (`scripts/docs_llms.py`).
 
+The decisions the code keeps to (how Python and the browser share the work, the
+renderers, images drawn in Python, data from a database, paging, the controls, the look,
+accessibility and how a change is checked) are in [docs/decisions](docs/decisions); a change
+that departs from one updates its record.
+
 CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: ruff
 and ty, the TypeScript checks, pytest on Python 3.12 to 3.15 (Linux; macOS and Windows on
 3.15), the select, legend, zoom and export checks in headless Chromium (WebGL2 and Canvas
