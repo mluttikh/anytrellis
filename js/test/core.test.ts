@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight, gridAxes, labelEnd } from "../src/core/drawing";
-import { layout, place, wrapLabel, xLabelMode } from "../src/core/layout";
+import { type Layout, layout, place, wrapLabel, xLabelMode } from "../src/core/layout";
 import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
 import { LinkGroup, chosenKeys, linkHighlight, readLink } from "../src/core/savedlink";
 import { markStops, nextStop } from "../src/core/stops";
+import { ease, motionFrom, placeBy, tween } from "../src/core/motion";
 import { FADED, boxMeetsPolygon, filled, highlighted, inPolygon, select, selectionColors, selects, simplify, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { SHAPES, dashPieces, shapeCorners } from "../src/core/channels";
@@ -1109,5 +1110,48 @@ describe("the arrow keys among marks", () => {
     const two = { layers: [lines, context] } as unknown as Scene;
     expect(markStops(two, 0, false)).toHaveLength(6);
     expect(markStops(two, 0, false, (l, i) => l === lines && i < 2)).toHaveLength(3);
+  });
+});
+
+describe("panels moving to their places", () => {
+  const box = (index: number, x: number, y: number, w = 100, h = 80) => ({
+    index,
+    rect: { x, y, w, h },
+    showX: true,
+    showY: true,
+    strip: { x, y: y - 20, w, h: 20 },
+    label: String(index),
+    xAxis: { x, y: y + h, w, h: 24 },
+    yAxis: { x: x - 30, y, w: 30, h },
+  });
+  const lay = (panels: ReturnType<typeof box>[]) => ({ width: 400, height: 300, panels, strips: [{ rect: { x: 0, y: 0, w: 10, h: 10 } }] }) as unknown as Layout;
+  const before = lay([box(0, 40, 20), box(1, 160, 20)]);
+  const after = lay([box(1, 40, 20), box(2, 160, 20)]);
+
+  it("starts a panel where it was, a new one smaller about its middle", () => {
+    const from = motionFrom(before, after)!;
+    expect(from.get(1)).toEqual({ x: 160, y: 20, w: 100, h: 80 });
+    expect(from.get(2)).toEqual({ x: 180, y: 36, w: 60, h: 48 });
+    expect(motionFrom(after, after)).toBeNull(); // nothing moved
+    expect(motionFrom(lay([box(5, 0, 0)]), after)).toBeNull(); // nothing shared: a cut
+  });
+  it("goes between, slow at both ends, its strip and axes with it", () => {
+    expect(ease(0)).toBe(0);
+    expect(ease(0.5)).toBeCloseTo(0.5);
+    expect(ease(1)).toBe(1);
+    expect(ease(0.1)).toBeLessThan(0.1);
+    const half = tween(after, motionFrom(before, after)!, 0.5);
+    const moving = half.panels[0];
+    expect(moving.rect).toEqual({ x: 100, y: 20, w: 100, h: 80 });
+    expect(moving.strip).toEqual({ x: 100, y: 0, w: 100, h: 20 }); // above it, its height kept
+    expect(moving.yAxis).toEqual({ x: 70, y: 20, w: 30, h: 80 }); // left of it
+    expect(half.strips).toEqual([]); // a grid's strips: at the end
+    expect(tween(after, motionFrom(before, after)!, 1)).toBe(after);
+  });
+  it("keeps what is past an edge at its size, and stretches what is along it", () => {
+    const last = { x: 0, y: 100, w: 200, h: 100 };
+    const now = { x: 10, y: 50, w: 100, h: 50 };
+    expect(placeBy({ x: 0, y: 200, w: 200, h: 24 }, last, now)).toEqual({ x: 10, y: 100, w: 100, h: 24 }); // an x axis
+    expect(placeBy({ x: 50, y: 100, w: 100, h: 100 }, last, now)).toEqual({ x: 35, y: 50, w: 50, h: 50 });
   });
 });

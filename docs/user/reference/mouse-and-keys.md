@@ -112,6 +112,13 @@ pages, sorts the panels and filters them (a drag across a statistic's histogram 
 range, a click clears it), and shows or keeps views ([Page through many
 panels](../how-to/pages.md)).
 
+## Panels moving
+
+Opening a panel grows it from its place in the grid; going back shrinks it to its place
+while the others grow in. A sort or a filter slides each panel to its new place. Each move
+takes about a quarter of a second, and you can carry on meanwhile. With reduced motion set
+in your system's settings, the panels go to their places at once.
+
 ## What the plot shows
 
 When the plot no longer shows what it started with, the header says so, beside the

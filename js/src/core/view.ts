@@ -35,6 +35,7 @@ import { type Glyph, dashPieces, drawGlyph, glyphBox } from "./channels";
 import { type EndLabel, endLabels } from "./labels";
 import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
+import { MOTION_MS, motionFrom, reducedMotion, tween } from "./motion";
 import { lookOf } from "./look";
 import { Pager } from "./pager";
 import { pageLabels, pageList, panelOrder, pinsOf } from "./pages";
@@ -306,6 +307,10 @@ export class TrellisView {
   private readonly detail = new Map<number, MarkLayerSpec>();
   private detailQueue: Promise<void> = Promise.resolve();
   private lay: Layout | null = null;
+  /** The panels moving to their places (motion.ts): where each started, and when. */
+  private motion: { from: Map<number, Rect>; start: number } | null = null;
+  /** The next layout moves the panels there (a sort, filter, page, or a panel opened). */
+  private moveNext = false;
   private theme: Theme;
   private xView = new Map<number, Range>();
   private yView = new Map<number, Range>();
@@ -613,6 +618,8 @@ export class TrellisView {
     // the opened panel stays open when the new spec still has it
     this.pendingFocus = null;
     this.focused = this.indexOf(openName);
+    this.motion = null; // a new spec: in its places at once
+    this.moveNext = false;
     this.computeOrder();
     if (this.pendingZoom) {
       this.applyZoom(this.pendingZoom);
@@ -890,6 +897,7 @@ export class TrellisView {
     if (user) this.reportPaging(typed ? PAGING_REPORT_MS : 0);
     this.clearHover();
     this.updateHeader();
+    this.moveNext = true;
     this.relayout();
     this.updateLoading();
   }
@@ -1395,6 +1403,7 @@ export class TrellisView {
     this.drag = null;
     this.clearHover();
     this.updateHeader();
+    this.moveNext = true;
     this.relayout();
     this.updateLoading();
     if (user) {
@@ -1556,7 +1565,14 @@ export class TrellisView {
         lay = computeLayout(this.spec, { ...base, height: focusH(this.legend.offsetHeight), focused: this.focused });
       }
     }
+    // a sort, filter, page or panel opened: the panels move from where they were
+    const before = this.lay;
     this.lay = lay!;
+    if (this.moveNext) {
+      this.moveNext = false;
+      const from = before && !reducedMotion() ? motionFrom(before, this.lay) : null;
+      this.motion = from && { from, start: performance.now() };
+    }
     const h = this.lay.height;
     this.stage.style.height = `${h}px`;
     // the ring and the tools: on a panel still shown
@@ -1610,9 +1626,10 @@ export class TrellisView {
     });
   }
 
-  private panelViews(): PanelView[] {
+  /** Each panel's view: as laid out, or (`lay`) where it is on its way there. */
+  private panelViews(lay: Layout = this.lay!): PanelView[] {
     const spec = this.spec!;
-    return this.lay!.panels.map((box) => {
+    return lay.panels.map((box) => {
       const p = spec.panels[box.index];
       const x = this.xView.get(p.xg) ?? p.x;
       const y = this.yView.get(p.yg) ?? p.y;
@@ -1629,7 +1646,14 @@ export class TrellisView {
       this.fitGroups();
     }
     this.settleSelection();
-    const views = this.panelViews();
+    // the panels on their way to their places: drawn where they are now, a frame at a time
+    let lay = this.lay;
+    if (this.motion) {
+      const t = (performance.now() - this.motion.start) / MOTION_MS;
+      if (t >= 1) this.motion = null;
+      else lay = tween(this.lay, this.motion.from, t);
+    }
+    const views = this.panelViews(lay);
     this.views = views;
     // a pinned tooltip: until the panels move under it
     if (this.pinned && this.viewsKey() !== this.pinnedAt) this.unpin(false);
@@ -1649,9 +1673,13 @@ export class TrellisView {
     const lasso = this.brush?.lasso;
     const own = (v: PanelView): boolean => this.brush?.panel === null || this.brush?.panel === undefined || this.brush.panel === v.panel;
     this.front_.lassos = lasso ? views.filter(own).map((v) => ({ clip: v.rect, points: lasso.map(([a, b]): [number, number] => [v.map.ox + a * v.map.sx, v.map.oy + b * v.map.sy]) })) : [];
-    drawFront(front, this.spec, this.lay, views, this.panelTheme(), this.front_);
+    drawFront(front, this.spec, lay, views, this.panelTheme(), this.front_);
     this.updateChips();
     this.updateViewName();
+    if (this.motion) {
+      this.request(); // the next frame of the move
+      return; // what is shown, reported once the panels are in place
+    }
     this.reportView();
   }
 
