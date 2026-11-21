@@ -42,6 +42,13 @@ const open = async (name) => {
 const press = async (...keys) => {
   for (const k of keys) await page.keyboard.press(k);
   await page.waitForTimeout(400); // the live region: once the keys rest
+  // a slow machine: until the panels are in place and a mark held is said
+  await page
+    .waitForFunction(() => {
+      const v = window.anytrellisViews[0];
+      return !v.motion && (!v.markAt || document.querySelector(".atr-sr").textContent !== "");
+    }, null, { timeout: 3000 })
+    .catch(() => {});
 };
 const state = () =>
   page.evaluate(() => {

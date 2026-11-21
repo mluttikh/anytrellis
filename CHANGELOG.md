@@ -8,6 +8,11 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **Panels move to their places**: a sort, a filter or a panel opened (and back) slides
+  each panel from where it was to where it goes in 250 ms, the panels new to the plot
+  growing in about their middles. At once when the system asks for reduced motion, and for
+  a page of all-new panels.
+
 - `hexbin(x, y, bins=30, stat="count"|"percent")`: the rows counted in hexagons, coloured
   by their counts, the same hexagons in every panel. Hover one for its count; a brush
   selects its rows.

@@ -261,7 +261,9 @@ a reference chosen as you go (`t.compare("Japan")`, `t.compare()`);
 (‹ ›, Page Up and Page Down), sort the panels by a statistic of each (rows, mean, median,
 min, max, sd and trend of the values drawn, plus any given with `t.panel_stats(table)`),
 filter them by name and by a statistic's range (drag across its histogram), and keep views
-of the sort, filters, page and zoom to show again. The strips show the value sorted by. A
+of the sort, filters, page and zoom to show again. The strips show the value sorted by.
+A sort, a filter or a panel opened moves the panels to their new places in a quarter of a
+second (at once with the system's reduced motion), so the eye can follow them. A
 pinned panel (its pin button, or `p`) stays first on every page, whatever the sort and
 filters. From Python: `t.sort_panels("trend temp", descending=True)`,
 `t.filter_panels("north")`, `t.show_page(2)`, `t.pin("station 7")`, `t.shown_panels()`,

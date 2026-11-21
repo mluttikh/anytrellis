@@ -40,6 +40,11 @@ Each statistic is named after the column, such as `trend temp`. The arrow next t
 switches between ascending and descending. While the panels are sorted, each strip shows
 the panel's value at its right end. Panels without a value go last.
 
+When you sort or filter, each panel on the page before and after slides to its new place in
+about a quarter of a second, and the panels new to the page grow in where they go, so you
+can follow a panel you were watching. A page of all-new panels shows at once. If your
+system asks for reduced motion, every change shows at once.
+
 **Filter by name** keeps the panels whose name has every word you type: `north 3` keeps
 `north 3` and `north 13`. The **filter** button next to it sets a range for any
 statistic, a low end, a high end or both, and counts the filters set. The bar says how many

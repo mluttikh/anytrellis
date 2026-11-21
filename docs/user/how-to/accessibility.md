@@ -93,5 +93,7 @@ at.set_theme(redundant=True)
 - Everything the mouse does, the keys do too: the arrow keys move between panels and
   marks, Enter opens a panel, and `?` lists the rest ([mouse and
   keys](../reference/mouse-and-keys.md)). The toolbar and legend are buttons with names.
+- Panels slide to their new places when sorted, filtered or opened; with the system's
+  *reduced motion* setting they go there at once.
 - `label="end"` names lines at their ends, in their colour, so the legend's colours
   needn't be matched ([marks](marks.md)).
