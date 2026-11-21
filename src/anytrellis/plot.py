@@ -132,6 +132,7 @@ from anytrellis.theme import Theme, theme_of
 from anytrellis.transforms import SCALES, TRANSFORMS, forward, inverse, on_scale_expr, scalar
 
 if TYPE_CHECKING:
+    from anytrellis.compose import Concat
     from anytrellis.widget import TrellisWidget
 
 SPEC_VERSION = 1
@@ -3658,6 +3659,18 @@ class Trellis:
 
     def _repr_mimebundle_(self, **kwargs: Any) -> Any:
         return self.widget._repr_mimebundle_(**kwargs)
+
+    def __or__(self, other: Trellis | Concat) -> Concat:
+        """``a | b``: the plots side by side, in one figure (``anytrellis.concat``)."""
+        from anytrellis.compose import beside
+
+        return beside(self, other)
+
+    def __truediv__(self, other: Trellis | Concat) -> Concat:
+        """``a / b``: ``a`` over ``b``, in one figure (``anytrellis.concat``)."""
+        from anytrellis.compose import under
+
+        return under(self, other)
 
     def _display_(self) -> Any:
         """What marimo shows: the widget."""

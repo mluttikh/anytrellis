@@ -2,7 +2,7 @@
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
 channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs, lasso.mjs,
-savedlink.mjs, views.mjs, keys.mjs)."""
+savedlink.mjs, views.mjs, keys.mjs, concat.mjs)."""
 
 from __future__ import annotations
 
@@ -141,6 +141,7 @@ def main(out: Path) -> None:
     saved_links(out)
     views(out)
     keyboard(out)
+    figures(out)
 
 
 def lassos(out: Path) -> None:
@@ -159,6 +160,26 @@ def lassos(out: Path) -> None:
         t.select(**chosen)
         t.save_html(out / f"{name}.html")
         (out / f"{name}.selected.json").write_text(json.dumps(len(t.selected())))
+
+
+def figures(out: Path) -> None:
+    """Different plots in one figure (concat.mjs): a scatter linked with a histogram, a box
+    plot under them, two columns of 2 and 1 shares (``concat.html``); where Python's image
+    puts each plot across a figure 824 px wide, as the page is at 856 (``concat.json``)."""
+    import json
+    import re
+
+    from anytrellis import concat, link
+
+    cars = load("cars")
+    a = Trellis(cars, wrap="origin", title="Weight and mpg").points(x="weight", y="mpg")
+    b = Trellis(cars, title="Horsepower").hist(x="horsepower")
+    c = Trellis(cars, title="mpg by origin").box(x="origin", y="mpg")
+    link(a, b)
+    fig = concat(a, b, c, cols=2, widths=[2, 1], title="Cars")
+    fig.save_html(out / "concat.html")
+    placed = re.findall(r'<svg x="([\d.]+)" y="[\d.]+" width="([\d.]+)"', fig._svg(824, "light"))
+    (out / "concat.json").write_text(json.dumps([[float(x), float(w)] for x, w in placed]))
 
 
 def keyboard(out: Path) -> None:

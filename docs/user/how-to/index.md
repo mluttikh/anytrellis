@@ -30,6 +30,8 @@ Steps for a task you already have in mind. Each guide starts from a plot like th
 **Working with plots**
 
 - [Link plots](link.md): one selection across separate plots.
+- [Put different plots in one figure](figures.md): `a | b`, `a / b`, a grid; one page,
+  one image.
 - [Plot large data](large.md): millions of marks, hundreds of panels.
 - [Page through many panels](pages.md): sort and filter them by each panel's statistics.
 - [Change a plot from its settings panel](settings.md): columns, scales, colour and order,

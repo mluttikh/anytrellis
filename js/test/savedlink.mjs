@@ -102,7 +102,8 @@ check(scatter.layers?.[0]?.lit > 0 && scatter.layers[0].lit < scatter.layers[0].
 const litBefore = scatter.layers[0].lit;
 await page.keyboard.press("Escape"); // (a drag from inside the brush would move it)
 await drag(await at(1, 0, 0.02, 0.02), await at(1, 0, 0.8, 0.98));
-check((await state())[0].layers[0].lit > litBefore, "a wider brush lights more");
+const litAfter = (await state())[0].layers?.[0]?.lit;
+check(litAfter > litBefore, `a wider brush lights more (${litBefore} → ${litAfter})`);
 await page.keyboard.press("Escape");
 await page.waitForTimeout(150);
 [scatter, hist] = await state();

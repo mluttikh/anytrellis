@@ -1237,7 +1237,9 @@ def _alpha(name: str, a: float) -> str:
 class _Svg:
     """An SVG being written: elements, and clip paths shared by their rectangles."""
 
-    def __init__(self, width: float, height: float, fs: float = FONT_SIZE) -> None:
+    def __init__(self, width: float, height: float, fs: float = FONT_SIZE, ids: str = "") -> None:
+        self.ids = ids
+        """Before each id (clip paths, gradients): unique among the plots of one image."""
         self.width = width
         self.height = height
         self.fs = fs
@@ -1255,7 +1257,7 @@ class _Svg:
     def clip(self, r: Rect) -> str:
         key = (_n(r.x), _n(r.y), _n(r.w), _n(r.h))
         if key not in self._clips:
-            cid = f"c{len(self._clips)}"
+            cid = f"{self.ids}c{len(self._clips)}"
             self._clips[key] = cid
             self.defs.append(f'<clipPath id="{cid}"><rect x="{key[0]}" y="{key[1]}" '
                              f'width="{key[2]}" height="{key[3]}"/></clipPath>')  # fmt: skip
@@ -2165,7 +2167,7 @@ def _draw_legend(svg: _Svg, placed: list[_Placed], dy: float, th: dict[str, str]
         elif e.kind == "text":
             svg.text(x, mid, e.label, th["muted"], size=e.size)
         elif e.kind == "gradient":
-            gid = f"g{len(svg.defs)}"
+            gid = f"{svg.ids}g{len(svg.defs)}"
             last = max(1, len(e.colors) - 1)
             stops = "".join(f'<stop offset="{_n(i / last)}" stop-color="{c}"/>'
                             for i, c in enumerate(e.colors))  # fmt: skip
@@ -2225,9 +2227,10 @@ def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging,
 
 
 def figure_svg(plot: Trellis, *, width: float | None = None, height: float | None = None,
-               theme: str = "light") -> str:  # fmt: skip
+               theme: str = "light", ids: str = "") -> str:  # fmt: skip
     """The plot as shown, as an SVG ``width`` by ``height`` CSS pixels (default: the
-    width it was last shown at, else ``DEFAULT_WIDTH``; the height its layout's)."""
+    width it was last shown at, else ``DEFAULT_WIDTH``; the height its layout's). ``ids``:
+    before its ids, for one of several plots in an image (``compose.Concat``)."""
     if theme not in THEMES:
         raise ValueError(f"theme must be one of {list(THEMES)}, got {theme!r}")
     th = THEMES[theme]
@@ -2313,7 +2316,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     inset_legend = bool(placed) and legend_h == 0
 
     total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box
-    svg = _Svg(width, total if height is None else float(height), lay.font_size)
+    svg = _Svg(width, total if height is None else float(height), lay.font_size, ids)
     svg.title, svg.description = spec.get("title") or "", spec.get("description") or ""
     svg.add(f'<rect width="100%" height="100%" fill="{th["bg"]}"/>')
     if header:
