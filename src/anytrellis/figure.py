@@ -25,6 +25,7 @@ import numpy as np
 
 from anytrellis.channels import dash_pattern, dash_pieces, shape_paths
 from anytrellis.codec import DTYPES, Buffers
+from anytrellis.facets import place
 from anytrellis.formats import axis_format, number_format
 from anytrellis.pages import page_list, pins_of
 from anytrellis.theme import CONTEXTS, NARROW, PRESETS
@@ -663,8 +664,10 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
         if pages.get("grid"):  # a grid's page: each cell in its place
             panels = [spec["panels"][index] for index in shown]
         else:
-            panels = [{**spec["panels"][index], "row": k // pages["cols"],
-                       "col": k % pages["cols"]} for k, index in enumerate(shown)]  # fmt: skip
+            panels: list[dict[str, Any]] = []
+            for k, index in enumerate(shown):
+                r, c = place(k, pages["rows"], pages["cols"], grid.get("dir", "lt"))
+                panels.append({**spec["panels"][index], "row": r, "col": c})
     look = look_of(spec)
     GAP = look["panel_gap"]
     rows = max(1, pages["rows"] if pages else grid["rows"])
@@ -763,36 +766,58 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
             h = min(300, max(90, w * 0.62))
         return w, max(MIN_PANEL, math.floor(h))
 
+    # space=: each column's share of the width by its x range, each row's of the height by
+    # its y range (the widest panel's of a column, the highest's of a row; layout.ts)
+    space = spec.get("space") or {}
+    col_span = [0.0] * cols
+    row_span = [0.0] * rows
+    for p in panels:
+        col_span[p["col"]] = max(col_span[p["col"]], _span(p["x"]))
+        row_span[p["row"]] = max(row_span[p["row"]], _span(p["y"]))
+    col_share = _shares(col_span, bool(space.get("x")))
+    row_share = _shares(row_span, bool(space.get("y")))
+
+    def sizes(w: float, h: float) -> tuple[list[float], list[float]]:
+        return ([max(MIN_PANEL, math.floor(w * s)) for s in col_share],
+                [max(MIN_PANEL, math.floor(h * s)) for s in row_share])  # fmt: skip
+
     pw, ph = panel_size()
+    col_w, row_h = sizes(pw, ph)
     for i, p in enumerate(panels):
         if show_y[i]:
-            y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], ph, fs))
+            y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], row_h[p["row"]], fs))
     gutters()
     pw, ph = panel_size()
+    col_w, row_h = sizes(pw, ph)
     # categories that don't fit side by side: on two lines or angled, the axis that high
-    x_labels, x_axis_h = x_label_mode(spec, pw, fs)
+    # (space="free_x": every band as wide, the narrowest of them all otherwise)
+    levels = spec["x"].get("levels")
+    bands_w = pw * cols * len(levels) / sum(col_span) if space.get("x") and levels else pw
+    x_labels, x_axis_h = x_label_mode(spec, bands_w, fs)
     if x_labels != "flat":
         axis_rows = sum(x_axis_h for r in row_has_x if r)
         pw, ph = panel_size()
-    shift = max(0, math.floor((free_width() - cols * pw) / 2))  # narrowed panels: centred
+        col_w, row_h = sizes(pw, ph)
+    shift = max(0, math.floor((free_width() - sum(col_w)) / 2))  # narrowed panels: centred
 
     col_x: list[float] = []
     x = float(left + shift)
     for c in range(cols):
         x += y_axis[c]
         col_x.append(x)
-        x += pw + GAP
+        x += col_w[c] + GAP
     row_y: list[float] = []
     y = float(top + top_strip)
     for r in range(rows):
         y += wrap_strip
         row_y.append(y)
-        y += ph + (x_axis_h if row_has_x[r] else 0) + GAP
+        y += row_h[r] + (x_axis_h if row_has_x[r] else 0) + GAP
     plot_bottom = y - GAP
-    plot_right = col_x[cols - 1] + pw
+    plot_right = col_x[cols - 1] + col_w[cols - 1]
 
     boxes = []
     for i, p in enumerate(panels):
+        pw, ph = col_w[p["col"]], row_h[p["row"]]
         rect = Rect(col_x[p["col"]], row_y[p["row"]], pw, ph)
         # a wrap's own strip: its innermost level's (the outer levels': strips over it)
         strip = Rect(rect.x, rect.y - strip_h, pw, strip_h - 1) if wrap_strip else None
@@ -805,10 +830,10 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
     strips = []
     if col_depth == 1:
         for c, label in enumerate(grid["col_labels"]):
-            strips.append(Strip(Rect(col_x[c], top, pw, strip_h - 1), label, False))
+            strips.append(Strip(Rect(col_x[c], top, col_w[c], strip_h - 1), label, False))
     elif col_depth > 1:
         for k, a, b in nest(grid["col_keys"], col_depth):
-            strips.append(Strip(Rect(col_x[a], top + k * strip_h, col_x[b] + pw - col_x[a],
+            strips.append(Strip(Rect(col_x[a], top + k * strip_h, col_x[b] + col_w[b] - col_x[a],
                                      strip_h - 1), grid["col_keys"][a][k], False,
                                 span=b > a))  # fmt: skip
     vertical = look["row_labels"] == "side"
@@ -818,11 +843,12 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
 
     if row_depth == 1:
         for r, label in enumerate(grid["row_labels"]):
-            strips.append(Strip(Rect(row_x(0), row_y[r], row_w[0] - 1, ph), label, vertical,
+            strips.append(Strip(Rect(row_x(0), row_y[r], row_w[0] - 1, row_h[r]), label, vertical,
                                 side="right"))  # fmt: skip
     elif row_depth > 1:
         for k, a, b in nest(grid["row_keys"], row_depth):
-            strips.append(Strip(Rect(row_x(k), row_y[a], row_w[k] - 1, row_y[b] + ph - row_y[a]),
+            strips.append(Strip(Rect(row_x(k), row_y[a], row_w[k] - 1,
+                                     row_y[b] + row_h[b] - row_y[a]),
                                 grid["row_keys"][a][k], vertical, side="right",
                                 span=b > a))  # fmt: skip
     if wrap_depth > 1:  # the outer levels' strips over the panels side by side sharing them
@@ -837,7 +863,8 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
             for run in runs:
                 keys = [p["keys"][start:] for p in run]
                 for k, a, b in nest(keys, wrap_depth - 1):
-                    x0, x1 = col_x[run[a]["col"]], col_x[run[b]["col"]] + pw
+                    x0 = col_x[run[a]["col"]]
+                    x1 = col_x[run[b]["col"]] + col_w[run[b]["col"]]
                     strips.append(Strip(Rect(x0, row_y[r] - wrap_strip + k * strip_h, x1 - x0,
                                              strip_h - 1), keys[a][k], False,
                                         span=b > a))  # fmt: skip
@@ -848,8 +875,9 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
         used = max((p["col"] + 1 for p in panels if p["row"] == last), default=0)
         if 0 < used < cols:
             sx = col_x[used] - y_axis[used] + 8
-            sy = row_y[last - 1] + ph + x_axis_h + GAP if last > 0 else row_y[last] - wrap_strip
-            sb = row_y[last] + ph
+            sy = (row_y[last - 1] + row_h[last - 1] + x_axis_h + GAP if last > 0
+                  else row_y[last] - wrap_strip)  # fmt: skip
+            sb = row_y[last] + row_h[last]
             if plot_right - sx >= 60 and sb - sy >= 30:
                 spare = Rect(sx, sy, plot_right - sx, sb - sy)
 
@@ -867,6 +895,19 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
         x_labels=x_labels,
         font_size=fs,
     )
+
+
+def _span(domain: list[float]) -> float:
+    return max(1e-12, abs(domain[1] - domain[0]))
+
+
+def _shares(spans: list[float], on: bool) -> list[float]:
+    """Each column's (row's) share of the panels' width (height), as a multiple of an even
+    share: by its range with ``space``, else 1 each (one without panels: the mean)."""
+    known = [s for s in spans if s > 0]
+    mean = sum(known) / len(known) if known else 1.0
+    of = [(s or mean) if on else 1.0 for s in spans]
+    return [s * len(of) / sum(of) for s in of]
 
 
 def nest(keys: list[list[str]], depth: int) -> list[tuple[int, int, int]]:

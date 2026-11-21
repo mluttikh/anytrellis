@@ -69,6 +69,10 @@ export interface GridSpec {
   strips?: "nested" | "joined";
   /** Each panel names itself in a strip of its own (PanelSpec.strip). */
   strip_label?: boolean;
+  /** How a wrap fills its cells (a paged wrap: each page): the side each run of panels
+   * starts at ("l", "r": runs are rows; "t", "b": columns), then the side the first run is
+   * at (facets.py: DIRECTIONS). Absent: "lt". */
+  dir?: string;
 }
 
 export interface ColorSpec {
@@ -243,6 +247,10 @@ export interface TrellisSpec {
   panel_height: number | null;
   /** Each panel's height as a multiple of its width (unless height or panel_height). */
   aspect?: number | null;
+  /** Panels sized by their range (`space=`): each column as wide as its x range takes of
+   * them all (`x`), each row as high as its y range (`y`); a band axis's range is its
+   * levels. Absent: every panel the same size. */
+  space?: { x: boolean; y: boolean } | null;
   /** auto: in a wrap's empty cells when it fits, else under the plot; bottom: under it;
    * right: a column right of the plot (under it when too tall); none: no legend. */
   legend_position?: "auto" | "top" | "bottom" | "right" | "none";

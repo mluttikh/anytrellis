@@ -138,6 +138,18 @@ def _gallery() -> list[Entry]:
             x="time", y="temp", origin=10
         )
 
+    def map_shaped() -> Trellis:
+        europe = pl.DataFrame(
+            [("Iceland", 1, 1), ("Norway", 1, 4), ("Finland", 1, 5), ("Ireland", 2, 1),
+             ("United Kingdom", 2, 2), ("Netherlands", 2, 3), ("Germany", 2, 4),
+             ("Poland", 2, 5), ("France", 3, 2), ("Belgium", 3, 3), ("Switzerland", 3, 4),
+             ("Austria", 3, 5), ("Portugal", 4, 1), ("Spain", 4, 2), ("Italy", 4, 4),
+             ("Croatia", 4, 5), ("Georgia", 4, 7), ("Greece", 5, 5), ("Turkey", 5, 6)],
+            schema=["country", "row", "col"], orient="row",
+        )  # fmt: skip
+        in_europe = gapminder.filter(pl.col("region") == "Europe & Central Asia")
+        return Trellis(in_europe, wrap="country", layout=europe).area(x="year", y="fertility")
+
     def segments() -> Trellis:
         change = gapminder.filter(pl.col("year").is_in([1955, 2005])).pivot(
             on="year", index=["country", "region"], values=["fertility", "life_expect"]
@@ -248,6 +260,17 @@ def _gallery() -> list[Entry]:
                   x="horsepower", y="mpg", size=4)),
         Entry("Layout and scales", "margins", "Margins: the rows and columns together",
               "how-to/layout.md#margins-the-rows-and-columns-together", margins),
+        Entry("Layout and scales", "map", "Panels in a map's shape",
+              "how-to/layout.md#panels-placed-by-hand-a-layout-table", map_shaped),
+        Entry("Layout and scales", "repeat", "Columns stacked as rows",
+              "how-to/layout.md#columns-repeated-as-rows",
+              lambda: Trellis(weather, repeat=["temp_max", "precipitation", "wind"])
+              .line(x="date", y="value", width=0.8)),
+        Entry("Layout and scales", "space", "Panels as wide as their categories",
+              "how-to/layout.md#panels-sized-by-their-range-space",
+              lambda: Trellis(cars.with_columns(cyl=pl.col("cylinders").cast(pl.String)),
+                              col="origin", share_x="col", space="free_x")
+              .bars(x="cyl", stat="count", color="cyl")),
         Entry("Layout and scales", "free-y", "Free y scales",
               "how-to/scales.md#free-y-shared-x",
               lambda: Trellis(six, wrap="country", cols=3, share_y=False).line(

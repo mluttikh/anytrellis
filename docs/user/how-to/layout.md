@@ -23,6 +23,87 @@ of the number of panels. When the last row is not full, the legend goes in its e
 A wrap of more than 100 panels shows them a page at a time; `rows=` sets a page's rows
 (see [Page through many panels](pages.md)).
 
+### The direction a wrap fills
+
+A wrap fills its cells row by row from the top left, as text runs. `direction="v"` fills
+them column by column instead, as ggplot2's `facet_wrap(dir = "v")` does, which keeps
+neighbouring levels one under another:
+
+```python exec="on" source="above" session="layout" html="true"
+gapminder = load("gapminder")
+plot = Trellis(gapminder, wrap="year", cols=4, direction="v", panel_height=110)
+plot.points(x="fertility", y="life_expect", color="region", size=4)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+Two letters name any start and direction: the first where a run starts (`l`eft, `r`ight,
+`t`op, `b`ottom), the second where the next run goes. `"lt"` is `"h"`, the default;
+`"tl"` is `"v"`; `"lb"` fills rows from the bottom up, so the first level is at the bottom
+left, as lattice draws them; `"rt"` fills rows from the right, for a language read right
+to left. Filled by columns, a wrap keeps its `cols=` and has as few rows as hold every
+panel. A paged wrap fills each page the same way. The settings panel's Fill choice changes
+it, and so does `plot.direction = "v"`.
+
+## Panels placed by hand: a layout table
+
+Some panels belong in a shape: the countries of a map, the wells of a plate, the floors and
+rooms of a building. `layout=` places each panel at a row and column, as R's geofacet
+does. Give a table with the wrap column and `row` and `col`, counted from 1, or a dict
+`{level: (row, col)}`. The cells without a panel stay empty:
+
+```python exec="on" source="above" session="layout" html="true"
+import polars as pl
+
+europe = pl.DataFrame(
+    [("Iceland", 1, 1), ("Norway", 1, 4), ("Finland", 1, 5),
+     ("Ireland", 2, 1), ("United Kingdom", 2, 2), ("Netherlands", 2, 3),
+     ("Germany", 2, 4), ("Poland", 2, 5),
+     ("France", 3, 2), ("Belgium", 3, 3), ("Switzerland", 3, 4), ("Austria", 3, 5),
+     ("Portugal", 4, 1), ("Spain", 4, 2), ("Italy", 4, 4), ("Croatia", 4, 5),
+     ("Georgia", 4, 7), ("Greece", 5, 5), ("Turkey", 5, 6)],
+    schema=["country", "row", "col"], orient="row",
+)
+in_europe = gapminder.filter(pl.col("region") == "Europe & Central Asia")
+plot = Trellis(in_europe, wrap="country", layout=europe, panel_height=70)
+plot.area(x="year", y="fertility")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+The table can be a DataFrame, a DuckDB query or any table the plot takes, and can hold
+more places than the data has panels (a map of every country, used for a few): those cells
+stay empty. A panel without a place is an error, and so are two panels in one cell. With
+several wrap columns, the table has each of them (and a dict's keys are tuples). A layout
+table places every panel, so it doesn't go with `cols=`, `direction=` or `rows=`; with
+`page=`, every page has the same cells.
+
+## Columns repeated as rows
+
+Measurements side by side in columns (a temperature, a rainfall, a wind speed) are often
+best read stacked, on one time axis, each on its own scale. `repeat=` makes a row of
+panels per column:
+
+```python exec="on" source="above" session="layout" html="true"
+weather = load("seattle_weather")
+plot = Trellis(weather, repeat=["temp_max", "precipitation", "wind"],
+               labels={"temp_max": "High (°C)", "precipitation": "Rain (mm)",
+                       "wind": "Wind (m/s)"}, panel_height=90)
+plot.line(x="date", y="value", width=0.8)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+The data is melted: a row per row and column, the column's name in `measure` and its value
+in `value`, which the layers draw as `y`. The rows keep the order given, each strip names
+its column by its label, and each row has its own y scale (`share_y="row"`; give
+`share_y=True` for one scale). `col=` and `page=` still facet, so
+`Trellis(weather, repeat=[...], col="year")` is a grid of measurements by years.
+`selected()` returns the melted rows, with `measure` and `value`. From a database, the
+melt is part of the query, so `load="pages"` reads a page's rows only. The columns must
+all be numbers (or all times); `repeat=` doesn't go with `row=` or `wrap=`, and a data
+that has a `measure` or `value` column already has to rename it.
+
 ## A grid: `row=` and `col=`
 
 ```python exec="on" source="above" session="layout" html="true"
@@ -134,6 +215,28 @@ banked or a number, keep their shape there: as large as fits, and narrower and c
 when the screen is too low for the whole width. An image of a given `height`
 (`save_png(height=...)`) keeps it in the same way. Without an `aspect`, the panels
 stretch to the screen's height.
+
+### Panels sized by their range: `space=`
+
+With free scales, one panel may show three categories and the next eight, each squeezed
+into the same width. `space="free_x"` makes each column of panels as wide as its x range
+takes of them all, so a category (or a year) is as wide in every panel, as ggplot2's
+`facet_grid(space = "free_x")` does:
+
+```python exec="on" source="above" session="layout" html="true"
+cars = load("cars").with_columns(cyl=pl.col("cylinders").cast(pl.String))
+plot = Trellis(cars, col="origin", share_x="col", space="free_x", panel_height=180)
+plot.bars(x="cyl", stat="count", color="cyl")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+`space="free_y"` sizes each row by its y range in the same way, and `space="free"` both.
+The ranges are the panels' own, so `space=` goes with free scales along its lines:
+`"free_x"` with `share_x="col"` or `False`, `"free_y"` with `share_y="row"` or `False`.
+A wrap's columns hold panels of different ranges, so in a wrap `"free_x"` needs one row
+of panels and `"free_y"` one column. `plot.space = "fixed"` sizes every panel the same
+again.
 
 ### Banking to 45 degrees
 

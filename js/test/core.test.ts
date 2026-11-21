@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fileName, fontAttributes, paint, SvgContext, svgMessage } from "../src/core/export";
 import { crowdedRight, gridAxes, labelEnd } from "../src/core/drawing";
-import { layout, wrapLabel, xLabelMode } from "../src/core/layout";
+import { layout, place, wrapLabel, xLabelMode } from "../src/core/layout";
 import { LOOKS, lookOf } from "../src/core/look";
 import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
@@ -971,5 +971,25 @@ describe("shapes and dashes (channels.ts, as channels.py)", () => {
     const spec = { layers: [{ type: "points", coords: ref("c"), starts: ref("s"), color: { rgba: null, codes: null, solid: [0, 0, 0, 255] }, marker: { shape: 0, shapes: ref("sh"), sizes: ref("sz") } }, { type: "line", coords: ref("c2"), starts: ref("s2"), color: { rgba: null, codes: null, solid: [0, 0, 0, 255] }, dash: { patterns: [[]], codes: ref("d") } }] };
     const ids = bufferIds(spec as unknown as Parameters<typeof bufferIds>[0]);
     expect(ids).toEqual(expect.arrayContaining(["sh", "sz", "d"]));
+  });
+});
+
+describe("place", () => {
+  // the same cells as facets.place in Python (tests/test_layout.py)
+  const cells = (n: number, rows: number, cols: number, dir: string): string[] => {
+    const out = Array.from({ length: rows }, () => new Array<string>(cols).fill(" "));
+    for (let k = 0; k < n; k++) {
+      const [r, c] = place(k, rows, cols, dir);
+      out[r][c] = String.fromCharCode(97 + k);
+    }
+    return out.map((r) => r.join(""));
+  };
+  it("fills a wrap in each direction", () => {
+    expect(cells(7, 3, 3, "lt")).toEqual(["abc", "def", "g  "]);
+    expect(cells(7, 3, 3, "tl")).toEqual(["adg", "be ", "cf "]);
+    expect(cells(7, 3, 3, "rt")).toEqual(["cba", "fed", "  g"]);
+    expect(cells(7, 3, 3, "lb")).toEqual(["g  ", "def", "abc"]);
+    expect(cells(7, 3, 3, "tr")).toEqual(["gda", " eb", " fc"]);
+    expect(cells(7, 3, 3, "br")).toEqual([" fc", " eb", "gda"]);
   });
 });

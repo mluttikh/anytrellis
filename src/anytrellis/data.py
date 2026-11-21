@@ -13,7 +13,7 @@ whole table's levels, so axes and colours stay the same from page to page."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -285,6 +285,43 @@ class Table:
         if self._lazy is not None and name not in self._read_names:
             self.column(name)
         return self._frame[name].to_numpy()
+
+
+MEASURE, VALUE = "measure", "value"
+"""``Trellis(repeat=...)``'s columns: each melted row's column (the plot's rows) and its
+value (the layers' ``y``)."""
+
+
+def repeated(data: Any, columns: Sequence[str]) -> Any:
+    """``data`` melted: a row per row and column of ``columns``, the column's name in
+    ``measure`` and its value in ``value``, the other columns kept (a lazy table: a query,
+    not read)."""
+    table = Table(data)
+    missing = [c for c in columns if c not in table]
+    if missing:
+        raise ValueError(f"repeat=: {missing} are not columns of the data")
+    kinds = {table.kind(c) for c in columns}
+    if "category" in kinds or len(kinds) > 1:
+        raise ValueError("repeat= melts number columns (or time columns) into one: "
+                         f"{list(columns)} are {sorted(kinds)}")  # fmt: skip
+    clash = [n for n in (MEASURE, VALUE) if n in table and n not in columns]
+    if clash:
+        raise ValueError(f"repeat= makes the columns {MEASURE!r} and {VALUE!r}: the data has "
+                         f"{clash} already; rename it")  # fmt: skip
+    index = [n for n in table.names if n not in columns]
+    frame = _frame(data)
+    if isinstance(frame, Mapping):
+        n = table.n
+        out: dict[str, Any] = {name: np.tile(np.asarray(frame[name]), len(columns))
+                               for name in index}  # fmt: skip
+        out[MEASURE] = np.repeat(np.array(list(columns), dtype=object), n)
+        out[VALUE] = np.concatenate([np.asarray(frame[c], dtype=float) for c in columns])
+        return out
+    import narwhals as nw
+
+    melted = frame.unpivot(on=list(columns), index=index, variable_name=MEASURE,
+                           value_name=VALUE)  # fmt: skip
+    return nw.to_native(melted)
 
 
 def _frame(data: Any) -> Any:

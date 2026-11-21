@@ -18,6 +18,18 @@ All notable changes to anytrellis. The format follows
 - `segments(x, y, x2=, y2=)`: a line from (x, y) to (x2, y2) for each row.
 - All four work with `load="pages"`: the database counts the hexagons and the contours'
   grid, and a page's rows draw the rugs and segments.
+- `direction=`: the way a wrap fills its cells, `"h"` (rows, the default), `"v"`
+  (columns) or two letters for any start corner and direction (`"lb"`: rows from the
+  bottom left). Paged wraps fill each page the same way. A Fill setting and
+  `t.direction`.
+- `layout=`: a wrap's panels placed by a table of the wrap column(s), `row` and `col`
+  (or a dict `{level: (row, col)}`), as R's geofacet: a map's or a plate's shape, the cells
+  without a panel empty.
+- `space="free_x"|"free_y"|"free"`: panels sized by their range, so a category or a day is
+  as wide (or a unit as high) in every panel, as ggplot2's `space=`. With free scales
+  along those lines; `t.space`.
+- `repeat=[...]`: columns stacked as rows of panels, each on its own y scale: the data
+  melted into `measure` and `value` (in the query, for a database).
 
 ## [0.7.0] - 2026-11-21
 

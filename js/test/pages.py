@@ -1,7 +1,7 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
-channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs)."""
+channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs)."""
 
 from __future__ import annotations
 
@@ -135,6 +135,46 @@ def main(out: Path) -> None:
     Trellis(change, wrap="region", cols=3, panel_height=180).segments(
         x="fertility_1955", y="life_expect_1955", x2="fertility_2005", y2="life_expect_2005",
         tooltip=["country"]).save_html(out / "segments.html")  # fmt: skip
+    layouts(out)
+
+
+def layouts(out: Path) -> None:
+    """Panels placed by a layout table, sized by their range, columns repeated as rows and a
+    paged wrap filled down its columns (layout.mjs), each with figure.py's boxes at the
+    widths the browser may lay it out at (``<name>.boxes.json``)."""
+    import json
+
+    from anytrellis.figure import layout
+
+    gapminder = load("gapminder")
+    europe = pl.DataFrame(
+        [("Iceland", 1, 1), ("Norway", 1, 4), ("Finland", 1, 5), ("Ireland", 2, 1),
+         ("United Kingdom", 2, 2), ("Netherlands", 2, 3), ("Germany", 2, 4), ("Poland", 2, 5),
+         ("France", 3, 2), ("Belgium", 3, 3), ("Switzerland", 3, 4), ("Austria", 3, 5),
+         ("Portugal", 4, 1), ("Spain", 4, 2), ("Italy", 4, 4), ("Croatia", 4, 5),
+         ("Georgia", 4, 7), ("Greece", 5, 5), ("Turkey", 5, 6)],
+        schema=["country", "row", "col"], orient="row",
+    )  # fmt: skip
+    cars = load("cars").with_columns(cyl=pl.col("cylinders").cast(pl.String))
+    weather = load("seattle_weather")
+    plots = {
+        "geo": Trellis(gapminder.filter(pl.col("region") == "Europe & Central Asia"),
+                       wrap="country", layout=europe, panel_height=70)
+        .area(x="year", y="life_expect"),
+        "space": Trellis(cars, col="origin", share_x="col", space="free_x", panel_height=200)
+        .bars(x="cyl", stat="count"),
+        "repeat": Trellis(weather, repeat=["temp_max", "precipitation", "wind"],
+                          labels={"temp_max": "High (°C)"}, space="free_y", height=420)
+        .line(x="date", y="value", width=0.8),
+        "downwards": Trellis(gapminder, wrap="country", rows=2, cols=3, direction="v",
+                             panel_height=90).line(x="year", y="life_expect"),
+    }  # fmt: skip
+    for name, plot in plots.items():
+        plot.save_html(out / f"{name}.html")
+        spec, _ = plot._scene()
+        boxes = {w: [[b.index, b.rect.x, b.rect.y, b.rect.w, b.rect.h]
+                     for b in layout(spec, w).panels] for w in range(900, 1001)}  # fmt: skip
+        (out / f"{name}.boxes.json").write_text(json.dumps(boxes))
 
 
 def site_readings() -> pl.DataFrame:
