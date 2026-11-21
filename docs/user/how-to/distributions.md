@@ -1,9 +1,10 @@
 # Show distributions
 
-`hist()`, `box()`, `violin()`, `density()`, `ecdf()` and `errorbar()` summarise each
-panel's rows in Python, and draw the result as bars, boxes, violins, lines and error bars. Their bins
-and x values are the same in every panel, so the panels compare. Brushing selects whole
-bins, boxes, violins and error bars, and `selected()` gives the rows they stand for.
+`hist()`, `box()`, `violin()`, `density()`, `ecdf()`, `errorbar()`, `hexbin()` and
+`contour()` summarise each panel's rows in Python, and draw the result as bars, boxes,
+violins, lines, error bars, hexagons and contour lines. Their bins and x values are the same
+in every panel, so the panels compare. Brushing selects whole bins, boxes, violins, error
+bars and hexagons, and `selected()` gives the rows they stand for.
 
 ## Histograms
 
@@ -117,6 +118,28 @@ print(plot._embed_html())  # markdown-exec: hide
 `bw_adjust=` scales the bandwidth (as in seaborn: 2 is smoother, 0.5 more detailed), and
 `cut=` sets how far past the data each curve goes, in bandwidths.
 
+### The values under the curve
+
+`rug()` draws a short tick at the panel's bottom edge for each row's value, so a smooth
+curve shows what it was smoothed from. `rug(y=...)` puts the ticks on the left edge, and
+giving both draws both. The ticks stay at the edge, as long, however the panel is zoomed,
+and a brush selects the rows whose values it covers.
+
+```python exec="on" source="above" session="dist" html="true"
+plot = Trellis(penguins, wrap="species", cols=3, panel_height=170)
+plot.density(x="body_mass_g", color="sex").rug(x="body_mass_g", color="sex")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+| Argument | Sets |
+| --- | --- |
+| `length=8` | the ticks' length in pixels |
+| `width=1` | their width in pixels |
+| `opacity=0.5` | lighter where values are few, darker where many overlap |
+
+Without `color=`, a rug takes the colour of the layer before it.
+
 ## Cumulative distributions
 
 `ecdf()` draws the empirical cumulative distribution: a step line that rises at each
@@ -183,6 +206,52 @@ print(plot._embed_html())  # markdown-exec: hide
 
 Each row is one bar, and brushing it selects that row.
 
+## Two columns at once
+
+When points pile up too thickly to read, `hexbin()` counts the rows in hexagons and
+colours each by its count:
+
+```python exec="on" source="above" session="dist" html="true"
+gapminder = load("gapminder")
+plot = Trellis(gapminder, wrap="region", cols=3, panel_height=170)
+plot.hexbin(x="fertility", y="life_expect", bins=16)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+| Argument | Sets |
+| --- | --- |
+| `bins=30` | the number of hexagons across x; or `(nx, ny)`, across x and up y |
+| `stat="count"` | the colour: the rows in each hexagon; `"percent"`, of each panel's rows |
+
+The hexagons are the same in every panel, and as tall as wide on screen when the plot has
+a number `aspect=` (otherwise, for a panel about 0.6 as high as wide). Hover one for its
+count; brush to select its rows.
+
+`contour()` draws the lines of a two-dimensional density instead: where the rows are
+thickest, as a map draws a hill. Over points, it shows each group's middle and spread
+without hiding the points:
+
+```python exec="on" source="above" session="dist" html="true"
+plot = Trellis(penguins, wrap="island", cols=3, panel_height=200)
+plot.points(x="bill_length_mm", y="bill_depth_mm", color="species", opacity=0.4)
+plot.contour(x="bill_length_mm", y="bill_depth_mm", color="species", levels=4)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+| Argument | Sets |
+| --- | --- |
+| `levels=6` | the number of lines, at even heights up to the highest density of any panel |
+| `bw_adjust=1` | the bandwidth, as a multiple of Scott's rule: 2 is smoother |
+| `gridsize=100` | the grid the density is computed on, along each axis |
+
+The levels are the same in every panel, so a line means the same density everywhere.
+Hover a line for its level. The lines stand for no rows, so a brush selects none.
+
+With `load="pages"`, the database counts the rows in each hexagon, and for contours in
+each cell of the grid, so neither reads the rows.
+
 ## Which one?
 
 | You want to see | Use |
@@ -194,3 +263,6 @@ Each row is one bar, and brushing it selects that row.
 | Groups compared without choosing bins; medians and tails | `ecdf()` |
 | How many rows at each value, or each category | `bars(x=..., stat="count")` |
 | Means and how sure they are | `errorbar()` |
+| Where many points pile up, in x and y together | `hexbin()` |
+| The shape of a few groups in x and y, overlaid | `contour()` |
+| Each value under a summary | `rug()` |

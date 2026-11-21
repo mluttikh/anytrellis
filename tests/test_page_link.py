@@ -170,8 +170,12 @@ def test_a_plot_reading_pages_links_by_key() -> None:
         at.link(paged(rel, load="pages").points(x="t", y="v"), Trellis(df).points(x="t", y="v"))
 
 
+COUNTED = [m for m in MARKS + TIMES if m[0] != "contour"]
+"""The summaries whose rows stand for rows (a contour's lines stand for none)."""
+
+
 @pytest.mark.parametrize("kind", list(LAZY))
-@pytest.mark.parametrize(("mark", "kw", "scale"), MARKS + TIMES)
+@pytest.mark.parametrize(("mark", "kw", "scale"), COUNTED)
 def test_the_database_counts_the_rows_of_the_keys_chosen(
     kind: str, mark: str, kw: dict[str, Any], scale: dict[str, str]
 ) -> None:

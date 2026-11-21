@@ -70,6 +70,18 @@ def _gallery() -> list[Entry]:
         daily = weather.with_columns(month=pl.col("date").dt.month(), day=pl.col("date").dt.day())
         return Trellis(daily, wrap="year", cols=2).rect(x="day", y="month", color="temp_max")
 
+    def segments() -> Trellis:
+        change = gapminder.filter(pl.col("year").is_in([1955, 2005])).pivot(
+            on="year", index=["country", "region"], values=["fertility", "life_expect"]
+        )
+        return (
+            Trellis(change, wrap="region", cols=3, x_title="fertility", y_title="life_expect")
+            .segments(
+                x="fertility_1955", y="life_expect_1955", x2="fertility_2005", y2="life_expect_2005"
+            )
+            .points(x="fertility_2005", y="life_expect_2005", size=4)
+        )
+
     def labels() -> Trellis:
         eight = gapminder.filter(
             pl.col("year").is_in([1955, 2005])
@@ -113,6 +125,8 @@ def _gallery() -> list[Entry]:
               lambda: Trellis(weather, wrap="year", cols=2, share_x=False).band(
                   x="date", ymin="temp_min", ymax="temp_max", color="#d62728")),
         Entry("heatmap", "Heatmaps", "how-to/more-marks.md#rects-and-heatmaps", heatmap),
+        Entry("segments", "Segments: from one value to another",
+              "how-to/more-marks.md#segments", segments),
         Entry("labels", "Labels", "how-to/more-marks.md#text", labels),
         Entry("histograms", "Histograms", "how-to/distributions.md#histograms",
               lambda: Trellis(penguins, wrap="species", cols=3).hist(
@@ -128,6 +142,17 @@ def _gallery() -> list[Entry]:
         Entry("error-bars", "Error bars", "how-to/distributions.md#error-bars",
               lambda: Trellis(known, wrap="species", cols=3).errorbar(
                   x="sex", y="body_mass_g", color="sex")),
+        Entry("rug", "A density and its values",
+              "how-to/distributions.md#the-values-under-the-curve",
+              lambda: Trellis(known, wrap="species", cols=3)
+              .density(x="body_mass_g", color="sex").rug(x="body_mass_g", color="sex")),
+        Entry("hexbin", "Hexagonal bins", "how-to/distributions.md#two-columns-at-once",
+              lambda: Trellis(gapminder, wrap="region", cols=3).hexbin(
+                  x="fertility", y="life_expect", bins=16)),
+        Entry("contours", "Density contours", "how-to/distributions.md#two-columns-at-once",
+              lambda: Trellis(penguins, wrap="island", cols=3)
+              .points(x="bill_length_mm", y="bill_depth_mm", color="species", opacity=0.4)
+              .contour(x="bill_length_mm", y="bill_depth_mm", color="species", levels=4)),
         Entry("pairs", "Every pair of columns", "how-to/pairs.md",
               lambda: pairs(penguins, ["bill_length_mm", "bill_depth_mm", "flipper_length_mm"],
                             color="species")),

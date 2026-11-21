@@ -1,4 +1,4 @@
-# Draw areas, bands, rects and text
+# Draw areas, bands, rects, segments and text
 
 ## Areas
 
@@ -50,6 +50,28 @@ print(plot._embed_html())  # markdown-exec: hide
 
 `width=` and `height=` shrink the tiles (as a share of the step). With `x2=` and `y2=`, a
 rect goes from (x, y) to (x2, y2) instead: periods, ranges, regions.
+
+## Segments
+
+`segments()` draws a line from (x, y) to (x2, y2) for each row: a change, a link, a move.
+Give `x2=`, `y2=` or both; the one not given stays as it was, so `y2=` alone draws a
+vertical line.
+
+```python exec="on" source="above" session="more" html="true"
+change = gapminder.filter(pl.col("year").is_in([1955, 2005])).pivot(
+    on="year", index=["country", "region"], values=["fertility", "life_expect"])
+plot = Trellis(change, wrap="region", cols=3, panel_height=170,
+               title="From 1955 to 2005", x_title="Children per woman",
+               y_title="Life expectancy")
+plot.segments(x="fertility_1955", y="life_expect_1955", x2="fertility_2005",
+              y2="life_expect_2005", tooltip=["country"])
+plot.points(x="fertility_2005", y="life_expect_2005", size=4)
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+`width=`, `color=` and `opacity=` work as for `line()`. A brush selects the segments with
+an end inside it.
 
 ## Text
 

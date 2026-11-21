@@ -1,7 +1,7 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
-channels.mjs, labels.mjs, panels.mjs)."""
+channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs)."""
 
 from __future__ import annotations
 
@@ -121,6 +121,20 @@ def main(out: Path) -> None:
     # the settings panel left out (settings.mjs)
     Trellis(gapminder, wrap="region", controls=False).points(
         x="fertility", y="life_expect").save_html(out / "nocontrols.html")  # fmt: skip
+    # hexagons, contours, rugs and segments (marks.mjs)
+    Trellis(gapminder, wrap="region", cols=3, panel_height=180).hexbin(
+        x="fertility", y="life_expect", bins=14).save_html(out / "hexbin.html")  # fmt: skip
+    penguins = load("penguins")
+    (Trellis(penguins, wrap="island", cols=3, panel_height=220)
+     .points(x="bill_length_mm", y="bill_depth_mm", color="species", opacity=0.4)
+     .contour(x="bill_length_mm", y="bill_depth_mm", color="species", levels=4)
+     .rug(x="bill_length_mm", y="bill_depth_mm", color="species")
+     .save_html(out / "contours.html"))  # fmt: skip
+    change = gapminder.filter(pl.col("year").is_in([1955, 2005])).pivot(
+        on="year", index=["country", "region"], values=["fertility", "life_expect"])  # fmt: skip
+    Trellis(change, wrap="region", cols=3, panel_height=180).segments(
+        x="fertility_1955", y="life_expect_1955", x2="fertility_2005", y2="life_expect_2005",
+        tooltip=["country"]).save_html(out / "segments.html")  # fmt: skip
 
 
 def site_readings() -> pl.DataFrame:

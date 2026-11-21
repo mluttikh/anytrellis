@@ -118,6 +118,9 @@ class Where:
 
 
 def _take_test(test: Range | Labels, rows: np.ndarray) -> Range | Labels:
+    if isinstance(test, HexCells):
+        return HexCells(test.name, test.kind, test.lo[rows], test.hi[rows], grid=test.grid,
+                        x=test.x, y=test.y)  # fmt: skip
     if isinstance(test, Labels):
         return Labels(test.name, test.labels[rows])
     return Range(test.name, test.kind, test.lo[rows], test.hi[rows], test.scale,
@@ -161,6 +164,10 @@ def parts(
         return barstat(layer, table, panel_of, npanels, also)
     if layer.mark == "ecdf":
         return ecdf(layer, table, panel_of, npanels, also)
+    if layer.mark == "hexbin":
+        return hexbin(layer, table, panel_of, npanels, also)
+    if layer.mark == "contour":
+        return contour(layer, table, panel_of, npanels, also)
     raise ValueError(f"{layer.mark!r} is not a summary mark")
 
 
@@ -973,6 +980,383 @@ def barstat_parts(g: Keys, value: np.ndarray, members: Members) -> list[Part]:
         {"x": g.pos.name, "y": g.val.name}  # fmt: skip
     drawn = replace(layer, mark="bars", tooltip=tips, **axes)
     return [Part(drawn, out, build, members, hide=("x", "y"), where=g.where(groups))]
+
+
+# ---- hexagonal bins -----------------------------------------------------------------------
+
+HEX_SHAPE = 0.62
+"""A panel's height over its width when the plot doesn't say (``aspect=``): its hexagons
+are regular in a panel of this shape."""
+
+SQRT3 = 3**0.5
+
+HEX_OVERLAP = 0.02
+"""Hexagons are drawn this much larger than the tiling, so they overlap a hair."""
+
+
+@dataclass(frozen=True)
+class HexGrid:
+    """Hexagons, pointed at the top, that tile x and y: their centres on two lattices,
+    ``(x0 + i sx, y0 + j sy)`` and the same moved by half a step each way, and each value
+    in the hexagon of the nearer centre. A hexagon is ``sx`` wide and ``2 sy / 3`` high:
+    regular on screen when ``sy / sx`` is ``√3`` times the panel's width per height in
+    data units. Each hexagon has a code (``cells``); a database computes the same codes
+    (``code_expr``), so it counts the hexagons and finds their rows."""
+
+    x0: float
+    sx: float
+    y0: float
+    sy: float
+    ny: int
+
+    @staticmethod
+    def over(x: np.ndarray, y: np.ndarray, bins: int | tuple[int, int],
+             shape: float) -> HexGrid:  # fmt: skip
+        """Hexagons over the values' ranges: ``bins`` across x (and ``(nx, ny)``: rows
+        of them up y), regular in a panel ``shape`` high a unit wide."""
+        nx, ny = (bins, max(1, round(bins * shape / SQRT3))) if isinstance(bins, int) \
+            else bins  # fmt: skip
+        (x0, x1), (y0, y1) = _extent(x), _extent(y)
+        return HexGrid(x0, _step(x0, x1, nx), y0, _step(y0, y1, ny), int(ny))
+
+    @property
+    def wrap(self) -> int:
+        """Codes of a column of hexagons apart: more than its rows."""
+        return self.ny + 3
+
+    def cells(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Each value's hexagon (int64; values not finite: -1)."""
+        with np.errstate(invalid="ignore"):  # values not finite: -1
+            ix, iy = (x - self.x0) / self.sx, (y - self.y0) / self.sy
+            i1, j1 = np.floor(ix + 0.5), np.floor(iy + 0.5)
+            i2, j2 = np.floor(ix), np.floor(iy)
+            first = (ix - i1) ** 2 + 3 * (iy - j1) ** 2 <= \
+                (ix - i2 - 0.5) ** 2 + 3 * (iy - j2 - 0.5) ** 2  # fmt: skip
+            i, j = np.where(first, i1, i2), np.where(first, j1, j2)
+            code = ((i + 1) * self.wrap + (j + 1)) * 2 + np.where(first, 0, 1)
+            return np.where(np.isfinite(code), code, -1).astype(np.int64)
+
+    def code_expr(self, vx: Any, vy: Any) -> Any:
+        """``cells`` as a query's expression of the values' expressions: a float (whole
+        numbers), so a row not finite makes one too, not an error."""
+        import narwhals as nw
+
+        ix, iy = (vx - self.x0) / self.sx, (vy - self.y0) / self.sy
+        i1, j1 = (ix + 0.5).floor(), (iy + 0.5).floor()
+        i2, j2 = ix.floor(), iy.floor()
+        near = (ix - i1) ** 2 + (iy - j1) ** 2 * 3
+        first = near <= (ix - i2 - 0.5) ** 2 + (iy - j2 - 0.5) ** 2 * 3
+        a = ((i1 + 1) * self.wrap + (j1 + 1)) * 2
+        b = ((i2 + 1) * self.wrap + (j2 + 1)) * 2 + 1
+        return nw.when(first).then(a).otherwise(b)
+
+    def centres(self, codes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """The hexagons' centres."""
+        k = codes % 2
+        rest = codes // 2
+        i, j = rest // self.wrap - 1, rest % self.wrap - 1
+        return self.x0 + (i + 0.5 * k) * self.sx, self.y0 + (j + 0.5 * k) * self.sy
+
+
+def _extent(v: np.ndarray) -> tuple[float, float]:
+    v = v[np.isfinite(v)]
+    return (float(v.min()), float(v.max())) if len(v) else (0.0, 1.0)
+
+
+def _step(lo: float, hi: float, n: int) -> float:
+    """``n`` steps over lo to hi (none: a unit, or a tenth of the value)."""
+    if hi > lo:
+        return (hi - lo) / n
+    return abs(lo) / 10 if lo else 1.0
+
+
+@dataclass
+class HexCells(Range):
+    """The rows in hexagons: each summary row's code (``lo``, ``hi`` alike) of ``grid``
+    over columns ``x`` and ``y`` (each its name and its axis's scale)."""
+
+    grid: HexGrid | None = None
+    x: tuple[str, str] = ("", "")
+    y: tuple[str, str] = ("", "")
+
+    def codes_of(self, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        """Values' codes, as the rows' (float, as ``lo``)."""
+        assert self.grid is not None
+        return self.grid.cells(xs, ys).astype(np.float64)
+
+
+def hexbin(layer: Layer, table: Table, panel_of: np.ndarray | None,
+           npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
+    """The rows counted in hexagons that every panel shares, a hexagon per (panel, cell)
+    holding rows, coloured by its count."""
+    assert layer.x is not None
+    assert layer.y is not None
+    xc, yc = table.column(layer.x), table.column(layer.y)
+    for col in (xc, yc):
+        if col.kind == "category":
+            raise ValueError(f"hexbin(): x and y must be numbers or times; {col.name!r} holds "
+                             "categories")  # fmt: skip
+    args = layer.stat_args
+    grid = HexGrid.over(xc.values, yc.values, args["bins"], args.get("shape") or HEX_SHAPE)
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
+    code = grid.cells(xc.values, yc.values)[rows]
+    keep = code >= 0
+    rows, panel, code = rows[keep], panel[keep], code[keep]
+    m = int(code.max(initial=0)) + 1
+    uniq, inverse = _codes(panel * m + code)
+    counts = np.bincount(inverse, minlength=len(uniq))
+    return hexbin_parts(layer, xc, yc, grid, uniq // m, uniq % m, counts, npanels,
+                        Members.grouped(inverse, rows, len(uniq)))  # fmt: skip
+
+
+def hexbin_parts(layer: Layer, xc: Column, yc: Column, grid: HexGrid, panel: np.ndarray,
+                 cells: np.ndarray, counts: np.ndarray, npanels: int,
+                 members: Members) -> list[Part]:  # fmt: skip
+    """Hexagons ``cells`` of panels ``panel`` holding ``counts`` rows: each two trapezoids
+    (its halves, either side of its middle), coloured by its count (or its share of the
+    panel's rows)."""
+    stat = layer.stat_args["stat"]
+    value = counts.astype(np.float64)
+    if stat == "percent":
+        total = np.bincount(panel, weights=value, minlength=npanels)[panel]
+        value = 100.0 * value / np.maximum(total, 1)
+    cx, cy = grid.centres(cells)
+    cols = [Column(PANEL, "number", panel.astype(np.float64)),
+            Column(xc.name, xc.kind, cx, scale=xc.scale),
+            Column(yc.name, yc.kind, cy, scale=yc.scale),
+            Column(stat, "number", value)]  # fmt: skip
+    extra: dict[str, np.ndarray] = {}
+    for col, centre in ((xc, cx), (yc, cy)):
+        (shown,) = _shown(col, centre)
+        extra[col.name] = _times(shown) if col.kind == "time" else shown
+    if stat != "count":
+        extra["count"] = counts
+    out = _table(cols, extra)
+    n = len(cells)
+    tips = [xc.name, yc.name, stat] + (["count"] if stat != "count" else [])
+
+    def build(_x: Levels, _y: Levels, _c: ColorLevels) -> Geometry:
+        # a hair larger than the tiling (and the halves past the middle), so no seam of
+        # the background shows between hexagons where their edges are smoothed
+        grow = 1 + HEX_OVERLAP
+        half, top, side = grid.sx / 2 * grow, grid.sy / 3 * grow, grid.sy / 6 * grow
+        mid = grid.sx * HEX_OVERLAP / 2
+        owners = np.r_[np.arange(n), np.arange(n)]
+        left = np.r_[np.ones(n, dtype=bool), np.zeros(n, dtype=bool)]
+        x, y = cx[owners], cy[owners]
+        x0 = np.where(left, x - half, x - mid)
+        x1 = np.where(left, x + mid, x + half)
+        y0 = np.where(left, y + side, y + top)
+        y1 = np.where(left, y + top, y + side)
+        g = Geometry(panel[owners], x0, y0, x1, y1, owners)
+        g.base0 = np.where(left, y - side, y - top)
+        g.base1 = np.where(left, y - top, y - side)
+        return _sorted(g)
+
+    test = HexCells(f"{xc.name}, {yc.name}", "number", cells.astype(np.float64),
+                    cells.astype(np.float64), grid=grid, x=(xc.name, xc.scale),
+                    y=(yc.name, yc.scale))  # fmt: skip
+    where = Where(panel, None, [test], ((xc.name, xc.scale), (yc.name, yc.scale)))
+    drawn = replace(layer, mark="band", color=stat, tooltip=tips)
+    return [Part(drawn, out, build, members, hide=("x", "y"), where=where)]
+
+
+# ---- density contours ---------------------------------------------------------------------
+
+CONTOUR_PAD = 0.2
+"""A contour grid reaches this share of the values' range past them, so the outer lines
+close around the data."""
+
+
+@dataclass
+class Binned:
+    """Rows counted in a grid of bins over x and y: each group's (panel, colour) count in
+    each bin holding rows."""
+
+    panel: np.ndarray
+    color: np.ndarray
+    bx: np.ndarray
+    by: np.ndarray
+    n: np.ndarray
+
+
+@dataclass(frozen=True)
+class Bins2:
+    """``size`` equal bins each way over x from ``x0`` (``wx`` wide) and y from ``y0``."""
+
+    x0: float
+    wx: float
+    y0: float
+    wy: float
+    size: int
+
+    @staticmethod
+    def over(x: np.ndarray, y: np.ndarray, size: int) -> Bins2:
+        """Bins over the values' ranges, and past them by ``CONTOUR_PAD`` of each."""
+        (xa, xb), (ya, yb) = _extent(x), _extent(y)
+        xr, yr = (xb - xa) or abs(xa) or 1.0, (yb - ya) or abs(ya) or 1.0
+        xa, ya = xa - CONTOUR_PAD * xr, ya - CONTOUR_PAD * yr
+        return Bins2(xa, xr * (1 + 2 * CONTOUR_PAD) / size, ya, yr * (1 + 2 * CONTOUR_PAD) / size,
+                     size)  # fmt: skip
+
+    def of(self, v: np.ndarray, x: bool) -> np.ndarray:
+        """Values' bins along x (``x``) or y."""
+        lo, w = (self.x0, self.wx) if x else (self.y0, self.wy)
+        with np.errstate(invalid="ignore"):
+            return np.clip(np.floor((v - lo) / w), 0, self.size - 1).astype(np.int64)
+
+    def centres(self, x: bool) -> np.ndarray:
+        lo, w = (self.x0, self.wx) if x else (self.y0, self.wy)
+        return lo + (np.arange(self.size) + 0.5) * w
+
+
+def contour(layer: Layer, table: Table, panel_of: np.ndarray | None,
+            npanels: int, also: np.ndarray | None = None) -> list[Part]:  # fmt: skip
+    """Lines of equal density in each panel (and of each colour): the rows binned, the
+    bins smoothed by a Gaussian kernel, and the lines found where the density crosses
+    levels every panel shares."""
+    assert layer.x is not None
+    assert layer.y is not None
+    xc, yc = table.column(layer.x), table.column(layer.y)
+    for col in (xc, yc):
+        if col.kind == "category":
+            raise ValueError(f"contour(): x and y must be numbers or times; {col.name!r} holds "
+                             "categories")  # fmt: skip
+    color = _color(layer, table)
+    bins = Bins2.over(xc.values, yc.values, layer.stat_args["gridsize"])
+    rows, panel = expand(panel_of, table.n, npanels, layer.facet, also)
+    x, y = xc.values[rows], yc.values[rows]
+    keep = np.isfinite(x) & np.isfinite(y)
+    rows, panel, x, y = rows[keep], panel[keep], x[keep], y[keep]
+    labels, c = _color_codes(color, rows)
+    size = bins.size
+    key = ((panel * len(labels) + c) * size + bins.of(x, True)) * size + bins.of(y, False)
+    uniq, counts = np.unique(key, return_counts=True)
+    group, cell = uniq // (size * size), uniq % (size * size)
+    binned = Binned(group // len(labels), group % len(labels), cell // size, cell % size,
+                    counts.astype(np.float64))  # fmt: skip
+    return contour_parts(layer, xc, yc, color, labels, bins, binned)
+
+
+def contour_parts(layer: Layer, xc: Column, yc: Column, color: Column | None,
+                  labels: np.ndarray, bins: Bins2, binned: Binned) -> list[Part]:  # fmt: skip
+    """The contour lines of each group's binned rows: each line segment a summary row, of
+    its group, at its level."""
+    args = layer.stat_args
+    size, nc = bins.size, len(labels)
+    cx, cy = bins.centres(True), bins.centres(False)
+    group = binned.panel * nc + binned.color
+    groups, at = _codes(group)
+    densities = []
+    for k in range(len(groups)):
+        mine = at == k
+        grid = np.zeros((size, size))
+        np.add.at(grid, (binned.bx[mine], binned.by[mine]), binned.n[mine])
+        densities.append(_smoothed(grid, cx, cy, float(args["bw_adjust"])))
+    top = max((float(d.max()) for d in densities), default=0.0)
+    count = int(args["levels"])
+    levels = top * np.arange(1, count + 1) / (count + 1)
+    seg_group, seg_level, ends = [], [], []
+    for k, d in enumerate(densities):
+        for i, level in enumerate(levels):
+            s = _isolines(d, cx, cy, float(level))
+            seg_group.append(np.full(len(s), k))
+            seg_level.append(np.full(len(s), i))
+            ends.append(s)
+    seg = np.concatenate(ends) if ends else np.zeros((0, 4))
+    g = np.concatenate(seg_group).astype(np.int64) if seg_group else np.zeros(0, np.int64)
+    li = np.concatenate(seg_level).astype(np.int64) if seg_level else np.zeros(0, np.int64)
+    panel, ci = groups[g] // nc, groups[g] % nc
+    n = len(seg)
+    level_value = levels[li] if len(levels) else np.zeros(0)
+    cols = [Column(PANEL, "number", panel.astype(np.float64)),
+            Column(xc.name, xc.kind, seg[:, 0], scale=xc.scale),
+            Column(yc.name, yc.kind, seg[:, 1], scale=yc.scale),
+            Column("density", "number", level_value),
+            Column("level", "number", (li + 1).astype(np.float64))]  # fmt: skip
+    if color is not None:
+        cols.append(Column(color.name, "category", labels[ci], color.levels))
+    out = _table(cols, {})
+    tips = ["level", "density"] + ([color.name] if color is not None else [])
+
+    def build(_x: Levels, _y: Levels, _c: ColorLevels) -> Geometry:
+        k = np.arange(n)
+        geom = Geometry(panel, seg[:, 0], seg[:, 1], seg[:, 2], seg[:, 3], k)
+        geom.rows_end = k.copy()
+        return _sorted(geom)
+
+    drawn = replace(layer, mark="line", tooltip=tips)
+    return [Part(drawn, out, build, no_members(n), hide=("x", "y"))]
+
+
+def _smoothed(counts: np.ndarray, cx: np.ndarray, cy: np.ndarray, adjust: float) -> np.ndarray:
+    """A group's density over the grid, from its rows counted in its bins: a Gaussian
+    kernel's, each way Scott's rule's bandwidth (``adjust`` times), from the binned
+    values' spread; over the grid it sums to 1 (times the bins' area)."""
+    n = counts.sum()
+    if n <= 0:
+        return counts
+    wx, wy = counts.sum(axis=1), counts.sum(axis=0)
+
+    def bandwidth(w: np.ndarray, c: np.ndarray) -> float:
+        mean = float((w * c).sum() / n)
+        sd = float(np.sqrt((w * (c - mean) ** 2).sum() / n))
+        step = float(c[1] - c[0]) if len(c) > 1 else 1.0
+        return max(sd, step) * n ** (-1 / 6) * adjust
+
+    hx, hy = bandwidth(wx, cx), bandwidth(wy, cy)
+    kx = np.exp(-0.5 * ((cx[:, None] - cx[None, :]) / hx) ** 2) / (hx * np.sqrt(2 * np.pi))
+    ky = np.exp(-0.5 * ((cy[:, None] - cy[None, :]) / hy) ** 2) / (hy * np.sqrt(2 * np.pi))
+    return kx @ counts @ ky.T / n
+
+
+# marching squares: per case (the corners at or above the level, bits a b c d: (x, y),
+# (x+1, y), (x+1, y+1), (x, y+1)), the edges each segment joins (0 bottom, 1 right, 2 top,
+# 3 left); a saddle's (5, 10) by its centre: above, then below
+_CASES: dict[int, list[tuple[int, int]]] = {
+    1: [(3, 0)], 2: [(0, 1)], 3: [(3, 1)], 4: [(1, 2)], 6: [(0, 2)], 7: [(2, 3)],
+    8: [(2, 3)], 9: [(0, 2)], 11: [(1, 2)], 12: [(1, 3)], 13: [(0, 1)], 14: [(3, 0)],
+}  # fmt: skip
+_SADDLES: dict[int, tuple[list[tuple[int, int]], list[tuple[int, int]]]] = {
+    5: ([(0, 1), (2, 3)], [(3, 0), (1, 2)]),
+    10: ([(3, 0), (1, 2)], [(0, 1), (2, 3)]),
+}
+
+
+def _isolines(d: np.ndarray, cx: np.ndarray, cy: np.ndarray, level: float) -> np.ndarray:
+    """Marching squares: the segments (x0, y0, x1, y1 per row) where ``d`` (over x, y
+    centres ``cx``, ``cy``) crosses ``level``."""
+    a, b, c, e = d[:-1, :-1], d[1:, :-1], d[1:, 1:], d[:-1, 1:]
+    case = (a >= level) * 1 + (b >= level) * 2 + (c >= level) * 4 + (e >= level) * 8
+    xi, yi = np.meshgrid(np.arange(len(cx) - 1), np.arange(len(cy) - 1), indexing="ij")
+
+    def point(edge: int, m: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        i, j = xi[m], yi[m]
+        p, q = {0: (a, b), 1: (b, c), 2: (e, c), 3: (a, e)}[edge]
+        u, v = p[m], q[m]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            t = np.clip(np.where(v != u, (level - u) / (v - u), 0.5), 0, 1)
+        if edge in (0, 2):  # along x, at the cell's bottom or top
+            return cx[i] + t * (cx[i + 1] - cx[i]), cy[j + (edge == 2)]
+        return cx[i + (edge == 1)], cy[j] + t * (cy[j + 1] - cy[j])
+
+    out = []
+
+    def add(m: np.ndarray, pairs: list[tuple[int, int]]) -> None:
+        if not m.any():
+            return
+        for e0, e1 in pairs:
+            x0, y0 = point(e0, m)
+            x1, y1 = point(e1, m)
+            out.append(np.stack([x0, y0, x1, y1], axis=1))
+
+    for k, pairs in _CASES.items():
+        add(case == k, pairs)
+    centre = (a + b + c + e) / 4 >= level
+    for k, (above, below) in _SADDLES.items():
+        add((case == k) & centre, above)
+        add((case == k) & ~centre, below)
+    return np.concatenate(out) if out else np.zeros((0, 4))
 
 
 # ---- empirical cumulative distributions ---------------------------------------------------

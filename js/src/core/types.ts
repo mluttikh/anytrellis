@@ -134,6 +134,9 @@ export interface MarkLayerSpec {
    * instance's series (uint16), and the colour legend the series are levels of (null:
    * none). */
   end_labels?: { names: string[]; series: BufferRef; legend: number | null } | null;
+  /** An axis whose coordinates are pixels from the panel's edge, not data (a rug): "y",
+   * up from its bottom; "x", right from its left. Absent: both in data. */
+  pin?: "x" | "y" | null;
 }
 
 export interface RuleLayerSpec {

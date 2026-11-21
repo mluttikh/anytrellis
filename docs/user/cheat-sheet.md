@@ -99,6 +99,7 @@ Trellis(barley, wrap="site").bars(x="yield", y="variety")  # a category y: horiz
 Trellis(gapminder, wrap="region").area(x="year", y="pop", group="country")  # stacked
 Trellis(weather, wrap="weather").band(x="date", ymin="temp_min", ymax="temp_max")
 Trellis(barley, wrap="year").rect(x="site", y="variety", color="yield")  # tiles
+Trellis(weather, wrap="weather").segments(x="date", y="temp_min", y2="temp_max")  # x2=
 Trellis(cars, wrap="origin").text(x="weight", y="mpg", text="cylinders", size=9)
 Trellis(cars, wrap="origin").text(x="weight", y="mpg", text="name", repel=True)  # apart
 Trellis(gapminder).line(x="year", y="life_expect", group="country",
@@ -114,7 +115,7 @@ Trellis(cars, wrap="origin").points(x="weight", y="mpg", facet="exclude")  # gre
 
 Every mark takes `facet=`: `"auto"`, `"include"`, `"all"` (every row in every panel) or
 `"exclude"` (the other panels' rows), and `name=`. See [Draw lines, points and
-bars](how-to/marks.md) and [Draw areas, bands, rects and text](how-to/more-marks.md).
+bars](how-to/marks.md) and [Draw areas, bands, rects, segments and text](how-to/more-marks.md).
 
 ## Summaries
 
@@ -132,6 +133,9 @@ Trellis(penguins, wrap="island").bars(x="species", y="body_mass_g", stat="mean")
 Trellis(penguins, wrap="island").ecdf(x="body_mass_g", color="species")  # complementary=True
 Trellis(cars, wrap="origin").points(x="weight", y="mpg").smooth(x="weight", y="mpg")
 Trellis(cars, wrap="origin").smooth(x="weight", y="mpg", method="linear", se=False)
+Trellis(penguins, wrap="island").density(x="body_mass_g").rug(x="body_mass_g")  # y=, both
+Trellis(gapminder, wrap="region").hexbin(x="fertility", y="life_expect", bins=20)
+Trellis(penguins, wrap="island").contour(x="bill_length_mm", y="bill_depth_mm", levels=5)
 ```
 
 See [Show distributions](how-to/distributions.md) and [Fit a smooth line](how-to/smooth.md).
