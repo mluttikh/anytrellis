@@ -266,6 +266,7 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 |---|---|
 | `f` | full screen, and back |
 | `e` | the Export menu: copy or download a PNG or SVG |
+| `,` | the settings panel: columns, scales, colour, order; Copy as Python |
 | `r`, `0` | reset the zoom |
 | `u`, Cmd/Ctrl+Z | undo the last zoom |
 | `z` | drag draws a zoom box, and back (Shift+drag: the other) |
@@ -285,6 +286,12 @@ These keys stay in the plot, so JupyterLab's own shortcuts don't also act on the
 On a phone or tablet, one finger scrolls the page and the plot takes two: pinch to zoom
 (fingers side by side zoom x alone), move two fingers to pan, and press and hold for the
 values there.
+
+The toolbar's settings panel changes the columns, the panels' shape, the scales and how
+they are shared, the colour column and the panels' order, each the property or method of
+the same name (`t.cols`, `t.share_y`, `t.y_scale`, `t.color`, `order()`), read back in
+Python. *Copy as Python*, or `t.code()`, gives the code of the plot as it is now, changes
+made by hand included. `controls=False` leaves the panel out.
 
 ## Sharing
 

@@ -18,6 +18,8 @@ interface Payload {
   selection?: Brush | null;
   /** The page, sort and filters of a paged wrap. */
   paging?: Paging | null;
+  /** The Python that made the plot as saved (Trellis.code), or null: controls=False. */
+  code?: string | null;
 }
 
 declare global {
@@ -36,7 +38,8 @@ async function start(host: HTMLElement): Promise<void> {
     // ?renderer=webgl2 (etc.) in the page's URL forces a backend: tests and comparisons
     const forced = new URLSearchParams(location.search).get("renderer") as RendererPreference | null;
     const renderer = forced ?? payload.renderer ?? "auto";
-    const view = new TrellisView(host, { source: embeddedSource(payload.buffers), renderer });
+    const code = payload.code ?? null;
+    const view = new TrellisView(host, { source: embeddedSource(payload.buffers), renderer, code: () => code });
     (window.anytrellisViews ??= []).push(view);
     if (payload.focus) view.setFocusName(payload.focus);
     if (payload.compare) view.setCompareName(payload.compare);

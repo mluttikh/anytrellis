@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from anytrellis.code import recorded_init
 from anytrellis.data import Column, Table
 from anytrellis.plot import Trellis, _text
 from anytrellis.stats import _kde
@@ -106,6 +107,7 @@ class Pairs(Trellis):
     """A scatterplot matrix (``anytrellis.pairs``): a ``Trellis`` whose ``selected()`` gives
     rows of the data, and whose panels are named ``"<y column> · <x column>"``."""
 
+    @recorded_init
     def __init__(
         self,
         data: Any,

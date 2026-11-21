@@ -247,6 +247,9 @@ export interface TrellisSpec {
   fit_y?: boolean;
   /** The plot's description for screen readers (Python's, or alt=): the figure's label. */
   description?: string;
+  /** The settings panel's sections (null: no panel, controls=False). Each setting is the
+   * property or method of the same name in Python. */
+  settings?: SettingsSection[] | null;
   /** A panel's buttons (open, pin, compare) on the panel under the pointer (absent: yes). */
   panel_buttons?: boolean;
   /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */
@@ -306,4 +309,23 @@ export type RendererPreference = RendererKind | "auto";
 
 export function isMark(layer: LayerSpec): layer is MarkLayerSpec {
   return layer.type !== "rule" && layer.type !== "text";
+}
+
+/** A section of the settings panel ("Layout", "Scales", "Data"). */
+export interface SettingsSection {
+  title: string;
+  settings: Setting[];
+}
+
+/** One setting: a menu of choices (value, label), or a number stepped up and down. */
+export interface Setting {
+  name: string;
+  label: string;
+  kind: "select" | "stepper";
+  value: unknown;
+  options?: [unknown, string][];
+  /** A stepper: the value shown (its own when the setting is None), and its range. */
+  shown?: number;
+  min?: number;
+  max?: number;
 }

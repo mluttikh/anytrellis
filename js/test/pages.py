@@ -118,6 +118,9 @@ def main(out: Path) -> None:
     # pins, the arrow keys, comparing (panels.mjs)
     countries = Trellis(gapminder, wrap="country", rows=2, cols=4, panel_height=110)
     countries.line(x="year", y="life_expect", color="region").save_html(out / "pins.html")
+    # the settings panel left out (settings.mjs)
+    Trellis(gapminder, wrap="region", controls=False).points(
+        x="fertility", y="life_expect").save_html(out / "nocontrols.html")  # fmt: skip
 
 
 def site_readings() -> pl.DataFrame:

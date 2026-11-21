@@ -85,6 +85,7 @@ its text. A click away from the marks, ++esc++ or its
 | ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom; with none opened, the previous / next page of a paged wrap |
 | ++backspace++ | back to all panels |
 | ++e++ | the Export menu: copy, download or save an image |
+| ++comma++ | the settings panel: columns, panel shape, scales, colour, order; *Copy as Python* |
 | ++f++ | full screen, and back |
 | ++question++ | the keys and mouse, the renderer drawing the plot and the anytrellis version |
 
@@ -92,8 +93,10 @@ its text. A click away from the marks, ++esc++ or its
 
 The buttons at the top right do the same as keys. The first three choose what a drag
 does, one of them always on: pan, box zoom (++z++) or select (++s++); with one focused, the
-arrow keys move along them. Then fit y (++y++), reset (++r++), export (++e++), the keys
-and mouse (++question++) and full screen (++f++). With a panel opened, the strip over it
+arrow keys move along them. Then fit y (++y++), reset (++r++), settings (++comma++), export
+(++e++), the keys and mouse (++question++) and full screen (++f++). The settings panel
+changes the layout, scales, colour and order, and copies the plot's Python ([Change a plot
+from its settings panel](../how-to/settings.md)). With a panel opened, the strip over it
 has *All panels* and the previous and next buttons. Over a paged wrap, a bar turns the
 pages, sorts the panels and filters them ([Page through many panels](../how-to/pages.md)).
 

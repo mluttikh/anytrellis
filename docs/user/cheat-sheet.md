@@ -51,8 +51,19 @@ Trellis(cars, wrap="origin", panel_buttons=False)  # no open, pin, compare butto
 Trellis(cars, wrap="origin", redundant=True)  # a colour column also as shapes and dashes
 Trellis(cars, wrap="origin", alt="Heavier cars use more fuel.")  # for screen readers
 Trellis(cars, wrap="origin").points(x="weight", y="mpg").description  # the one made for it
+Trellis(cars, wrap="origin", controls=False)  # no settings panel (a page to publish)
 
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
+t.cols = 2  # each a setting of the settings panel, read back as it changes there
+t.aspect = 1
+t.share_y = "sliced"
+t.y_scale = "log"
+t.x_scale = "linear"
+t.share_x = True
+t.color = "cylinders"  # the layers' colour column (None: none)
+t.title = "Fuel use"  # also t.subtitle, t.caption: each redraws the plot shown
+t.panel_height = 160  # or t.height; a shape (t.aspect) set after it lets it go
+print(t.code())  # the Python of the plot as it is now (the panel's "Copy as Python")
 t.share(x=True, y="row")  # as share_x=, share_y=
 t.scale(x="log")  # as x_scale=
 t.scale(y=("sqrt", "reverse"))  # high to low; "reverse" alone: a linear axis reversed
