@@ -96,6 +96,19 @@ export interface LayoutOptions {
   page?: number[] | null;
 }
 
+/** The cell (row, column) of a wrap's `k`-th panel, filled as `dir` says (facets.py: place). */
+export function place(k: number, rows: number, cols: number, dir = "lt"): [number, number] {
+  const [first, then] = dir;
+  if (first === "l" || first === "r") {
+    const run = Math.floor(k / cols);
+    const at = k % cols;
+    return [then === "t" ? run : rows - 1 - run, first === "l" ? at : cols - 1 - at];
+  }
+  const run = Math.floor(k / rows);
+  const at = k % rows;
+  return [first === "t" ? at : rows - 1 - at, then === "l" ? run : cols - 1 - run];
+}
+
 /** A panel's name: its level of each facet column. */
 export function panelName(spec: TrellisSpec, index: number): string {
   const p = spec.panels[index];
@@ -189,7 +202,11 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
   const shown = pages ? (opts.page ?? pageList(spec.panels.map((_, i) => i), pages)[0]) : null;
   // (a grid's page: each panel in its cell)
   const panels = shown
-    ? shown.map((index, k) => (pages!.grid ? spec.panels[index] : { ...spec.panels[index], row: Math.floor(k / pages!.cols), col: k % pages!.cols }))
+    ? shown.map((index, k) => {
+        if (pages!.grid) return spec.panels[index];
+        const [row, col] = place(k, pages!.rows, pages!.cols, grid.dir);
+        return { ...spec.panels[index], row, col };
+      })
     : spec.panels;
   const fs = opts.fontSize;
   const look = lookOf(spec);
@@ -280,42 +297,68 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
     else h = Math.min(300, Math.max(90, w * 0.62));
     return [w, Math.max(MIN_PANEL, Math.floor(h))];
   };
+  // space=: each column's share of the width by its x range, each row's of the height by
+  // its y range (the widest panel's of a column, the highest's of a row)
+  const span = (d: [number, number]): number => Math.max(1e-12, Math.abs(d[1] - d[0]));
+  const colSpan = new Array<number>(cols).fill(0);
+  const rowSpan = new Array<number>(rows).fill(0);
+  panels.forEach((p) => {
+    colSpan[p.col] = Math.max(colSpan[p.col], span(p.x));
+    rowSpan[p.row] = Math.max(rowSpan[p.row], span(p.y));
+  });
+  const shares = (spans: number[], on: boolean | undefined): number[] => {
+    const known = spans.filter((s) => s > 0);
+    const mean = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1;
+    const of = spans.map((s) => (on ? s || mean : 1));
+    const sum = of.reduce((a, b) => a + b, 0);
+    return of.map((s) => (s * of.length) / sum);
+  };
+  const colShare = shares(colSpan, spec.space?.x);
+  const rowShare = shares(rowSpan, spec.space?.y);
+  const sizes = (w: number, h: number): [number[], number[]] => [colShare.map((s) => Math.max(MIN_PANEL, Math.floor(w * s))), rowShare.map((s) => Math.max(MIN_PANEL, Math.floor(h * s)))];
   // the panels' height sets how many y ticks they draw (finer steps, longer labels: 500M
   // between 0 and 1.0G), and it can follow their width, which follows the labels: so size
   // them, measure the labels drawn at that height, keep the wider, and size them again
   let [pw, ph] = panelSize();
+  let [colW, rowH] = sizes(pw, ph);
   panels.forEach((p, i) => {
-    if (showY[i]) yLabelWidth[i] = Math.max(yLabelWidth[i], yLabelsWidth(spec, p.y, opts, ph));
+    if (showY[i]) yLabelWidth[i] = Math.max(yLabelWidth[i], yLabelsWidth(spec, p.y, opts, rowH[p.row]));
   });
   yGutters();
   [pw, ph] = panelSize();
+  [colW, rowH] = sizes(pw, ph);
   // categories that don't fit side by side: on two lines or angled, the axis as high as that
-  ({ mode: xLabels, height: xAxisHeight } = xLabelMode(spec, pw, opts));
+  // (space="free_x": every band as wide, the narrowest of them all otherwise)
+  const bandsW = spec.space?.x && spec.x.levels ? (pw * cols * spec.x.levels.length) / colSpan.reduce((a, b) => a + b, 0) : pw;
+  ({ mode: xLabels, height: xAxisHeight } = xLabelMode(spec, bandsW, opts));
   if (xLabels !== "flat") {
     axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
     [pw, ph] = panelSize();
+    [colW, rowH] = sizes(pw, ph);
   }
   // panels narrowed to keep their shape: the grid centred
-  const shift = Math.max(0, Math.floor((freeWidth() - cols * pw) / 2));
+  const shift = Math.max(0, Math.floor((freeWidth() - colW.reduce((a, b) => a + b, 0)) / 2));
 
   const colX: number[] = [];
   let x = left + shift;
   for (let c = 0; c < cols; c++) {
     x += yAxisWidth[c];
     colX.push(x);
-    x += pw + GAP;
+    x += colW[c] + GAP;
   }
   const rowY: number[] = [];
   let y = top + topStrip;
   for (let r = 0; r < rows; r++) {
     y += wrapStrip;
     rowY.push(y);
-    y += ph + (rowHasX[r] ? xAxisHeight : 0) + GAP;
+    y += rowH[r] + (rowHasX[r] ? xAxisHeight : 0) + GAP;
   }
   const plotBottom = y - GAP;
-  const plotRight = colX[cols - 1] + pw;
+  const plotRight = colX[cols - 1] + colW[cols - 1];
 
   const boxes: PanelBox[] = panels.map((p, i) => {
+    const pw = colW[p.col];
+    const ph = rowH[p.row];
     const rect = { x: colX[p.col], y: rowY[p.row], w: pw, h: ph };
     return {
       index: shown ? shown[i] : i,
@@ -333,12 +376,12 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
   const strips: Strip[] = [];
   if (colDepth === 1) {
     grid.col_labels.forEach((label, c) => {
-      strips.push({ rect: { x: colX[c], y: top, w: pw, h: stripH - 1 }, label, vertical: false, side: "top", span: false });
+      strips.push({ rect: { x: colX[c], y: top, w: colW[c], h: stripH - 1 }, label, vertical: false, side: "top", span: false });
     });
   } else if (colDepth > 1) {
     for (const [k, a, b] of nest(grid.col_keys ?? [], colDepth)) {
       const x0 = colX[a];
-      strips.push({ rect: { x: x0, y: top + k * stripH, w: colX[b] + pw - x0, h: stripH - 1 }, label: grid.col_keys![a][k], vertical: false, side: "top", span: b > a });
+      strips.push({ rect: { x: x0, y: top + k * stripH, w: colX[b] + colW[b] - x0, h: stripH - 1 }, label: grid.col_keys![a][k], vertical: false, side: "top", span: b > a });
     }
   }
   const vertical = look.row_labels === "side";
@@ -346,11 +389,11 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
   const rowX = (k: number): number => plotRight + GAP + rowW.slice(k + 1).reduce((a, b) => a + b, 0);
   if (rowDepth === 1) {
     grid.row_labels.forEach((label, r) => {
-      strips.push({ rect: { x: rowX(0), y: rowY[r], w: rowW[0] - 1, h: ph }, label, vertical, side: "right", span: false });
+      strips.push({ rect: { x: rowX(0), y: rowY[r], w: rowW[0] - 1, h: rowH[r] }, label, vertical, side: "right", span: false });
     });
   } else if (rowDepth > 1) {
     for (const [k, a, b] of nest(grid.row_keys ?? [], rowDepth)) {
-      strips.push({ rect: { x: rowX(k), y: rowY[a], w: rowW[k] - 1, h: rowY[b] + ph - rowY[a] }, label: grid.row_keys![a][k], vertical, side: "right", span: b > a });
+      strips.push({ rect: { x: rowX(k), y: rowY[a], w: rowW[k] - 1, h: rowY[b] + rowH[b] - rowY[a] }, label: grid.row_keys![a][k], vertical, side: "right", span: b > a });
     }
   }
   if (wrapDepth > 1) {
@@ -366,7 +409,7 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
         const keys = run.map((i) => inRow[i].keys.slice(from));
         for (const [k, a, b] of nest(keys, wrapDepth - 1)) {
           const x0 = colX[inRow[run[a]].col];
-          const x1 = colX[inRow[run[b]].col] + pw;
+          const x1 = colX[inRow[run[b]].col] + colW[inRow[run[b]].col];
           strips.push({ rect: { x: x0, y: rowY[r] - wrapStrip + k * stripH, w: x1 - x0, h: stripH - 1 }, label: keys[a][k], vertical: false, side: "top", span: b > a });
         }
       }
@@ -380,8 +423,8 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
     const used = panels.filter((p) => p.row === last).reduce((a, p) => Math.max(a, p.col + 1), 0);
     if (used > 0 && used < cols) {
       const sx = colX[used] - yAxisWidth[used] + 8;
-      const sy = last > 0 ? rowY[last - 1] + ph + xAxisHeight + GAP : rowY[last] - wrapStrip;
-      const sb = rowY[last] + ph;
+      const sy = last > 0 ? rowY[last - 1] + rowH[last - 1] + xAxisHeight + GAP : rowY[last] - wrapStrip;
+      const sb = rowY[last] + rowH[last];
       if (plotRight - sx >= 60 && sb - sy >= 30) spare = { x: sx, y: sy, w: plotRight - sx, h: sb - sy };
     }
   }

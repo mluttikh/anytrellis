@@ -26,7 +26,7 @@ import numpy as np
 from anytrellis.channels import DASHES, SIZE_RANGE, Channels, dash_units, shape_code
 from anytrellis.code import Call, call_text, chained, literal, recorded, recorded_init
 from anytrellis.codec import Buffers
-from anytrellis.data import Table, number_label
+from anytrellis.data import MEASURE, Table, number_label, repeated
 from anytrellis.describe import Axis, describe, facet_phrase
 from anytrellis.detail import (
     DENSE,
@@ -37,7 +37,19 @@ from anytrellis.detail import (
     PointDetail,
     Shown,
 )
-from anytrellis.facets import Grid, Order, Panel, Summary, build_grid, ordered_levels, strip_texts
+from anytrellis.facets import (
+    DIRECTION_NAMES,
+    Grid,
+    Order,
+    Panel,
+    Summary,
+    build_grid,
+    direction_of,
+    layout_places,
+    ordered_levels,
+    place,
+    strip_texts,
+)
 from anytrellis.formats import axis_format, number_format, time_format
 from anytrellis.layers import (
     FACET_MODES,
@@ -118,6 +130,9 @@ LEGENDS = ("auto", "top", "bottom", "right", "none")
 BAR_STATS = ("identity", "count", "sum", "mean", "median")
 STRIPS = ("nested", "joined")
 EMPTY = ("draw", "blank")
+SPACES = ("fixed", "free_x", "free_y", "free")
+"""Panels sized by their range: ``free_x``, the columns by their x range; ``free_y``, the
+rows by their y range; ``free``, both (as ggplot2's ``space=``)."""
 MARGINS = (False, True, "row", "col")
 LOADS = ("all", "pages")
 PAGE_MARKS = ("points", "line", "text", "segment", "rug")
@@ -150,7 +165,24 @@ class Trellis:
         col: Facet column(s) whose levels are the grid's columns.
         wrap: Facet column(s) whose levels are panels wrapped into ``cols`` columns (not
             with ``row`` or ``col``).
+        repeat: Number (or time) columns, a row of panels each, as stacked time series: the
+            data is melted, the column's name in ``measure`` (the rows' facet column) and
+            its value in ``value``, which the layers draw as ``y``:
+            ``Trellis(weather, repeat=["temp_max", "wind"]).line(x="date", y="value")``.
+            Each row has its own y scale (unless ``share_y`` says otherwise), its strip
+            names the column (by its label), and ``col`` and ``page`` still facet. Not with
+            ``row`` or ``wrap``.
         cols: Columns of a wrap (default: about the square root of the panels; 6 a page).
+        layout: A wrap's panels placed by hand (as geofacet's grids): a table with the wrap
+            column(s) and ``row`` and ``col``, counted from 1, or a dict ``{level: (row,
+            col)}``. Cells without a panel stay empty, so a map's shape keeps; a panel with
+            no place is an error. Not with ``direction``, ``cols`` or paging (``rows``).
+        direction: How a wrap fills its cells (as ggplot2's ``facet_wrap(dir=)``): ``"h"``,
+            rows left to right from the top (as text reads); ``"v"``, columns top to bottom
+            from the left; or two letters, the side each row or column starts at and the
+            side the first one is at: ``"rt"`` (rows right to left, the first at the top, for
+            text read right to left), ``"lb"`` (rows from the bottom, as lattice), ``"tl"``,
+            ``"tr"``, ``"bl"``, ``"br"``, ``"rb"``. A paged wrap fills each page so.
         rows: Rows of panels a page of a wrap shows: a wrap of more than 100 panels shows 4
             at a time, and the reader turns the pages, sorts and filters the panels (by
             their statistics: see ``panel_stats``). ``rows=3`` pages any wrap; ``"all"``
@@ -163,7 +195,7 @@ class Trellis:
             (the panels of a page of ``page``), ``False`` (each panel its own) or
             ``"sliced"`` (each panel its own range, all as wide as the widest, so a change
             of 5 looks the same size in every panel; zooming one zooms all to its width).
-        share_y: The same for y.
+        share_y: The same for y (default: ``True``; with ``repeat``, ``"row"``).
         x_scale: ``"linear"``; ``"log"`` (log10: values of 0 or less are left out; a
             histogram's bins and a density are computed on the log scale); ``"sqrt"`` (the
             square root: sizes, counts; values of 0 and up); ``"symlog"`` (log-like away
@@ -174,6 +206,13 @@ class Trellis:
             histograms, densities).
         height: The plot's height in CSS pixels (default: from ``panel_height``).
         panel_height: Each panel's height in CSS pixels (default: from its width).
+        space: Panels sized by their range (as ggplot2's ``space=``): ``"free_x"``, each
+            column as wide as its x range takes of them all, so a unit (a category, a day)
+            is as wide in every panel; ``"free_y"``, each row as high as its y range;
+            ``"free"``, both; ``"fixed"``, every panel the same size. It goes with free
+            scales: ``"free_x"`` needs ``share_x="col"`` or ``False`` (a wrap: one row of
+            panels), ``"free_y"`` ``share_y="row"`` or ``False`` (a wrap: one column). A
+            category axis's range is the levels from the panel's first to its last.
         aspect: Each panel's height as a multiple of its width (``1``: square), or
             ``"bank"``: the one showing the lines' median slope at 45 degrees, where
             changes are easiest to compare (Cleveland's banking; the ``smooth()`` fits', or
@@ -271,15 +310,19 @@ class Trellis:
         row: str | Sequence[str] | None = None,
         col: str | Sequence[str] | None = None,
         wrap: str | Sequence[str] | None = None,
+        repeat: Sequence[str] | None = None,
         cols: int | None = None,
+        layout: Any = None,
+        direction: str = "h",
         rows: int | str | None = None,
         page: str | Sequence[str] | None = None,
         share_x: bool | str = True,
-        share_y: bool | str = True,
+        share_y: bool | str | None = None,
         x_scale: str | Sequence[str] = "linear",
         y_scale: str | Sequence[str] = "linear",
         height: int | None = None,
         panel_height: int | None = None,
+        space: str = "fixed",
         aspect: float | str | None = None,
         title: str = "",
         subtitle: str = "",
@@ -312,6 +355,16 @@ class Trellis:
             palette = None
         elif palette is not None:
             Theme(palette=palette)  # an unknown name or colour raises here
+        self._repeat = _names(repeat)
+        if self._repeat:
+            if data is None:
+                raise ValueError("repeat= melts the plot's data: give data")
+            if row is not None or wrap is not None:
+                raise ValueError("repeat= makes the plot's rows: not with row= or wrap=")
+            data = repeated(data, self._repeat)
+            row = MEASURE
+            share_y = "row" if share_y is None else share_y  # each column its own scale
+            y_title = "" if y_title is None else y_title  # (the strips name them)
         self._data = None if data is None else Table(data)
         if load not in LOADS:
             raise ValueError(f"load must be one of {LOADS}, got {load!r}")
@@ -337,6 +390,10 @@ class Trellis:
         if cols is not None and cols < 1:
             raise ValueError("cols must be at least 1")
         self._cols = cols
+        self._direction = direction_of(direction)
+        if self._direction != "lt" and (self._row or self._col):
+            raise ValueError("direction= fills a wrap's cells: give wrap= (a grid's cells are "
+                             "its rows' and columns')")  # fmt: skip
         if rows is not None and rows != "all" and (not isinstance(rows, int) or rows < 1):
             raise ValueError(f"rows must be at least 1, or 'all', got {rows!r}")
         if isinstance(rows, int) and (self._row or self._col or not (self._wrap or self._page)):
@@ -346,15 +403,24 @@ class Trellis:
         if load == "pages" and rows == "all":
             raise ValueError("load='pages' reads a wrap a page at a time: not with rows='all'")
         self._rows = rows
+        if space not in SPACES:
+            raise ValueError(f"space must be one of {SPACES}, got {space!r}")
+        self._space = space
+        self._places = None if layout is None else self._layout_places(layout)
         self._given_stats: Table | None = None
         self._paging: Paging = {}
         self._stats: list[Stat] = []
-        self._share: dict[str, Share] = {"x": share_mode(share_x), "y": share_mode(share_y)}
+        self._share: dict[str, Share] = {
+            "x": share_mode(share_x),
+            "y": share_mode(True if share_y is None else share_y),
+        }
         self._scales: dict[str, str] = {}
         self._reverse: dict[str, bool] = {}
         for axis, given in (("x", x_scale), ("y", y_scale)):
             self._scales[axis], self._reverse[axis] = _scale(given)
         self._orders: dict[str, Order] = {}
+        if self._repeat:  # the rows as the columns were given
+            self._orders[MEASURE] = Order(levels=self._repeat)
         self._categories: frozenset[str] = frozenset()
         """Number columns read as categories (``as_category``)."""
         self._layers: list[Layer] = []
@@ -1870,6 +1936,68 @@ class Trellis:
         self._cols = cols
         self._changed()
 
+    def _layout_places(self, layout: Any) -> dict[tuple[str, ...], tuple[int, int]]:
+        """A layout table's places, checked against the plot's other arguments."""
+        if not self._wrap:
+            raise ValueError("layout= places a wrap's panels: give wrap=")
+        if self._cols is not None or self._direction != "lt":
+            raise ValueError("layout= places every panel: not with cols= or direction=")
+        if isinstance(self._rows, int):
+            raise ValueError("layout= places every panel on one page: not with rows=")
+        return layout_places(layout, self._wrap)
+
+    def _space_spec(self, grid: Grid, pages: dict[str, Any] | None) -> dict[str, bool] | None:
+        """``space``: the axes whose ranges size the panels, checked against how the scales
+        are shared and the panels placed (None: every panel the same size)."""
+        if self._space == "fixed":
+            return None
+        out = {"x": self._space in ("free_x", "free"), "y": self._space in ("free_y", "free")}
+        for axis, line, many in (("x", "col", grid.rows), ("y", "row", grid.cols)):
+            if not out[axis]:
+                continue
+            name = "share_x" if axis == "x" else "share_y"
+            if self._share[axis] not in (line, "none"):
+                raise ValueError(f"space={self._space!r} sizes the panels by their {axis} "
+                                 f"ranges: give {name}={line!r} or False")  # fmt: skip
+            if pages and not pages.get("grid"):
+                raise ValueError(f"space={self._space!r}: not with a paged wrap")
+            if grid.kind == "wrap" and many > 1:
+                one = "row (cols= the panels)" if axis == "x" else "column (cols=1)"
+                raise ValueError(f"space={self._space!r} in a wrap needs one {one}: a "
+                                 f"{'column' if axis == 'x' else 'row'} of a wrap holds "
+                                 "panels of different ranges")  # fmt: skip
+        return out
+
+    @property
+    def space(self) -> str:
+        """``"fixed"``, ``"free_x"``, ``"free_y"`` or ``"free"``: whether the panels are
+        sized by their range. Setting it redraws a shown plot."""
+        return self._space
+
+    @space.setter
+    def space(self, space: str) -> None:
+        if space not in SPACES:
+            raise ValueError(f"space must be one of {SPACES}, got {space!r}")
+        self._space = space
+        self._changed()
+
+    @property
+    def direction(self) -> str:
+        """How a wrap fills its cells: one of ``DIRECTIONS`` (``"lt"``: rows from the top
+        left, ``"tl"``: columns from the top left, ...). Setting it (``"h"``, ``"v"`` too)
+        redraws a shown plot."""
+        return self._direction
+
+    @direction.setter
+    def direction(self, direction: str) -> None:
+        d = direction_of(direction)
+        if d != "lt" and (self._row or self._col):
+            raise ValueError("direction= fills a wrap's cells: a grid has none to fill")
+        if d != "lt" and self._places is not None:
+            raise ValueError("direction= fills a wrap's cells: a layout table places them")
+        self._direction = d
+        self._changed()
+
     @property
     def aspect(self) -> float | str | None:
         """Each panel's height as a multiple of its width, ``"bank"``, or ``None`` (as the
@@ -2012,9 +2140,11 @@ class Trellis:
             ("subtitle", self._subtitle, ""),
             ("caption", self._caption, ""),
             ("cols", self._cols, None),
+            ("direction", _direction_given(self._direction), "h"),
+            ("space", self._space, "fixed"),
             ("aspect", self._aspect_given, None),
             ("share_x", self.share_x, True),
-            ("share_y", self.share_y, True),
+            ("share_y", self.share_y, "row" if self._repeat else True),
             ("x_scale", self.x_scale, "linear"),
             ("y_scale", self.y_scale, "linear"),
         )
@@ -2038,6 +2168,8 @@ class Trellis:
                     kw["color"] = layer.color
             calls.append(call_text(c.name, c.args, kw))
         for column, order in self._orders.items():
+            if self._repeat and column == MEASURE and order.levels == self._repeat:
+                continue  # (repeat='s own: the columns' order)
             if order.levels is not None:
                 calls.append(call_text("order", [column, list(order.levels)], {}))
             else:
@@ -2100,12 +2232,16 @@ class Trellis:
 
         many = len(grid.panels) > 1
         layout: list[dict[str, Any]] = []
-        if self._wrap:
+        sized = {"x": self._space in ("free_x", "free"), "y": self._space in ("free_y", "free")}
+        if self._wrap and self._places is None and not any(sized.values()):
             cols = int(spec["grid"]["cols"])
             most = 12 if pages else max(1, len(grid.panels))
             layout.append({"name": "cols", "label": "Columns", "kind": "stepper",
                            "value": self._cols if self._cols is not None else cols,
                            "shown": cols, "min": 1, "max": most})  # fmt: skip
+            if many:
+                layout.append(choice("direction", "Fill", self._direction,
+                                     list(DIRECTION_LABELS.items())))  # fmt: skip
         shapes: list[tuple[Any, str]] = [(None, "Auto"), *SHAPES.items()]
         if self._own_aspect is not None:  # the plot's own, in its place by height
             own = (self._own_aspect, _shape_label(self._own_aspect))
@@ -2134,6 +2270,9 @@ class Trellis:
                     share.append(("page", "Per page"))
                 if lv is None:
                     share.append(("sliced", "Sliced (one width)"))
+                if sized[axis]:  # (space= sizes the panels by these ranges: theirs alone)
+                    line = "col" if axis == "x" else "row"
+                    share = [o for o in share if o[0] in (False, line)]
                 scales.append(choice(f"share_{axis}", f"Share {axis}",
                                      _share_given(self._share[axis]), share,
                                      lambda v: SHARE_NAMES.get(v, str(v))))  # fmt: skip
@@ -2156,7 +2295,7 @@ class Trellis:
                     columns.append((name, self._label(name)))
             data.append(choice("color", "Colour by", self.color, columns, self._label))
         facets = [*self._wrap, *self._row, *self._col]
-        if facets:
+        if facets and self._places is None:  # (a layout table places the panels)
             first = next((lr for lr in self._layers if lr.mark != "rule"), None)
             numbers = {a: spec[a]["kind"] not in ("band", "time") for a in ("x", "y")}
             of = first.y if first is not None and first.y is not None and numbers["y"] \
@@ -2183,7 +2322,7 @@ class Trellis:
     def _apply_settings(self, changes: Mapping[str, Any]) -> None:
         """Changes from the settings panel, by name; all or none (a change the plot can't
         draw raises, and the plot is as it was)."""
-        saved = (self._cols, self._aspect_given, self._banked, self._height,
+        saved = (self._cols, self._direction, self._aspect_given, self._banked, self._height,
                  self._panel_height, self._let_go, self._own_aspect, self._kept_orders,
                  {k: list(v) for k, v in self._kept.items()}, dict(self._share),
                  dict(self._scales), dict(self._reverse), dict(self._orders),
@@ -2193,6 +2332,8 @@ class Trellis:
             for name, value in changes.items():
                 if name == "cols":
                     self._cols = None if value is None else int(value)
+                elif name == "direction":
+                    self._direction = direction_of(value)
                 elif name == "aspect":
                     if value == "fixed":  # the height given (or replaced) chosen again
                         self._set_height()
@@ -2210,7 +2351,8 @@ class Trellis:
                     raise ValueError(f"no setting {name!r}")
             self._changed()
         except Exception:
-            (self._cols, self._aspect_given, self._banked, self._height, self._panel_height,
+            (self._cols, self._direction, self._aspect_given, self._banked, self._height,
+             self._panel_height,
              self._let_go, self._own_aspect, self._kept_orders, self._kept, share, scales,
              reverse, orders, layers) = saved  # fmt: skip
             self._share, self._scales, self._reverse, self._orders = share, scales, reverse, orders
@@ -2278,9 +2420,15 @@ class Trellis:
             fmt = axis_format(a["kind"], a["format"])
             axes.append(Axis(a["title"], a["kind"], lv, *(span or (None, None)), fmt))
         per = pages["rows"] * pages["cols"] if pages and not pages.get("grid") else None
-        facets = facet_phrase(self._label, self._wrap, self._row, self._col, self._page,
+
+        def label(name: str) -> str:  # (repeat='s rows: a column each)
+            return "column" if self._repeat and name == MEASURE else self._label(name)
+
+        facets = facet_phrase(label, self._wrap, self._row, self._col, self._page,
                               len(grid.panels), grid.rows, grid.cols, per)  # fmt: skip
         rows = self._data.count() if self._data is not None else None
+        if rows is not None and self._repeat:  # the data's rows, not the melted ones
+            rows //= len(self._repeat)
         return describe(self._layers, self._label, facets, rows, axes[0], axes[1])
 
     def _axis_format(self, axis: str, kind: AxisKind) -> str | None:
@@ -2627,7 +2775,7 @@ class Trellis:
         self._stats = []
         if grid.page_of is not None:
             return self._level_pages(grid)
-        if grid.kind != "wrap" or self._rows == "all":
+        if grid.kind != "wrap" or self._rows == "all" or grid.placed:
             return None
         if self._rows is None and n <= AUTO_PANELS:
             return None
@@ -2635,8 +2783,8 @@ class Trellis:
         rows = max(1, min(self._rows if isinstance(self._rows, int) else PAGE_ROWS,
                           -(-n // cols)))  # fmt: skip
         per = rows * cols
-        grid.panels = [replace(p, row=(i % per) // cols, col=i % cols)
-                       for i, p in enumerate(grid.panels)]  # fmt: skip
+        grid.panels = [replace(p, row=r, col=c) for i, p in enumerate(grid.panels)
+                       for r, c in [place(i % per, rows, cols, grid.direction)]]  # fmt: skip
         grid.rows, grid.cols = rows, cols
         self._stats = self._panel_stats(grid)
         return {"rows": rows, "cols": cols, "stats": [s.spec() for s in self._stats]}
@@ -2648,7 +2796,7 @@ class Trellis:
         assert grid.page_of is not None
         levels = {"groups": grid.page_of.tolist(), "levels": grid.pages,
                   "title": " · ".join(self._label(c) for c in self._page)}  # fmt: skip
-        if grid.kind == "grid":
+        if grid.kind == "grid" or grid.placed:  # every cell in its place on each page
             return {"rows": grid.rows, "cols": grid.cols, "stats": [], "grid": True, **levels}
         most = int(np.bincount(grid.page_of).max(initial=1))
         if isinstance(self._rows, int):
@@ -2657,14 +2805,15 @@ class Trellis:
         else:
             cols, rows = grid.cols, grid.rows
         per = rows * cols
-        place = []
+        placed = []
         at = 0
         for k, p in enumerate(grid.panels):
             if k and grid.page_of[k] != grid.page_of[k - 1]:
                 at = 0  # a level's first panel
-            place.append(replace(p, row=(at % per) // cols, col=at % cols))
+            r, c = place(at % per, rows, cols, grid.direction)
+            placed.append(replace(p, row=r, col=c))
             at += 1
-        grid.panels = place
+        grid.panels = placed
         grid.rows, grid.cols = rows, cols
         self._stats = self._panel_stats(grid)
         return {"rows": rows, "cols": cols, "stats": [s.spec() for s in self._stats], **levels}
@@ -3722,7 +3871,12 @@ class Trellis:
         grid = build_grid([self._facets(), *own] if paged else tables, row=self._row,
                           col=self._col, wrap=self._wrap, cols=self._cols,
                           orders=self._orders, keep_empty=self._keep_empty,
-                          page=self._page, margins=self._margins)  # fmt: skip
+                          page=self._page, margins=self._margins,
+                          direction=self._direction, places=self._places)  # fmt: skip
+        if self._repeat:  # the rows' strips: the columns' labels
+            grid.row_labels = [self._label(name) for name in grid.row_labels]
+            grid.row_keys = [tuple(self._label(k) for k in keys) for keys in grid.row_keys]
+            grid.row_title = ""
         npanels = len(grid.panels)
         texts = None
         paged_keys = len(self._page) if self._row or self._col or self._wrap else 0
@@ -3985,6 +4139,7 @@ class Trellis:
             "height": self.height,
             "panel_height": self.panel_height,
             "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
+            "space": self._space_spec(grid, pages),
             "legend_position": self._legend["position"],
             "fit_y": self.fit_y,
             "panel_buttons": self.panel_buttons,
@@ -4532,6 +4687,25 @@ _Sent = tuple[Layer, Table, "Geometry | None", "Part | None"]
 
 TIP_HISTORY = 32
 """Layers sent in detail before that a tooltip can still be asked for."""
+
+
+DIRECTION_LABELS = {
+    "lt": "Rows left to right, top first",
+    "rt": "Rows right to left, top first",
+    "lb": "Rows left to right, bottom first",
+    "rb": "Rows right to left, bottom first",
+    "tl": "Columns top to bottom, left first",
+    "tr": "Columns top to bottom, right first",
+    "bl": "Columns bottom to top, left first",
+    "br": "Columns bottom to top, right first",
+}
+"""The settings panel's fill directions (``facets.DIRECTIONS``)."""
+
+
+def _direction_given(direction: str) -> str:
+    """A fill direction as ``Trellis(direction=...)`` is best written: ``"h"``, ``"v"``, or
+    its two letters."""
+    return {v: k for k, v in DIRECTION_NAMES.items()}.get(direction, direction)
 
 
 def _plain_indices(drawn: list[_Drawn]) -> dict[int, int]:

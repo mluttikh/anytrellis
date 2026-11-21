@@ -18,7 +18,7 @@ every row), as ggplot2's ``facet_grid(margins=TRUE)``. A row goes to its own pan
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
@@ -30,6 +30,47 @@ Summary = Literal["median", "mean", "min", "max", "sum", "count"]
 
 ALL_LABEL = "(all)"
 """The level of a margin's row or column."""
+
+DIRECTIONS = ("lt", "tl", "lb", "bl", "rt", "tr", "rb", "br")
+"""How a wrap fills its cells, as ggplot2's ``facet_wrap(dir=)``: the first letter is the
+side each run of panels starts at (``l``, ``r``: runs are rows; ``t``, ``b``: runs are
+columns), the second the side the first run is at. ``"lt"``: rows from left to right,
+the first at the top (as text reads); ``"tl"``: columns from top to bottom, the first at
+the left."""
+DIRECTION_NAMES = {"h": "lt", "v": "tl"}
+
+
+def direction_of(direction: str) -> str:
+    """A wrap's fill direction, as one of ``DIRECTIONS`` (``"h"``: ``"lt"``, ``"v"``:
+    ``"tl"``)."""
+    d = DIRECTION_NAMES.get(direction, direction)
+    if d not in DIRECTIONS:
+        raise ValueError(f"direction must be 'h', 'v' or one of {DIRECTIONS}, got {direction!r}")
+    return d
+
+
+def wrap_shape(n: int, cols: int, direction: str) -> tuple[int, int]:
+    """The rows and columns of a wrap of ``n`` panels in about ``cols`` columns: as many
+    rows as they need; filled by columns, as many columns as that many rows need."""
+    cols = max(1, min(cols, n))
+    rows = max(1, math.ceil(n / cols))
+    if direction[0] in "tb":
+        cols = max(1, math.ceil(n / rows))
+    return rows, cols
+
+
+def place(k: int, rows: int, cols: int, direction: str) -> tuple[int, int]:
+    """The cell (row, column) of a wrap's ``k``-th panel (layout.ts: place)."""
+    first, then = direction
+    if first in "lr":  # rows
+        run, at = divmod(k, cols)
+        col = at if first == "l" else cols - 1 - at
+        row = run if then == "t" else rows - 1 - run
+    else:  # columns
+        run, at = divmod(k, rows)
+        row = at if first == "t" else rows - 1 - at
+        col = run if then == "l" else cols - 1 - run
+    return row, col
 
 
 @dataclass(frozen=True)
@@ -89,6 +130,10 @@ class Grid:
     also: np.ndarray | None = None
     """Margins: each panel's margin panels, which draw its rows too (−1: none), one row per
     panel; None: no margins."""
+    direction: str = "lt"
+    """How a wrap fills its cells (``DIRECTIONS``): a paged wrap's pages too."""
+    placed: bool = False
+    """A wrap's panels placed by a layout table: each in its cell on every page."""
 
     def assign(self, table: Table) -> np.ndarray | None:
         """The panel of each row of ``table`` (−1: a level not in the trellis), or None when
@@ -127,6 +172,7 @@ class Grid:
             "strip_from": self.strip_from,
             "row_title": self.row_title,
             "col_title": self.col_title,
+            "dir": self.direction,
         }
 
 
@@ -141,10 +187,14 @@ def build_grid(
     keep_empty: bool = True,
     page: tuple[str, ...] = (),
     margins: tuple[bool, bool] = (False, False),
+    direction: str = "lt",
+    places: Mapping[tuple[str, ...], tuple[int, int]] | None = None,
 ) -> Grid:
     """The grid of panels for the facet columns, from the tables that have them; with page
     columns, a grid or wrap per page level, their panels in turn. ``margins``: an "(all)"
-    row, and an "(all)" column, of a grid."""
+    row, and an "(all)" column, of a grid. ``direction``: how a wrap fills its cells
+    (``DIRECTIONS``). ``places``: a wrap's panels placed by hand, each combination of the
+    wrap columns' levels at its (row, column), counted from 0 (a layout table)."""
     if wrap and (row or col):
         raise ValueError("use wrap= alone, or row= and/or col= (a grid), not both")
     margin_row, margin_col = margins
@@ -177,8 +227,17 @@ def build_grid(
             known = np.ravel_multi_index(tuple(page_combos.T), dims)
             page_of = np.searchsorted(known, flat).astype(np.int64)
         most = n if page_of is None else int(np.bincount(page_of).max(initial=1))
-        ncols = max(1, min(cols or math.ceil(math.sqrt(most)), most))
-        nrows = max(1, math.ceil(most / ncols))
+        nrows, ncols = wrap_shape(most, cols or math.ceil(math.sqrt(most)), direction)
+        if places is not None:  # the table's cells, those without data empty
+            own_keys = [tuple(levels[v][k] for v, k in zip(wrap, c[len(page) :], strict=True))
+                        for c in combos]  # fmt: skip
+            missing = sorted({" · ".join(k) for k in own_keys if k not in places})
+            if missing:
+                more = f" and {len(missing) - 5} more" if len(missing) > 5 else ""
+                raise ValueError(f"the layout table has no place for {missing[:5]}{more}: "
+                                 "add a row for each panel")  # fmt: skip
+            nrows = 1 + max(r for r, _ in places.values())
+            ncols = 1 + max(c for _, c in places.values())
         panels = []
         at = 0
         for i, combo in enumerate(combos):
@@ -187,11 +246,13 @@ def build_grid(
                 at = 0  # a page's first panel
             own = keys[len(page) :]  # the strip: the wrap's levels (the page's: above)
             label = " · ".join(own) if own else " · ".join(keys)
-            panels.append(Panel(i, at // ncols, at % ncols, label, keys))
+            cell = places[own] if places is not None else place(at, nrows, ncols, direction)
+            panels.append(Panel(i, *cell, label, keys))
             at += 1
         return Grid("wrap", nrows, ncols, panels, columns=columns, pages=page_labels,
                     page_of=page_of, strip_from=len(page) if wrap else 0, _levels=levels,
-                    _row_combos=combos, _wrap_vars=names)  # fmt: skip
+                    _row_combos=combos, _wrap_vars=names, direction=direction,
+                    placed=places is not None)  # fmt: skip
     row_combos = _present(sources, row, levels) if row else np.zeros((1, 0), dtype=np.int64)
     col_combos = _present(sources, col, levels) if col else np.zeros((1, 0), dtype=np.int64)
     row_keys = [tuple(levels[v][k] for v, k in zip(row, c, strict=True)) for c in row_combos]
@@ -390,6 +451,49 @@ def _codes(column: Column) -> tuple[list[str], np.ndarray]:
         return list(column.levels), column.level_codes()
     uniq, inverse = np.unique(column.values, return_inverse=True)  # NaNs: one, at the end
     return [_format(v, column.kind) for v in uniq], inverse.ravel()
+
+
+def layout_places(layout: Any, wrap: Sequence[str]) -> dict[tuple[str, ...], tuple[int, int]]:
+    """A layout table's places: each combination of the ``wrap`` columns' levels (as their
+    panels name them) at its (row, column), counted from 0. ``layout``: a table with the
+    wrap columns and ``row`` and ``col`` (counted from 1, as geofacet's grids are), or a
+    mapping of a level (a tuple of levels, for several wrap columns) to its ``(row, col)``."""
+    pairs: list[tuple[tuple[str, ...], Any, Any]] = []
+    if isinstance(layout, Mapping):
+        for key, at in layout.items():
+            keys = tuple(str(k) for k in key) if isinstance(key, tuple) else (str(key),)
+            if len(keys) != len(wrap) or not isinstance(at, Sequence) or len(at) != 2:
+                raise ValueError(f"layout: {key!r}: give each panel's level(s) of {list(wrap)} "
+                                 "and its (row, col)")  # fmt: skip
+            pairs.append((keys, at[0], at[1]))
+    else:
+        table = Table(layout)
+        need = [*wrap, "row", "col"]
+        if any(c not in table for c in need):
+            raise ValueError(f"a layout table needs the columns {need}, has {list(table.names)}")
+        labels = []
+        for name in wrap:
+            lv, codes = _codes(table.column(name))
+            labels.append([lv[c] if c >= 0 else MISSING_LABEL for c in codes])
+        rows, cols = table.raw("row"), table.raw("col")
+        pairs = [(tuple(lb[i] for lb in labels), rows[i], cols[i]) for i in range(table.n)]
+    out: dict[tuple[str, ...], tuple[int, int]] = {}
+    taken: dict[tuple[int, int], tuple[str, ...]] = {}
+    for keys, r, c in pairs:
+        if not all(isinstance(v, int | np.integer) and not isinstance(v, bool) and v >= 1
+                   for v in (r, c)):  # fmt: skip
+            raise ValueError(f"layout: {' · '.join(keys)}: row and col are counted from 1, "
+                             f"got ({r!r}, {c!r})")  # fmt: skip
+        at = (int(r) - 1, int(c) - 1)
+        if at in taken and taken[at] != keys:
+            raise ValueError(f"layout: {' · '.join(taken[at])} and {' · '.join(keys)} are both "
+                             f"at row {r}, col {c}")  # fmt: skip
+        if keys in out and out[keys] != at:
+            raise ValueError(f"layout: {' · '.join(keys)} has two places")
+        out[keys], taken[at] = at, keys
+    if not out:
+        raise ValueError("the layout table is empty")
+    return out
 
 
 def _present(

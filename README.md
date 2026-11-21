@@ -45,6 +45,11 @@ from anytrellis.synthetic import sales
 Trellis(sales(), row="store", col="product").bars(x="month", y="units")
 ```
 
+A wrap fills its cells in any `direction=` (`"v"`: down the columns), or each panel goes
+where a `layout=` table puts it (a map's shape, a plate's wells). `space="free_x"` makes
+each panel as wide as its x range, and `repeat=["temp", "humidity"]` stacks columns as
+rows of panels, each on its own scale.
+
 ## Marks
 
 Each mark is a method that adds a layer; layers draw in the order they were added.

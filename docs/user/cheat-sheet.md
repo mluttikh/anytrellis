@@ -8,6 +8,8 @@ more; the [reference](reference/index.md) lists every argument. For an AI assist
 ## A plot
 
 ```python
+import polars as pl
+
 from anytrellis import Trellis
 from anytrellis.datasets import load
 
@@ -25,6 +27,8 @@ can be Polars, pandas, PyArrow, DuckDB, Ibis or a dict of arrays
 
 ```python
 gapminder = load("gapminder")
+weather = load("seattle_weather")
+grid = {"Spain": (2, 1), "France": (1, 1), "Germany": (1, 2)}  # or a table: country, row, col
 
 Trellis(cars, wrap="origin", cols=3)  # panels wrapped into 3 columns
 Trellis(cars, row="origin", col="cylinders")  # a grid: origins by cylinders
@@ -34,6 +38,9 @@ Trellis(cars, wrap=["origin", "cylinders"], strips="joined")  # one strip, "USA 
 Trellis(gapminder, wrap="country", strip_label="region")  # a column names each panel
 Trellis(cars, wrap="name", rows=3)  # pages of 3 rows; over 100 panels page anyway
 Trellis(cars, wrap="cylinders", page="origin")  # a page per origin
+Trellis(cars, wrap="name", direction="v")  # filled down the columns; "lb": from bottom left
+Trellis(gapminder.filter(pl.col("country").is_in(list(grid))), wrap="country", layout=grid)
+Trellis(weather, repeat=["temp_max", "wind"]).line(x="date", y="value")  # a row a column
 ```
 
 See [Choose a facet layout](how-to/layout.md) and [Page through many
@@ -45,6 +52,7 @@ panels](how-to/pages.md).
 Trellis(cars, wrap="origin", share_y=False)  # also "row", "col", "page", "sliced"
 Trellis(cars, wrap="origin", share_x="row", y_scale="log")  # also "sqrt", "symlog", "linear"
 Trellis(cars, wrap="origin", aspect=1)  # square panels; aspect="bank": slopes at 45°
+Trellis(cars, col="origin", share_x="col", space="free_x")  # widths by their x ranges
 Trellis(cars, wrap="origin", panel_height=150)  # or height=600, the whole plot
 Trellis(cars, wrap="origin", fit_y=True)  # y follows the data in view as x zooms
 Trellis(cars, wrap="origin", panel_buttons=False)  # no open, pin, compare buttons on hover
@@ -55,6 +63,8 @@ Trellis(cars, wrap="origin", controls=False)  # no settings panel (a page to pub
 
 t = Trellis(cars, wrap="origin").points(x="weight", y="mpg")
 t.cols = 2  # each a setting of the settings panel, read back as it changes there
+t.direction = "v"
+t.space = "fixed"
 t.aspect = 1
 t.share_y = "sliced"
 t.y_scale = "log"
