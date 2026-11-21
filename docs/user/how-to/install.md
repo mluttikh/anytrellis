@@ -36,6 +36,16 @@ installed. The `examples` extra brings it:
 pip install "anytrellis[examples]"
 ```
 
+## For images
+
+`save_svg` needs nothing more. PNGs need `resvg-py` and PDFs `vl-convert-python`, each a
+wheel with no system libraries to install:
+
+```bash
+pip install "anytrellis[png]"   # save_png
+pip install "anytrellis[pdf]"   # save_pdf
+```
+
 ## Where it runs
 
 | Notebook | Works | Notes |

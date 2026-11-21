@@ -16,6 +16,7 @@ and the API reference, with live plots; for AI assistants,
 pip install anytrellis
 pip install "anytrellis[examples]"   # with Polars, for the example notebooks and datasets
 pip install "anytrellis[png]"        # with resvg-py, for save_png
+pip install "anytrellis[pdf]"        # with vl-convert-python, for save_pdf
 ```
 
 Status: early development (0.7). One panel per level of the facet columns, every panel
@@ -288,7 +289,10 @@ the browser allows), downloads it as a PNG (at twice the screen's size) or an SV
 a notebook, saves either next to the notebook. The toolbar and what the pointer points at
 are left out. From Python, without a browser (a script, a CI job), `t.save_png("plot.png")`
 and `t.save_svg("plot.svg")` draw the same: the zoom last shown, the selection and an
-opened panel (`width=`, `height=`, `theme="dark"`; PNGs need the `png` extra).
+opened panel (`width=`, `height=`, `theme="dark"`; PNGs need the `png` extra). For print,
+sizes take lengths and PNGs a dpi, and `save_pdf` writes a vector PDF (the `pdf` extra):
+`t.save_pdf("figure-2.pdf", width="180mm")`, `t.save_png("figure-2.png", width="180mm",
+dpi=300)`.
 
 **Full screen.** The toolbar's button or `f` shows the plot on the whole screen (`f` or Esc
 leaves). Browsers allow it only from a click or a key, so not from Python; where a page

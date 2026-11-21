@@ -15,6 +15,9 @@ from __future__ import annotations
 import datetime as dt
 import itertools
 import math
+import re
+import struct
+import zlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
@@ -2412,11 +2415,102 @@ def _highlighted(plot: Trellis, marks: list[_Marks]) -> tuple[Masks, Masks]:
 
 def svg_to_png(svg: str, scale: float = PNG_SCALE, background: str | None = None) -> bytes:
     """PNG bytes of ``svg``, ``scale`` pixels per CSS pixel (needs the optional
-    ``resvg_py``)."""
+    ``resvg_py``), saying it prints at the size the SVG says (``96 * scale`` dpi)."""
     try:
         import resvg_py
     except ImportError:
         raise ImportError(
             "PNG images need resvg-py: pip install 'anytrellis[png]' (or save as .svg)"
         ) from None
-    return bytes(resvg_py.svg_to_bytes(svg_string=svg, zoom=scale, background=background))
+    png = bytes(resvg_py.svg_to_bytes(svg_string=svg, zoom=scale, background=background))
+    return png_dpi(png, CSS_DPI * scale)
+
+
+# ---- sizes for print: mm, cm, in, pt and dpi ---------------------------------------------
+
+CSS_DPI = 96.0
+"""CSS pixels per inch: a plot's sizes are CSS pixels, 1/96 inch printed."""
+
+UNITS = {"px": 1.0, "in": CSS_DPI, "cm": CSS_DPI / 2.54, "mm": CSS_DPI / 25.4, "pt": CSS_DPI / 72}
+"""CSS pixels per unit of a length (``"180mm"``)."""
+
+Length = float | str
+"""A size: CSS pixels, or a string with a unit: ``"180mm"``, ``"18cm"``, ``"7in"``,
+``"500pt"``, ``"680px"``."""
+
+
+def length(value: Length | None, name: str) -> tuple[float | None, str | None]:
+    """``value`` in CSS pixels, and its unit when it is one for print (mm, cm, in, pt;
+    None for pixels)."""
+    if value is None:
+        return None, None
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value), None
+    if isinstance(value, str):
+        m = re.fullmatch(r"\s*(\d+(?:\.\d*)?|\.\d+)\s*(px|mm|cm|in|pt)\s*", value)
+        if m:
+            unit = m[2]
+            return float(m[1]) * UNITS[unit], None if unit == "px" else unit
+    raise ValueError(f"{name} must be CSS pixels or a length such as '180mm', '18cm', "
+                     f"'7in' or '500pt', got {value!r}")  # fmt: skip
+
+
+def print_size(svg: str, unit: str | None) -> str:
+    """``svg`` with its width and height in ``unit`` (mm, cm, in, pt), its viewBox still
+    in CSS pixels: printed (and placed in a document) at that size. None: as it is."""
+    if unit is None:
+        return svg
+    head, rest = svg.split(">", 1)
+    size = lambda m: f'{m[1]}="{float(m[2]) / UNITS[unit]:.4g}{unit}"'  # noqa: E731
+    return re.sub(r'\b(width|height)="([\d.]+)"', size, head, count=2) + ">" + rest
+
+
+def png_scale(scale: float | None, dpi: float | None) -> float:
+    """PNG pixels per CSS pixel: ``dpi / 96``, else ``scale`` (default ``PNG_SCALE``)."""
+    if dpi is not None and scale is not None:
+        raise ValueError("give scale= or dpi=, not both (dpi=300 is scale=3.125)")
+    if dpi is not None:
+        if not dpi > 0:
+            raise ValueError(f"dpi must be above 0, got {dpi}")
+        return dpi / CSS_DPI
+    scale = PNG_SCALE if scale is None else scale
+    if not scale > 0:
+        raise ValueError(f"scale must be above 0, got {scale}")
+    return scale
+
+
+def png_dpi(png: bytes, dpi: float) -> bytes:
+    """``png`` saying it has ``dpi`` pixels per inch (a pHYs chunk after IHDR), so a
+    document places it at its size."""
+    if png[:8] != b"\x89PNG\r\n\x1a\n" or png[12:16] != b"IHDR":
+        return png
+    per_metre = round(dpi / 0.0254)
+    data = struct.pack(">IIB", per_metre, per_metre, 1)
+    chunk = struct.pack(">I", len(data)) + b"pHYs" + data
+    chunk += struct.pack(">I", zlib.crc32(b"pHYs" + data) & 0xFFFFFFFF)
+    end = 8 + 8 + 13 + 4  # the signature, IHDR's length, name, data and CRC
+    rest = png[end:]
+    while rest[4:8] == b"pHYs":  # (one already: replaced)
+        rest = rest[12 + struct.unpack(">I", rest[:4])[0] :]
+    return png[:end] + chunk + rest
+
+
+def svg_to_pdf(svg: str) -> bytes:
+    """A vector PDF of ``svg`` (its text kept as text, its fonts embedded) at the size it
+    says, a CSS pixel 0.75 pt (needs the optional ``vl_convert``)."""
+    try:
+        import vl_convert
+    except ImportError:
+        raise ImportError(
+            "PDF files need vl-convert-python: pip install 'anytrellis[pdf]' (or save as .svg)"
+        ) from None
+    head, rest = svg.split(">", 1)
+    if not re.search(r'\bwidth="[\d.]+"', head):  # mm, in, ...: back to CSS pixels
+        view = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', head)
+        if view:
+            head = re.sub(r'\bwidth="[^"]*"', f'width="{view[1]}"', head, count=1)
+            head = re.sub(r'\bheight="[^"]*"', f'height="{view[2]}"', head, count=1)
+    # vl-convert takes the SVG's units for points: a CSS pixel is 0.75 of one
+    to_pt = lambda m: f'{m[1]}="{float(m[2]) * 0.75:.4f}"'  # noqa: E731
+    head = re.sub(r'\b(width|height)="([\d.]+)"', to_pt, head, count=2)
+    return bytes(vl_convert.svg_to_pdf(head + ">" + rest))

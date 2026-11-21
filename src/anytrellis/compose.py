@@ -274,7 +274,15 @@ class Concat:
                 f'<rect width="100%" height="100%" fill="{THEMES[theme]["bg"]}"/>'
                 f"{''.join(parts)}</svg>")  # fmt: skip
 
-    def save_svg(self, path: str | Path, *, width: float | None = None,
+    def _image_svg(self, width: float | str | None, theme: str) -> tuple[str, str | None]:
+        """The figure's SVG at a width in CSS pixels or a length (``"180mm"``), and the
+        unit for print it was given in (None: pixels)."""
+        from anytrellis.figure import length
+
+        w, unit = length(width, "width")
+        return self._svg(w, theme), unit
+
+    def save_svg(self, path: str | Path, *, width: float | str | None = None,
                  theme: str = "light") -> Path:  # fmt: skip
         """Write the figure as one SVG image, drawn in Python as each plot's ``save_svg``
         draws it, the plots where the notebook and the page put them; returns its path.
@@ -282,23 +290,40 @@ class Concat:
         Args:
             path: The file to write.
             width: The image's width in CSS pixels (default: as it was last shown, else
-                400 a column, at least 800); each row is as high as its plots.
+                400 a column, at least 800), or a length for print (``"180mm"``, as
+                ``Trellis.save_svg``); each row is as high as its plots.
             theme: ``"light"`` or ``"dark"``.
         """
+        from anytrellis.figure import print_size
+
+        svg, unit = self._image_svg(width, theme)
         out = Path(path)
-        out.write_text(self._svg(width, theme), encoding="utf-8")
+        out.write_text(print_size(svg, unit), encoding="utf-8")
         return out
 
-    def save_png(self, path: str | Path, *, width: float | None = None, theme: str = "light",
-                 scale: float = 2.0) -> Path:  # fmt: skip
+    def save_png(self, path: str | Path, *, width: float | str | None = None,
+                 theme: str = "light", scale: float | None = None,
+                 dpi: float | None = None) -> Path:  # fmt: skip
         """Write the figure as a PNG image, as ``save_svg`` draws it, with ``scale`` pixels
-        per CSS pixel; returns its path. Needs ``resvg-py``: ``pip install "anytrellis[png]"``."""
-        from anytrellis.figure import THEMES, svg_to_png
+        per CSS pixel (default 2) or ``dpi`` pixels per inch, recorded in the PNG; returns
+        its path. Needs ``resvg-py``: ``pip install "anytrellis[png]"``."""
+        from anytrellis.figure import THEMES, png_scale, svg_to_png
 
-        if not scale > 0:
-            raise ValueError(f"scale must be above 0, got {scale}")
+        zoom = png_scale(scale, dpi)
+        svg, _ = self._image_svg(width, theme)
         out = Path(path)
-        out.write_bytes(svg_to_png(self._svg(width, theme), scale, THEMES[theme]["bg"]))
+        out.write_bytes(svg_to_png(svg, zoom, THEMES[theme]["bg"]))
+        return out
+
+    def save_pdf(self, path: str | Path, *, width: float | str | None = None,
+                 theme: str = "light") -> Path:  # fmt: skip
+        """Write the figure as one vector PDF, as ``save_svg`` draws it (``Trellis.save_pdf``);
+        returns its path. Needs ``vl-convert-python``: ``pip install "anytrellis[pdf]"``."""
+        from anytrellis.figure import svg_to_pdf
+
+        svg, _ = self._image_svg(width, theme)
+        out = Path(path)
+        out.write_bytes(svg_to_pdf(svg))
         return out
 
     def __repr__(self) -> str:
