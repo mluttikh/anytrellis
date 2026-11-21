@@ -3711,8 +3711,18 @@ class Trellis:
         out.write_text(self.to_html(title=title), encoding="utf-8")
         return out
 
-    def save_svg(self, path: str | Path, *, width: float | None = None,
-                 height: float | None = None, theme: str = "light") -> Path:  # fmt: skip
+    def _image_svg(self, width: float | str | None, height: float | str | None,
+                   theme: str) -> tuple[str, str | None]:  # fmt: skip
+        """The plot's SVG at a size in CSS pixels or a length (``"180mm"``), and the unit
+        for print it was given in (None: pixels)."""
+        from anytrellis.figure import figure_svg, length
+
+        w, w_unit = length(width, "width")
+        h, h_unit = length(height, "height")
+        return figure_svg(self, width=w, height=h, theme=theme), w_unit or h_unit
+
+    def save_svg(self, path: str | Path, *, width: float | str | None = None,
+                 height: float | str | None = None, theme: str = "light") -> Path:  # fmt: skip
         """Write the plot as an SVG image, drawn in Python (no browser needed: a script, a
         CI job); returns its path. It is the plot as shown: the zoom it was last shown with,
         the selection and an opened panel, every mark, axis and label a vector element.
@@ -3720,42 +3730,78 @@ class Trellis:
         ```python
         t.save_svg("temperatures.svg")
         t.save_svg("slide.svg", width=1200, height=600, theme="dark")
+        t.save_svg("figure-2.svg", width="180mm")  # a journal's page width
         ```
 
         Args:
             path: The file to write.
             width: The image's width in CSS pixels (default: the width the plot was last
-                shown at, else 800).
-            height: The image's height in CSS pixels (default: as the plot lays out);
+                shown at, else 800), or a length for print: ``"180mm"``, ``"18cm"``,
+                ``"7in"``, ``"500pt"``. A CSS pixel is 1/96 inch, so 12 px text prints at
+                9 pt; a length is written as the image's printed size.
+            height: The image's height, as ``width`` (default: as the plot lays out);
                 panels with an ``aspect`` keep their shape within it.
             theme: ``"light"`` or ``"dark"``.
         """
-        from anytrellis.figure import figure_svg
+        from anytrellis.figure import print_size
 
+        svg, unit = self._image_svg(width, height, theme)
         out = Path(path)
-        out.write_text(figure_svg(self, width=width, height=height, theme=theme),
-                       encoding="utf-8")  # fmt: skip
+        out.write_text(print_size(svg, unit), encoding="utf-8")
         return out
 
-    def save_png(self, path: str | Path, *, width: float | None = None,
-                 height: float | None = None, theme: str = "light",
-                 scale: float = 2.0) -> Path:  # fmt: skip
-        """Write the plot as a PNG image, drawn in Python as ``save_svg`` draws it, with
-        ``scale`` pixels per CSS pixel (2: sharp on slides and high-density screens);
-        returns its path. Needs ``resvg-py``: ``pip install "anytrellis[png]"``.
+    def save_png(self, path: str | Path, *, width: float | str | None = None,
+                 height: float | str | None = None, theme: str = "light",
+                 scale: float | None = None, dpi: float | None = None) -> Path:  # fmt: skip
+        """Write the plot as a PNG image, drawn in Python as ``save_svg`` draws it; returns
+        its path. Needs ``resvg-py``: ``pip install "anytrellis[png]"``.
 
         ```python
         t.save_png("temperatures.png")
         t.save_png("thumbnail.png", width=400, scale=1)
+        t.save_png("figure-2.png", width="180mm", dpi=300)  # 2125 pixels wide
         ```
-        """
-        from anytrellis.figure import THEMES, figure_svg, svg_to_png
 
-        if not scale > 0:
-            raise ValueError(f"scale must be above 0, got {scale}")
-        svg = figure_svg(self, width=width, height=height, theme=theme)
+        Args:
+            path: The file to write.
+            width: As ``save_svg``'s: CSS pixels or a length (``"180mm"``).
+            height: As ``save_svg``'s.
+            theme: ``"light"`` or ``"dark"``.
+            scale: Pixels per CSS pixel (default 2: sharp on slides and high-density
+                screens).
+            dpi: Pixels per inch instead (``dpi / 96`` per CSS pixel). The PNG records
+                it, so a document places it at its size.
+        """
+        from anytrellis.figure import THEMES, png_scale, svg_to_png
+
+        zoom = png_scale(scale, dpi)
+        svg, _ = self._image_svg(width, height, theme)
         out = Path(path)
-        out.write_bytes(svg_to_png(svg, scale, THEMES[theme]["bg"]))
+        out.write_bytes(svg_to_png(svg, zoom, THEMES[theme]["bg"]))
+        return out
+
+    def save_pdf(self, path: str | Path, *, width: float | str | None = None,
+                 height: float | str | None = None, theme: str = "light") -> Path:  # fmt: skip
+        """Write the plot as a vector PDF, drawn in Python as ``save_svg`` draws it: its
+        text kept as text, its fonts embedded, a page the plot's size (a CSS pixel 0.75
+        pt); returns its path. Needs ``vl-convert-python``: ``pip install
+        "anytrellis[pdf]"``.
+
+        ```python
+        t.save_pdf("figure-2.pdf", width="180mm")
+        ```
+
+        Args:
+            path: The file to write.
+            width: As ``save_svg``'s: CSS pixels or a length (``"180mm"``).
+            height: As ``save_svg``'s.
+            theme: ``"light"`` or ``"dark"``.
+        """
+        from anytrellis.figure import svg_to_pdf
+
+        svg, _ = self._image_svg(width, height, theme)
+        out = Path(path)
+        out.write_bytes(svg_to_pdf(svg))
         return out
 
     def __repr__(self) -> str:

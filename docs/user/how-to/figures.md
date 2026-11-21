@@ -59,6 +59,7 @@ link(scatter, counts)
 figure.save_html("cars.html")              # one page, no Python needed to open it
 figure.save_svg("cars.svg")                # one image, drawn in Python
 figure.save_png("cars.png", width=1200)    # needs anytrellis[png]
+figure.save_pdf("cars.pdf", width="180mm") # a vector PDF for print; anytrellis[pdf]
 figure.plots                               # its plots, row by row
 ```
 

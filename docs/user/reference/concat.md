@@ -14,3 +14,4 @@
         - to_html
         - save_svg
         - save_png
+        - save_pdf

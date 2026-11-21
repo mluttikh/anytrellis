@@ -48,6 +48,36 @@ PNGs need `resvg-py`, which draws the SVG:
 pip install "anytrellis[png]"
 ```
 
+### For print: mm, dpi and PDF
+
+A journal asks for a figure 180 mm wide at 300 dpi, or a vector PDF. `width` and `height`
+take lengths as well as pixels, and the PNG takes a `dpi`:
+
+```python
+plot.save_pdf("figure-2.pdf", width="180mm")             # vector, text kept as text
+plot.save_svg("figure-2.svg", width="180mm")             # printed 180 mm wide
+plot.save_png("figure-2.png", width="180mm", dpi=300)    # 2125 pixels wide, 300 dpi
+plot.save_png("poster.png", width="40cm", height="30cm", dpi=150)
+```
+
+A length is `"180mm"`, `"18cm"`, `"7in"` or `"500pt"`. The plot lays out at that size in
+CSS pixels, 96 to the inch, so its 12 px text prints at 9 pt, the size journals ask for;
+make the text larger for a poster with `context="poster"` or the theme's `font_size`
+(`at.set_theme(font_size=14)`). The SVG and the PDF say their printed size, and the PNG records its dpi, so a word
+processor or LaTeX places each at its size. `dpi` replaces `scale`: `dpi=300` is
+`scale=3.125`.
+
+The PDF is drawn from the same SVG: every mark a vector shape and every label text you
+can search and copy, its fonts embedded. It needs `vl-convert-python`, a wheel with no
+system libraries:
+
+```bash
+pip install "anytrellis[pdf]"
+```
+
+A [figure of several plots](figures.md) takes the same `width` and `dpi`, and has
+`save_pdf` too.
+
 Python draws the text in a common sans-serif font, so the labels can look slightly
 different from the browser's. The Export menu's images are the browser's own.
 

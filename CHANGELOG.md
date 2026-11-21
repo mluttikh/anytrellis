@@ -8,6 +8,12 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **Sizes for print and PDF**: `save_svg`, `save_png` and the new `save_pdf` take `width=`
+  and `height=` as lengths (`"180mm"`, `"18cm"`, `"7in"`, `"500pt"`) as well as CSS pixels;
+  `save_png` takes `dpi=` (instead of `scale=`) and records it in the PNG, and the SVG says
+  its printed size. `save_pdf` writes a vector PDF, its text kept as text, at the plot's
+  size (`pip install "anytrellis[pdf]"`). Figures (`concat`) have them too.
+
 - **Different plots in one figure**: `a | b` side by side, `a / b` one under another, and
   `concat(*plots, cols=, widths=, title=)` a grid, nested as deep as you like. A figure
   shows in Jupyter (an ipywidgets grid of the plots) and marimo, saves as one page
