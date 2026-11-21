@@ -420,6 +420,7 @@ class Trellis:
         self._given_stats: Table | None = None
         self._paging: Paging = {}
         self._views: dict[str, dict[str, Any]] = {}
+        self._stats_cache: tuple[dict[str, Any], list[Stat]] | None = None
         self._start_zoom: dict[str, Any] | None = None
         """A view's zoom (``show_view``) the browser has not shown yet: sent when a view
         starts, and the zoom a saved page opens with."""
@@ -2648,10 +2649,49 @@ class Trellis:
         return self._changed()
 
     def stats(self) -> dict[str, list[Any]]:
-        """The panels' statistics, to sort and filter by: ``{name: [a value per panel]}``,
-        in the order of ``panels()`` (empty when the plot does not page)."""
-        self._scene()
-        return {"panel": self.panels(), **{s.name: list(s.values) for s in self._stats}}
+        """The panels' statistics (a paged wrap's to sort and filter by; any plot's in its
+        table view): ``{name: [a value per panel]}``, in the order of ``panels()``."""
+        return {"panel": self.panels(), **{s.name: list(s.values) for s in self._all_stats()}}
+
+    def _all_stats(self) -> list[Stat]:
+        """The panels' statistics: a paged wrap's, else computed once for the plot as it
+        is (the table view, ``stats()``)."""
+        spec, _ = self._scene()
+        if self._stats:
+            return self._stats
+        if self._stats_cache is None or self._stats_cache[0] is not spec:
+            self._stats_cache = (spec, self._panel_stats(self._grid))
+        return self._stats_cache[1]
+
+    def _table_view(self) -> dict[str, Any]:
+        """The table view's data (the toolbar's Table, ``t``), every value as text: each
+        panel's statistics (``stats()``), and the rows of the first layer's data when they
+        are ``TABLE_ROWS`` or fewer (``note``: why not)."""
+        stats = self._all_stats()
+        names = self.panels()
+        panels = {"columns": ["panel", *[s.label or s.name for s in stats]],
+                  "rows": [[name or "all", *[s.text[i] for s in stats]]
+                           for i, name in enumerate(names)]}  # fmt: skip
+        rows, note = None, ""
+        layer = next((lr for lr in self._layers if lr.mark not in ("rule", "text")), None)
+        if layer is None:
+            pass
+        elif self._on_page(layer):
+            note = "The rows are in the database, read a page at a time: not listed here."
+        else:
+            table = self._table(layer)
+            if table.n > TABLE_ROWS:
+                note = f"{table.n:,} rows: too many to list here (at most {TABLE_ROWS:,})."
+            else:
+                given = [*self._page, *self._row, *self._col, *self._wrap, layer.x, layer.y,
+                         layer.x2, layer.y2, layer.color, *layer.group, layer.text,
+                         *_tooltip_columns(layer, table)]  # fmt: skip
+                cols = [c for c in dict.fromkeys(given) if c is not None and c in table]
+                values = [table.raw(c) for c in cols]
+                listed = [[_cell(v[r]) for v in values] for r in range(table.n)]
+                rows = {"caption": f"Rows ({table.n:,})",
+                        "columns": [self._label(c) for c in cols], "rows": listed}  # fmt: skip
+        return {"panels": panels, "rows": rows, "note": note}
 
     def sort_panels(self, by: str | None = None, *, descending: bool = False) -> Self:
         """Sort a paged wrap's panels by a statistic (a name from ``stats()``), as the
@@ -3641,6 +3681,7 @@ class Trellis:
             "paging": self.paging,
             "views": self._views,
             "zoom": self._start_zoom,
+            "table": self._table_view(),
             "link": link,
         }
         data = json.dumps(payload).replace("</", "<\\/")
@@ -4814,6 +4855,9 @@ def page_html(body: str, title: str) -> str:
     )
 
 
+TABLE_ROWS = 500
+"""The rows a table view lists at most (more: only the panels' statistics)."""
+
 VIEW_KEYS = ("page", "sort", "descending", "name", "where", "pinned", "open", "compare", "zoom")
 """What a view (``save_view``) keeps: the paging, the opened and compared panels, the zoom
 (``{"x": [[group, [lo, hi]], ...], "y": ...}`` in the spec's units; None: as it starts)."""
@@ -5782,6 +5826,15 @@ def _text(value: Any) -> str:
     if isinstance(value, np.datetime64):
         return str(value).replace("T", " ")
     return str(value)
+
+
+def _cell(value: Any) -> str:
+    """A value in the table view: as a tooltip shows it, a missing number blank."""
+    if isinstance(value, float | np.floating) and np.isnan(value):
+        return ""
+    if isinstance(value, np.datetime64) and np.isnat(value):
+        return ""
+    return _text(value)
 
 
 def _span(extent: Extent, scale: str | None) -> tuple[float, float] | None:

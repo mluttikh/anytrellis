@@ -7,6 +7,7 @@ import { pageLabels, pageList, panelOrder } from "../src/core/pages";
 import { type Scene, bufferIds, buildScene, hitPoint, pick, yExtent } from "../src/core/scene";
 import { BufferStore } from "../src/core/transport";
 import { LinkGroup, chosenKeys, linkHighlight, readLink } from "../src/core/savedlink";
+import { markStops, nextStop } from "../src/core/stops";
 import { FADED, boxMeetsPolygon, filled, highlighted, inPolygon, select, selectionColors, selects, simplify, toggleLegend } from "../src/core/selection";
 import { KIND_CAPSULE, KIND_RECT, KIND_TRAP } from "../src/core/renderers/renderer";
 import { SHAPES, dashPieces, shapeCorners } from "../src/core/channels";
@@ -1079,5 +1080,34 @@ describe("saved links", () => {
     log.length = 0;
     g.clear();
     expect(log).toEqual(["a cleared", "a plain", "b plain", "c plain"]);
+  });
+});
+
+describe("the arrow keys among marks", () => {
+  const map = { sx: 10, ox: 0, sy: -10, oy: 100 }; // x px = 10x, y px = 100 - 10y
+  // two lines (a's points at x 0, 1, 2; b's at 0, 1, 2 higher up) and a bar
+  const lines = layer("line", [0, 1, 1, 2, 1, 2, 2, 1, 0, 5, 1, 6, 1, 6, 2, 5], KIND_CAPSULE, 1);
+  const bars = layer("bars", [3, 0, 3.8, 4], KIND_RECT, 0);
+  const scene = { layers: [lines, bars] } as unknown as Scene;
+  const stops = markStops(scene, 0, false);
+  it("stops at each point of a line, its last too, and a bar's top, by x", () => {
+    expect(stops.map((s) => [s.x, s.y])).toEqual([[0, 1], [0, 5], [1, 2], [1, 6], [2, 1], [2, 5], [3.4, 4]]);
+    expect(stops[4].instance).toBe(1); // a's last point: the end of its second piece
+  });
+  it("steps along x, to the ends, and up and down at the same x", () => {
+    expect(nextStop(stops, -1, { step: 1 }, map)).toBe(0);
+    expect(nextStop(stops, -1, { step: -1 }, map)).toBe(6);
+    expect(nextStop(stops, 2, { step: 1 }, map)).toBe(3);
+    expect(nextStop(stops, 6, { step: 1 }, map)).toBeNull();
+    expect(nextStop(stops, 2, { to: "last" }, map)).toBe(6);
+    expect(nextStop(stops, 2, { up: -1 }, map)).toBe(3); // b's point above a's
+    expect(nextStop(stops, 3, { up: 1 }, map)).toBe(2);
+    expect(nextStop(stops, 3, { up: -1 }, map)).toBeNull();
+  });
+  it("leaves out grey context and what the legend hides", () => {
+    const context = layer("points", [1, 1, 1, 1], KIND_CAPSULE, 2, true);
+    const two = { layers: [lines, context] } as unknown as Scene;
+    expect(markStops(two, 0, false)).toHaveLength(6);
+    expect(markStops(two, 0, false, (l, i) => l === lines && i < 2)).toHaveLength(3);
   });
 });

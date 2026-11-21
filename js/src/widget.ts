@@ -158,6 +158,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     },
     // what it shows: Trellis.save_png and save_svg draw the same view
     onView: (shown) => model.send({ type: "view", ...shown }),
+    // the table view: Python's
+    table: async () => (await ask(model, s, { type: "table" })).table ?? null,
     onViews: (views) => {
       model.set("views", views);
       model.save_changes();

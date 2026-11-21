@@ -91,6 +91,9 @@ selected.
 
 For screen readers, every plot is a figure labelled with a sentence made from what it
 shows (`t.description`; `alt=` says it your way), and saved SVGs carry it as their title.
+In a panel opened (or a plot of one) the arrow keys step through the marks, each one's
+tooltip said to the screen reader; the toolbar's table (`t`) shows each panel's statistics
+(`t.stats()`) and, when few, the rows as HTML tables.
 `redundant=True` gives a colour column's categories a shape each on points and a dash each
 on lines, so colour doesn't carry them alone.
 
@@ -289,7 +292,9 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | `s` | drag draws a selection brush, and back |
 | Esc | clear the selection (else: back to all panels) |
 | click a legend entry | select its colour (Shift+click: add or remove one) |
-| arrow keys | move a ring from panel to panel |
+| arrow keys | move a ring from panel to panel; in a panel opened, step through its marks |
+| Home, End | the first, last mark |
+| `t` | the plot as a table: each panel's statistics, and the rows when few |
 | Enter | open the panel the ring is on (or under the pointer) |
 | `p`, `c` | pin that panel first on every page; compare every panel with it |
 | Page Up / Page Down | previous / next panel (with none opened: page) |

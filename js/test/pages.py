@@ -2,7 +2,7 @@
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
 channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs, lasso.mjs,
-savedlink.mjs, views.mjs)."""
+savedlink.mjs, views.mjs, keys.mjs)."""
 
 from __future__ import annotations
 
@@ -140,6 +140,7 @@ def main(out: Path) -> None:
     lassos(out)
     saved_links(out)
     views(out)
+    keyboard(out)
 
 
 def lassos(out: Path) -> None:
@@ -158,6 +159,24 @@ def lassos(out: Path) -> None:
         t.select(**chosen)
         t.save_html(out / f"{name}.html")
         (out / f"{name}.selected.json").write_text(json.dumps(len(t.selected())))
+
+
+def keyboard(out: Path) -> None:
+    """The arrow keys among marks and the table view (keys.mjs): cars by origin, with the
+    table view Python gives and each panel's points with a weight and an mpg
+    (``keys.json``); two lines in one panel (``keys-line.html``)."""
+    import json
+
+    cars = load("cars")
+    t = Trellis(cars, wrap="origin", title="Cars").points(x="weight", y="mpg", tooltip=["name"])
+    t.save_html(out / "keys.html")
+    drawn = cars.filter(pl.col("weight").is_not_null() & pl.col("mpg").is_not_nan())
+    counts = {o: drawn.filter(pl.col("origin") == o).height for o in t.panels()}
+    (out / "keys.json").write_text(json.dumps({"table": t._table_view(), "points": counts}))
+    two = pl.DataFrame({"x": [0, 1, 2, 0, 1, 2], "y": [1.0, 2.0, 1.0, 5.0, 6.0, 5.0],
+                        "series": ["a", "a", "a", "b", "b", "b"]})  # fmt: skip
+    lines = Trellis(two, title="Two lines").line(x="x", y="y", color="series")
+    lines.save_html(out / "keys-line.html")
 
 
 def views(out: Path) -> None:

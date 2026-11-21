@@ -322,6 +322,14 @@ export interface Zoom {
   y: [number, [number, number]][];
 }
 
+/** The table view (the toolbar's Table, t), from Python: each panel's statistics, and the
+ * rows when they are few (`note`: why not); every value as text. */
+export interface TableView {
+  panels: { columns: string[]; rows: string[][] };
+  rows: { caption: string; columns: string[]; rows: string[][] } | null;
+  note?: string;
+}
+
 /** Where buffers come from: Python (BufferStore), or a page that embeds them. */
 export interface DataSource {
   has(id: string): boolean;
