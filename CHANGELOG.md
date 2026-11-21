@@ -8,6 +8,15 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **A description for screen readers**: every plot gets a sentence made from what it
+  shows ("Scatter of mpg against weight, one panel per origin (3), coloured by cylinders.
+  406 rows. mpg from 9 to 46.6; weight from 1613 to 5140."), `t.description`. The plot is
+  a figure (`role="figure"`) labelled with it; saved SVGs (Python's and the browser's) have
+  it as their `<title>`/`<desc>`. `Trellis(alt=...)` says it in your words. With
+  `load="pages"` the rows are counted in the database.
+- **A second encoding**: `Trellis(redundant=True)` (or `set_theme(redundant=True)`)
+  gives a colour column's categories a shape each on points and a dash each on lines, in
+  one legend, so colour doesn't carry them alone. A layer's own `shape=`/`dash=` wins.
 - **Touch**: pinch to zoom a panel about the fingers (side by side: x alone; one above
   the other: y alone), two fingers to pan, a long press for the values there (pinned; a
   tap lets them go). One finger scrolls the page past the plot, unless box zoom or select

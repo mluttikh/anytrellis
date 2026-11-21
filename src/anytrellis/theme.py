@@ -105,6 +105,8 @@ class Theme:
         context: Where the plot is shown, scaling the text, line widths and point
             sizes together: ``"paper"`` (0.8), ``"notebook"`` (1), ``"talk"`` (1.5) or
             ``"poster"`` (2).
+        redundant: A colour column also gives points their shapes and lines their
+            dashes (``Trellis(redundant=)`` overrides it).
     """
 
     base: str = "minimal"
@@ -123,6 +125,7 @@ class Theme:
     palette: str | Sequence[str] | None = None
     font_size: float | Literal["auto"] | None = None
     context: Context | None = None
+    redundant: bool | None = None
 
     def __post_init__(self) -> None:
         if self.base not in PRESETS:
@@ -135,7 +138,9 @@ class Theme:
         for name, choices in _CHOICES.items():
             if getattr(self, name) not in choices:
                 raise ValueError(f"{name} must be one of {choices}, got {getattr(self, name)!r}")
-        for name in ("panel_fill", "frame", "strip_fill", "strip_bold"):
+        if self.redundant is None:
+            object.__setattr__(self, "redundant", False)
+        for name in ("panel_fill", "frame", "strip_fill", "strip_bold", "redundant"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be True or False, got {getattr(self, name)!r}")
         opacity = self.grid_opacity
@@ -170,6 +175,7 @@ class Theme:
         pixels, its context applied, and whether it steps with the panels' width."""
         out = asdict(self)
         del out["palette"]
+        del out["redundant"]  # (drawn in Python)
         size = FONT_SIZE if self.font_size == "auto" else float(self.font_size or FONT_SIZE)
         out["font_size"] = size * self.scale
         out["font_step"] = self.font_size == "auto"

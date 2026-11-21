@@ -323,8 +323,9 @@ export class SvgContext {
     this.emit(`<text ${place} ${fontAttributes(this.s.font)}${anchor !== "start" ? ` text-anchor="${anchor}"` : ""} ${paintAttrs}>${esc(text)}</text>`);
   }
 
-  /** The image: what was drawn, on `background` (none: transparent). */
-  toString(background?: string): string {
+  /** The image: what was drawn, on `background` (none: transparent); its title and
+   * description for screen readers (as figure.py's). */
+  toString(background?: string, label: { title?: string | null; description?: string | null } = {}): string {
     while (this.stack.length) this.restore();
     for (let i = 0; i < this.s.opened; i++) this.out.push("</g>");
     this.s.opened = 0;
@@ -334,7 +335,15 @@ export class SvgContext {
       bg = `<rect width="100%" height="100%" fill="${col}"${a < 1 ? ` fill-opacity="${n(a)}"` : ""}/>`;
     }
     const defs = this.defs.length ? `<defs>${this.defs.join("")}</defs>` : "";
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${n(this.width)}" height="${n(this.height)}" viewBox="0 0 ${n(this.width)} ${n(this.height)}">${defs}${bg}${this.out.join("")}</svg>`;
+    const { title, description } = label;
+    let role = "";
+    let about = "";
+    if (title || description) {
+      role = ` role="img"`;
+      about = `<title>${esc(title || description || "")}</title>`;
+      if (title && description) about += `<desc>${esc(description)}</desc>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${n(this.width)}" height="${n(this.height)}" viewBox="0 0 ${n(this.width)} ${n(this.height)}"${role}>${about}${defs}${bg}${this.out.join("")}</svg>`;
   }
 }
 

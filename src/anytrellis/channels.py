@@ -115,6 +115,8 @@ class Channels:
                 if name is None or name not in table:
                     continue
                 column = table.column(name)
+                if column.kind != "category" and layer.second:
+                    continue  # a number colour: its colormap alone
                 if column.kind != "category":
                     raise ValueError(
                         f"{layer.name}: {kind}={name!r} draws a {kind} a category, and "

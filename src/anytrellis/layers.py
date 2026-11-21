@@ -75,6 +75,9 @@ class Layer:
     # lines: a dash column (``dash``: one dash, in px); labels at their ends ("end")
     dash_by: str | None = None
     label: str | None = None
+    # shape or dash_by repeats the colour column (Trellis(redundant=True)): drawn when it
+    # holds categories, else left out
+    second: bool = False
     # text: labels kept out of each other's way (those with no room left out)
     repel: bool = False
     # rules: constant positions, or (with data) a column's, in each row's panel

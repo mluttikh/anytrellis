@@ -88,6 +88,12 @@ check(s.chips.includes("compare"), "a chip says which");
 await page.screenshot({ path: join(out, `panels-${tag}-compare.png`) });
 const svg = await page.evaluate(() => window.anytrellisViews[0].svgImage?.() ?? "");
 if (svg) check(svg.includes("rgb(184,190,198)") || svg.includes("#b8bec6"), "the export draws the compared marks");
+if (svg) check(/role="img"><title>Lines of life_expect against year, one panel per country \(63\)/.test(svg), "the export's title: the description");
+const figure = await page.evaluate(() => {
+  const root = document.querySelector(".atr-root");
+  return { role: root.getAttribute("role"), label: root.getAttribute("aria-label") ?? "" };
+});
+check(figure.role === "figure" && figure.label.startsWith("Lines of life_expect against year, one panel per country (63), 8 a page, coloured by region."), `the plot is a figure named by its description (${figure.label.slice(0, 60)}…)`);
 await page.keyboard.press("Escape");
 s = await state();
 check(s.ring === null && s.compare !== null, "Esc lets the ring go first");
