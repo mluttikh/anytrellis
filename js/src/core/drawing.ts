@@ -161,6 +161,8 @@ export interface FrontState {
   texts: TextData[];
   /** Labels at the ends of lines (labels.ts: endLabels). */
   ends: EndLabel[];
+  /** The panel the arrow keys have reached: a ring round it. */
+  ring: Rect | null;
 }
 
 /** A ring around a hovered mark: its centre (px), its radius, in its colour. */
@@ -268,6 +270,15 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
     ctx.strokeStyle = theme.axis;
     for (const v of views) ctx.strokeRect(v.rect.x - 0.5, v.rect.y - 0.5, v.rect.w + 1, v.rect.h + 1);
   }
+  // the panel the arrow keys have reached
+  if (state.ring) {
+    const r = state.ring;
+    ctx.save();
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+    ctx.restore();
+  }
 
   // axes
   const lineX = look.axis_lines === "x" || look.axis_lines === "both";
@@ -350,7 +361,7 @@ export function drawFront(ctx: CanvasRenderingContext2D, spec: TrellisSpec, layo
 
   // strips
   const strip = look.strip_fill ? filledStrip : flatStrip;
-  for (const box of layout.panels) if (box.strip) strip(ctx, theme, look, { rect: box.strip, label: box.label, vertical: false, side: "top", span: false }, box.note);
+  for (const box of layout.panels) if (box.strip) strip(ctx, theme, look, { rect: box.strip, label: box.label, vertical: false, side: "top", span: false, pin: box.pinned }, box.note);
   for (const s of layout.strips) strip(ctx, theme, look, s);
   ctx.font = `${fs}px ${theme.font}`;
 
@@ -594,9 +605,12 @@ function drawRule(ctx: CanvasRenderingContext2D, l: RuleLayerSpec, v: PanelView)
 /** A filled strip: its label centred or at the left (a row's on its side), a paged wrap's
  * sorted value whole at the right. */
 function filledStrip(ctx: CanvasRenderingContext2D, theme: Theme, look: Look, s: Strip, note = ""): void {
-  const { rect, label } = s;
+  const label = s.label;
   ctx.fillStyle = theme.strip;
-  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.fillRect(s.rect.x, s.rect.y, s.rect.w, s.rect.h);
+  // a pinned panel's: a pin, then the label in the room left
+  if (s.pin) drawPin(ctx, s.rect.x + STRIP_PAD, s.rect.y + s.rect.h / 2, theme.accent);
+  const rect = s.pin ? { ...s.rect, x: s.rect.x + PIN_W, w: s.rect.w - PIN_W } : s.rect;
   ctx.fillStyle = theme.stripText;
   ctx.save();
   if (look.strip_bold) ctx.font = `600 ${theme.fontSize}px ${theme.font}`;
@@ -631,8 +645,10 @@ function filledStrip(ctx: CanvasRenderingContext2D, theme: Theme, look: Look, s:
  * line at its left) to show which; a paged wrap's sorted value at the right in the muted
  * colour, the name keeping at least half the room. */
 function flatStrip(ctx: CanvasRenderingContext2D, theme: Theme, look: Look, s: Strip, note = ""): void {
-  const { rect, label } = s;
+  const label = s.label;
   const right = s.side === "right";
+  if (s.pin) drawPin(ctx, s.rect.x + 1, s.rect.y + s.rect.h / 2, theme.accent);
+  const rect = s.pin ? { ...s.rect, x: s.rect.x + PIN_W, w: s.rect.w - PIN_W } : s.rect;
   ctx.save();
   if (s.span) {
     ctx.strokeStyle = theme.axis;
@@ -679,6 +695,26 @@ function flatStrip(ctx: CanvasRenderingContext2D, theme: Theme, look: Look, s: S
     ctx.textAlign = "left";
     ctx.fillText(fit(ctx, label, room), x, y);
   }
+  ctx.restore();
+}
+
+/** The room a pin takes before a pinned panel's label (px). */
+export const PIN_W = 11;
+
+/** A pin (a pinned panel's, in its strip): its left at x, centred on y. As figure.py. */
+export function drawPin(ctx: CanvasRenderingContext2D, x: number, y: number, color: string): void {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(x + 4, y - 1.5, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x + 4, y + 1.5);
+  ctx.lineTo(x + 4, y + 5.5);
+  ctx.stroke();
   ctx.restore();
 }
 

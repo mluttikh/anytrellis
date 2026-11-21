@@ -37,7 +37,7 @@ import { drawMarks } from "./renderers/canvas2d";
 import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
 import { lookOf } from "./look";
 import { Pager } from "./pager";
-import { pageLabels, pageList, panelOrder } from "./pages";
+import { pageLabels, pageList, panelOrder, pinsOf } from "./pages";
 import { createRenderer } from "./renderers/select";
 import type { Draw, InstanceSet, Renderer } from "./renderers/renderer";
 import { type Brush, type Highlight, type LegendChoice, type Selection, chooses, filled, highlighted, select, selectionColors, selects, toggleLegend } from "./selection";
@@ -61,6 +61,8 @@ export interface ViewOptions {
   tooltip?: (layer: number, instance: number, of: string) => Promise<string[][]>;
   /** The reader opened a panel (its name) or went back to all of them (null). */
   onFocus?: (name: string | null) => void;
+  /** The reader chose a panel to compare every other with (its name), or none. */
+  onCompare?: (name: string | null) => void;
   /** The reader drew, moved or cleared the selection (on release). */
   onSelect?: (brush: Brush | null) => void;
   /** The brush as it is dragged (many times a second). */
@@ -183,6 +185,11 @@ const FLIP_MAX = 30;
 /** ... and goes back within this time (ms): a flip happens every frame. */
 const FLIP_MS = 100;
 
+/** The compared panel's marks in the others: the context grey (styling.py CONTEXT_COLOR),
+ * at this share of their opacity. */
+const GHOST = [184, 190, 198];
+const GHOST_ALPHA = 0.7;
+
 const ICONS = {
   pan: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" /></svg>',
   help: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" /><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.5" /><path d="M8 11.6v.1" /></svg>',
@@ -192,6 +199,8 @@ const ICONS = {
   reset: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5" /><path d="M3 2.5V5h2.5" /></svg>',
   expand: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" /></svg>',
   collapse: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" /></svg>',
+  pin: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4M7 2.5v4l-2.5 2.5h7L9 6.5v-4M8 9v4.5" /></svg>',
+  compare: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="4" width="7" height="7" rx="1" stroke-dasharray="1.6 1.4" /><rect x="7" y="5" width="7" height="7" rx="1" /></svg>',
   box: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" stroke-dasharray="2 1.6" /><path d="m10.5 10.5 3 3" /></svg>',
   select: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="4.5" width="11" height="7" rx="1" stroke-dasharray="2 1.6" /><path d="M6 8h4" /></svg>',
   export: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7.5M5 7l3 3 3-3M2.5 10.5v3h11v-3" /></svg>',
@@ -245,7 +254,7 @@ export class TrellisView {
   private views: PanelView[] = [];
   private frameRequested = false;
   private frameId = 0;
-  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], texts: [], ends: [] };
+  private front_: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: [], texts: [], ends: [], ring: null };
   /** A tooltip pinned by a click (null: none), and the views it was pinned in. */
   private pinned: HTMLDivElement | null = null;
   private pinnedAt = "";
@@ -286,8 +295,20 @@ export class TrellisView {
   private tipRequest = 0;
   /** The panel under the pointer (index in spec.panels), for Enter. */
   private pointerPanel: number | null = null;
+  private readonly tools: HTMLDivElement;
+  private readonly openTool: HTMLButtonElement;
+  private readonly pinTool: HTMLButtonElement;
+  private readonly compareTool: HTMLButtonElement;
+  /** The panel the tools are on. */
+  private toolPanel: number | null = null;
   /** The opened panel (index in spec.panels), or null: all of them. */
   private focused: number | null = null;
+  /** The panel drawn faintly in every other (its name: it stays as the spec changes). */
+  private compareName: string | null = null;
+  /** The panel the arrow keys have reached (a ring round it), or null. */
+  private ring: number | null = null;
+  /** Grey copies of the layers' instances: the compared panel's, drawn in the others. */
+  private ghostSets = new Map<LayerData, InstanceSet>();
   /** A panel to open once the spec is in (the name Python asked for). */
   private pendingFocus: string | null = null;
   private gridHeight = 0;
@@ -391,9 +412,18 @@ export class TrellisView {
     this.status = el("div", "atr-status");
     this.notice = el("div", "atr-notice");
     this.notice.hidden = true;
+    this.notice.setAttribute("role", "status");
     this.empty = el("div", "atr-empty", "No panel matches the filters");
     this.empty.hidden = true;
-    this.stage.append(this.back, this.front, this.tip, this.status, this.notice, this.empty);
+    // on a panel under the pointer (or the arrow keys' ring): open, pin, compare
+    this.tools = el("div", "atr-panel-tools");
+    this.tools.hidden = true;
+    this.openTool = button(ICONS.expand, "Open this panel (Enter, double-click)", () => this.toolPanel !== null && this.setFocus(this.toolPanel, true));
+    this.pinTool = button(ICONS.pin, "Pin: first on every page (p)", () => this.toolPanel !== null && this.togglePin(this.toolPanel));
+    this.compareTool = button(ICONS.compare, "Compare with this: its marks in every panel (c)", () => this.toolPanel !== null && this.toggleCompare(this.toolPanel));
+    this.tools.append(this.openTool, this.pinTool, this.compareTool);
+    for (const type of ["pointerdown", "pointermove", "pointerup", "dblclick", "wheel"]) this.tools.addEventListener(type, (e) => e.stopPropagation());
+    this.stage.append(this.back, this.front, this.tools, this.tip, this.status, this.notice, this.empty);
     this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.help);
     host.append(this.root);
     this.theme = readTheme(this.root);
@@ -555,6 +585,68 @@ export class TrellisView {
     if (index !== this.focused) this.setFocus(index, false);
   }
 
+  /** Draw the panel named `name` faintly in every other (Python: Trellis.compare), or none. */
+  setCompareName(name: string | null): void {
+    if (name === this.compareName) return;
+    this.compareName = name;
+    this.updateTools();
+    this.request();
+  }
+
+  /** The panel compared with (its index), or null. */
+  private compared(): number | null {
+    return this.indexOf(this.compareName);
+  }
+
+  /** Compare every panel with `index` (again: with none). */
+  private toggleCompare(index: number): void {
+    if (!this.spec) return;
+    const name = this.compared() === index ? null : panelName(this.spec, index);
+    this.compareName = name;
+    this.opts.onCompare?.(name);
+    this.notify(name === null ? "Compared with none" : `Every panel compared with ${name}`);
+    this.updateTools();
+    this.request();
+  }
+
+  /** The panels pinned to the front of every page (indices), when the plot pages a wrap. */
+  private pins(): number[] {
+    const spec = this.spec;
+    if (!spec?.pages || spec.pages.grid) return [];
+    const out: number[] = [];
+    for (const name of this.paging.pinned ?? []) {
+      const i = this.indexOf(name);
+      if (i !== null) out.push(i);
+    }
+    return pinsOf(out, spec.pages.rows * spec.pages.cols);
+  }
+
+  /** Whether panels can be pinned: the plot pages a wrap (its panels move, a grid's not). */
+  private pinnable(): boolean {
+    return !!this.spec?.pages && !this.spec.pages.grid && this.spec.pages.rows * this.spec.pages.cols > 1;
+  }
+
+  /** Pin panel `index` first on every page (again: unpin it). */
+  private togglePin(index: number): void {
+    const spec = this.spec;
+    if (!spec || !this.pinnable()) {
+      this.notify("Pinning keeps panels first on every page: this plot has one page");
+      return;
+    }
+    const name = panelName(spec, index);
+    const have = this.paging.pinned ?? [];
+    const on = !have.includes(name);
+    const per = spec.pages!.rows * spec.pages!.cols;
+    if (on && this.pins().length >= per - 1) {
+      this.notify(`At most ${per - 1} pinned: a page needs a place for another`);
+      return;
+    }
+    const pinned = on ? [...have, name] : have.filter((n) => n !== name);
+    this.setPaging({ ...this.paging, pinned }, true);
+    this.notify(on ? `${name} pinned: first on every page` : `${name} unpinned`);
+    this.updateTools();
+  }
+
   // ---- pages ------------------------------------------------------------------------------
 
   /** Show a page, sort and filters (Python: show_page, sort_panels, filter_panels; or the
@@ -592,7 +684,7 @@ export class TrellisView {
     }
     const names = spec.panels.map((_, i) => panelName(spec, i));
     this.order = panelOrder(pages.stats, names, this.paging);
-    this.pageList = pageList(this.order, pages);
+    this.pageList = pageList(this.order, pages, this.pins());
     const last = this.pageList.length - 1;
     this.paging.page = Math.max(0, Math.min(this.paging.page ?? 0, last));
   }
@@ -617,6 +709,8 @@ export class TrellisView {
 
   /** A paged wrap's strips: each panel's value of the statistic sorted by, at the right. */
   private noteSorted(lay: Layout): void {
+    const pins = new Set(this.pins());
+    for (const box of lay.panels) box.pinned = pins.has(box.index) || undefined;
     const stat = this.spec?.pages?.stats.find((s) => s.name === this.paging.sort);
     if (!stat) return;
     for (const box of lay.panels) box.note = stat.text[box.index] || undefined;
@@ -1158,6 +1252,9 @@ export class TrellisView {
     this.lay = lay!;
     const h = this.lay.height;
     this.stage.style.height = `${h}px`;
+    // the ring and the tools: on a panel still shown
+    if (this.ring !== null && !this.lay.panels.some((b) => b.index === this.ring)) this.ring = null;
+    this.updateTools();
     let resized = false;
     for (const c of [this.back, this.front]) resized = sizeCanvas(c, width, h, this.dpr) || resized;
     this.renderer?.resize(width, h, this.dpr);
@@ -1239,6 +1336,8 @@ export class TrellisView {
     front.clearRect(0, 0, this.width, this.lay.height);
     this.front_.texts = this.scene.texts;
     this.front_.ends = this.endsOf(views, front);
+    const ringed = this.focused === null ? views.find((v) => v.panel === this.ring) : undefined;
+    this.front_.ring = ringed ? ringed.rect : null;
     this.front_.brushes = this.brush ? (views.map((v) => this.brushRect(v)).filter(Boolean) as Rect[]) : [];
     drawFront(front, this.spec, this.lay, views, this.panelTheme(), this.front_);
     this.updateChips();
@@ -1282,6 +1381,13 @@ export class TrellisView {
     if (filters && this.order && this.spec) {
       const of = `${this.order.length} of ${this.spec.panels.length} panels`;
       chips.push(["filter", `${filters} ${filters === 1 ? "filter" : "filters"}: ${of}`, "Clear", () => this.setPaging({ ...this.paging, where: {}, name: "", page: 0 }, true)]);
+    }
+    const ref = this.compared();
+    if (ref !== null && this.spec) chips.push(["compare", `Compared with ${panelName(this.spec, ref)}, in grey`, "Clear", () => this.toggleCompare(ref)]);
+    const pins = this.pins();
+    if (pins.length && this.focused === null && this.spec) {
+      const names = pins.map((i) => panelName(this.spec!, i));
+      chips.push(["pin", `${pins.length} pinned`, "Unpin", () => this.setPaging({ ...this.paging, pinned: (this.paging.pinned ?? []).filter((n) => !names.includes(n)) }, true)]);
     }
     const key = chips.map((c) => c[1]).join("|");
     if (key === this.chipsKey) return;
@@ -1349,6 +1455,7 @@ export class TrellisView {
         ["Hover", "the values there; lines by colour: every one at that x"],
         ["Click", "pin the tooltip, to compare (Esc: unpin)"],
         ["Double-click", "open a panel (an axis: reset it)"],
+        ["A panel's buttons", "open it, pin it, compare every panel with it"],
         ["Hover a legend entry", "its marks stand out"],
         ["Click a legend entry", "select its colour (Shift: add one)"],
         ["Double-click one", "show it alone (Esc: all)"],
@@ -1359,7 +1466,9 @@ export class TrellisView {
         ["y", "fit y to the data in view"],
         ["r  u", "reset the zoom, undo the last"],
         ["Esc", "unpin, clear the selection, close a panel"],
-        ["Enter", "open the panel under the pointer"],
+        ["← → ↑ ↓", "move between panels"],
+        ["Enter", "open the panel reached (or under the pointer)"],
+        ["p  c", "pin it first on every page, compare every panel with it"],
         ["Page Up / Down", "the previous / next panel or page"],
         ["e  f", "export, full screen"],
         ["?", "these keys"],
@@ -1390,6 +1499,22 @@ export class TrellisView {
     const scene = this.scene!;
     const draws: Draw[] = [];
     // with a selection: every layer faded, then the selected marks on top
+    // the compared panel's marks, grey, under every other panel's
+    const ref = this.compared();
+    if (ref !== null) {
+      for (const layer of scene.layers) {
+        const start = layer.starts[ref];
+        const count = layer.starts[ref + 1] - start;
+        if (!count || layer.spec.context) continue;
+        const set = this.ghostSet(layer);
+        for (const v of views) {
+          if (v.panel === ref) continue;
+          const { map, rect } = v;
+          const dashed = layer.dash ? this.dashSet(layer, set, ref, start, count, map) : null;
+          draws.push({ set: dashed ?? set, start: dashed ? 0 : start, count: dashed ? dashed.count : count, clip: rect, sx: map.sx, ox: map.ox + scene.baseX[ref] * map.sx, sy: map.sy, oy: map.oy + scene.baseY[ref] * map.sy, kind: layer.kind, halfWidth: layer.halfWidth, opacity: layer.spec.opacity });
+        }
+      }
+    }
     const passes: { layer: LayerData; set: InstanceSet }[] = [];
     scene.layers.forEach((layer, i) => passes.push({ layer, set: this.selectionSets[i]?.dim ?? this.shownSet(i) }));
     scene.layers.forEach((layer, i) => this.selectionSets[i] && passes.push({ layer, set: this.selectionSets[i]!.hi }));
@@ -1418,6 +1543,24 @@ export class TrellisView {
       }
     }
     return draws;
+  }
+
+  /** A layer's instances in grey (the compared panel's marks drawn in the others), as a
+   * context layer's: kept while the layer's set stays the same. */
+  private ghostSet(layer: LayerData): InstanceSet {
+    const had = this.ghostSets.get(layer);
+    if (had && had.key === `${layer.set.key}:ghost` && had.count === layer.set.count) return had;
+    const src = layer.set.colors;
+    const colors = new Uint8Array(src.length);
+    for (let k = 0; k < layer.set.count; k++) {
+      colors[k * 4] = GHOST[0];
+      colors[k * 4 + 1] = GHOST[1];
+      colors[k * 4 + 2] = GHOST[2];
+      colors[k * 4 + 3] = Math.round(src[k * 4 + 3] * GHOST_ALPHA);
+    }
+    const set: InstanceSet = { ...layer.set, key: `${layer.set.key}:ghost`, version: ++selectionVersion, colors };
+    this.ghostSets.set(layer, set);
+    return set;
   }
 
   /** A dashed line's dashes in panel `p` at the map's scales (kept while those and its
@@ -1625,6 +1768,7 @@ export class TrellisView {
       "pointerleave",
       () => {
         this.pointerPanel = null;
+        this.toolsAt(-1, -1);
         if (!this.drag) this.clearHover();
       },
       { signal },
@@ -1712,11 +1856,34 @@ export class TrellisView {
         return true;
       case "Enter":
         if (!many || this.focused !== null) return false;
-        if (this.pointerPanel === null) {
-          this.notify("Point at a panel to open it");
+        if (this.keyPanel() === null) {
+          this.notify("Point at a panel, or reach it with the arrow keys, to open it");
           return true;
         }
-        this.setFocus(this.pointerPanel, true);
+        this.setFocus(this.keyPanel(), true);
+        return true;
+      case "ArrowLeft":
+      case "ArrowRight":
+      case "ArrowUp":
+      case "ArrowDown":
+        if (!many || this.focused !== null) return false;
+        this.moveRing(key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : 0, key === "ArrowUp" ? -1 : key === "ArrowDown" ? 1 : 0);
+        return true;
+      case "p":
+        if (!many) return false;
+        if (this.keyPanel() === null) {
+          this.notify("Point at a panel, or reach it with the arrow keys, to pin it");
+          return true;
+        }
+        this.togglePin(this.keyPanel()!);
+        return true;
+      case "c":
+        if (!many) return false;
+        if (this.keyPanel() === null) {
+          this.notify("Point at a panel, or reach it with the arrow keys, to compare with it");
+          return true;
+        }
+        this.toggleCompare(this.keyPanel()!);
         return true;
       case "Escape":
         if (!this.help.hidden) {
@@ -1738,6 +1905,16 @@ export class TrellisView {
         }
         if (this.isolated) {
           this.isolate(null);
+          return true;
+        }
+        if (this.ring !== null && this.focused === null) {
+          this.ring = null;
+          this.toolsAt(-1, -1);
+          this.request();
+          return true;
+        }
+        if (this.compareName !== null && this.focused === null) {
+          this.toggleCompare(this.compared() ?? 0);
           return true;
         }
         if (this.brush) {
@@ -1785,6 +1962,93 @@ export class TrellisView {
     return out;
   }
 
+  /** The panel tools on the panel under a point (its strip included); the ring's when
+   * the pointer is on none. */
+  private toolsAt(x: number, y: number): void {
+    let at: number | null = null;
+    for (const box of this.lay?.panels ?? []) {
+      const r = box.rect;
+      const s = box.strip;
+      const inStrip = !!s && x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h;
+      if (inStrip || (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)) at = box.index;
+    }
+    this.toolPanel = at ?? this.ring;
+    this.updateTools();
+  }
+
+  /** Show the panel tools on `toolPanel`: at its strip's right end (or inside the panel's
+   * top right, without a strip of its own). */
+  private updateTools(): void {
+    const spec = this.spec;
+    const box = this.lay?.panels.find((b) => b.index === this.toolPanel);
+    if (!spec || !box || spec.panels.length < 2 || this.drag || spec.panel_buttons === false) {
+      this.tools.hidden = true;
+      return;
+    }
+    const open = this.focused !== null;
+    this.openTool.hidden = open;
+    this.pinTool.hidden = open || !this.pinnable();
+    const pinned = this.pins().includes(box.index);
+    this.pinTool.classList.toggle("atr-on", pinned);
+    this.pinTool.setAttribute("aria-pressed", String(pinned));
+    const ref = this.compared() === box.index;
+    this.compareTool.classList.toggle("atr-on", ref);
+    this.compareTool.setAttribute("aria-pressed", String(ref));
+    this.compareTool.title = ref ? "Compare with none (c, Esc)" : "Compare with this: its marks in every panel (c)";
+    this.tools.hidden = false;
+    const h = this.tools.offsetHeight;
+    const w = this.tools.offsetWidth;
+    const s = box.strip;
+    const r = box.rect;
+    const left = (s ? s.x + s.w : r.x + r.w) - w - 1;
+    const top = s ? s.y + (s.h - h) / 2 : r.y + 2;
+    this.tools.style.left = `${Math.max(r.x, left)}px`;
+    this.tools.style.top = `${top}px`;
+  }
+
+  /** Move the arrow keys' ring to the next panel that way (from none: the first shown). */
+  private moveRing(dx: number, dy: number): void {
+    const boxes = this.lay?.panels ?? [];
+    if (!this.spec || boxes.length < 2) return;
+    const from = boxes.find((b) => b.index === this.ring);
+    let next = boxes[0];
+    if (from) {
+      const cx = from.rect.x + from.rect.w / 2;
+      const cy = from.rect.y + from.rect.h / 2;
+      // the nearest whose centre is that way, straight on counting more than aside
+      let best = Infinity;
+      let found = null;
+      for (const b of boxes) {
+        const ox = b.rect.x + b.rect.w / 2 - cx;
+        const oy = b.rect.y + b.rect.h / 2 - cy;
+        const ahead = ox * dx + oy * dy;
+        if (ahead <= 1) continue;
+        const aside = Math.abs(ox * dy) + Math.abs(oy * dx);
+        const d = ahead + 3 * aside;
+        if (d < best) {
+          best = d;
+          found = b;
+        }
+      }
+      if (!found) {
+        this.notify("No panel that way");
+        return;
+      }
+      next = found;
+    }
+    this.ring = next.index;
+    this.toolPanel = next.index;
+    this.updateTools();
+    const pinned = this.pins().includes(next.index) ? " · pinned" : "";
+    this.notify(`${panelName(this.spec, next.index)}${pinned} · Enter opens, p pins, c compares`);
+    this.request();
+  }
+
+  /** The panel a key acts on: the arrow keys' ring's, else the one under the pointer. */
+  private keyPanel(): number | null {
+    return this.ring ?? this.pointerPanel ?? this.focused;
+  }
+
   /** The line-end label under a point of the stage, if any. */
   private endAt(x: number, y: number): EndLabel | null {
     const h = this.panelTheme().fontSize / 2 + 1;
@@ -1793,6 +2057,7 @@ export class TrellisView {
 
   private hover(x: number, y: number): void {
     if (!this.spec || !this.scene) return;
+    this.toolsAt(x, y);
     // a line's end label: as its legend entry, its marks shown in every panel
     const label = this.endAt(x, y);
     if (label || this.overEnd) {
@@ -2413,7 +2678,7 @@ export class TrellisView {
     ctx.clip();
     drawBack(ctx, this.spec, views, this.panelTheme());
     drawMarks(ctx, this.markDraws(views));
-    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts, ends: this.endsOf(views, ctx) };
+    const front: FrontState = { crossX: null, crossGroup: null, hovers: [], hoverPanel: null, pins: [], pinPanel: null, readout: null, box: null, ghosts: [], brushes: this.front_.brushes, texts: this.scene.texts, ends: this.endsOf(views, ctx), ring: null };
     drawFront(ctx, this.spec, this.lay, views, this.panelTheme(), front);
     ctx.restore();
     if (shownLegends(this.spec) && this.spec.legend_position !== "none") paintHtml(ctx, this.legend, origin);

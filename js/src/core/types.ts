@@ -245,6 +245,8 @@ export interface TrellisSpec {
   legend_position?: "auto" | "top" | "bottom" | "right" | "none";
   /** Start with y fitted to the data in view (it follows x zooms). */
   fit_y?: boolean;
+  /** A panel's buttons (open, pin, compare) on the panel under the pointer (absent: yes). */
+  panel_buttons?: boolean;
   /** The look (look.ts): a preset's name, or its settings (from Python: all of them). */
   theme?: LookName | (Partial<Look> & { base?: LookName });
   /** A wrap shown a page at a time (null: all its panels at once). */
@@ -286,6 +288,8 @@ export interface Paging {
   descending?: boolean;
   name?: string;
   where?: Record<string, [number | null, number | null] | string | null>;
+  /** Panels first on every page, whatever the sort and filters (their names). */
+  pinned?: string[];
 }
 
 /** Where buffers come from: Python (BufferStore), or a page that embeds them. */

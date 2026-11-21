@@ -209,6 +209,9 @@ class Trellis:
         fit_y: Start with y fitted to the data in view: zooming or panning x refits each y
             scale (shared ones to all their panels), until y is zoomed by hand. The ``y`` key
             and the toolbar switch it on and off.
+        panel_buttons: Show a panel's buttons (open, pin, compare) when the pointer is on
+            it. ``False`` leaves them out; double-click, Enter, ``p`` and ``c`` still do
+            the same.
         link: Column(s) that identify a thing across panels (a country, a station): a
             selection grows to every row sharing them, in all panels and layers that have
             the columns. Select a few countries in 1955 and see them in every year.
@@ -262,6 +265,7 @@ class Trellis:
         empty: str = "draw",
         margins: bool | str = False,
         fit_y: bool = False,
+        panel_buttons: bool = True,
         link: str | Sequence[str] | None = None,
         load: str = "all",
         theme: str | Theme | None = None,
@@ -370,6 +374,7 @@ class Trellis:
             raise ValueError("strip_label= names facet panels: give row=, col= or wrap=")
         self.strip_label = strip_label
         self.fit_y = bool(fit_y)
+        self.panel_buttons = bool(panel_buttons)
         self._link = _names(link)
         self._selection: Brush | None = None
         self._axes: dict[str, tuple[AxisKind, list[str] | None, float]] = {}
@@ -379,6 +384,7 @@ class Trellis:
         self.renderer = renderer
         self._widget: TrellisWidget | None = None
         self._focus: str | None = None
+        self._compare: str | None = None
         self._view: dict[str, Any] | None = None
         """What the browser last showed: its width and each scale group's range (images)."""
         self._link_group: Link | None = None
@@ -1615,15 +1621,79 @@ class Trellis:
         The zoom stays linked: back in the grid, the panels sharing its scales show what
         the opened panel showed. ``close()`` (or Backspace, Esc, a double-click) goes back.
         """
+        self._set_focus(self._panel_named(panel, "open"))
+        return self
+
+    def _panel_named(self, panel: Sequence[Any], what: str) -> str:
+        """A panel's name, from its name or its level of each facet column."""
         names = self.panels()
         if len(names) < 2:
-            raise ValueError("this plot has one panel: there is nothing to open")
+            raise ValueError(f"this plot has one panel: there is nothing to {what}")
         name = " · ".join(str(k) for k in panel) if len(panel) != 1 else str(panel[0])
         if name not in names:
             shown = ", ".join(repr(n) for n in names[:8]) + (", ..." if len(names) > 8 else "")
             raise ValueError(f"no panel {name!r}; the panels are {shown}")
-        self._set_focus(name)
+        return name
+
+    def compare(self, *panel: Any) -> Self:
+        """Draw one panel's marks faintly in every other panel (as "Compare with this" on
+        its strip, or ``c`` with it under the pointer, does): each panel against a
+        reference, chosen as you go. ``compare()`` (or Esc) draws them alone again.
+
+        ```python
+        t.compare("Seattle")         # wrap="city": Seattle's lines, grey, in every panel
+        t.compare()                  # none
+        ```
+
+        ``facet="exclude"`` on a layer draws all the other panels' rows so, from code.
+        """
+        self._set_compare(self._panel_named(panel, "compare") if panel else None)
         return self
+
+    @property
+    def compared(self) -> str | None:
+        """The panel drawn in every other (``compare``, here or in the browser), or None."""
+        if self._widget is not None:
+            return self._widget.compare_panel
+        return self._compare
+
+    def _set_compare(self, name: str | None) -> None:
+        self._compare = name
+        if self._widget is not None:
+            self._widget.compare_panel = name
+        self._send_detail()  # a panel of another page: its data
+
+    def pin(self, *panels: str) -> Self:
+        """Keep panels first on every page of a paged wrap, whatever the sort and the
+        filters (as the pin on a panel's strip, or ``p``, does): to compare the others with.
+        As many as leave a place on a page for another.
+
+        ```python
+        t.pin("Seattle", "Phoenix")
+        t.unpin("Phoenix")
+        ```
+        """
+        spec = self._pages_spec()
+        if spec is None or spec.get("grid"):
+            why = "shows every page's cells in place" if spec else "does not page"
+            raise ValueError(
+                f"pin(): only a paged wrap's panels move to the front; this plot {why}"
+            )
+        names = [self._panel_named([p], "pin") for p in panels]
+        have = list(self.paging.get("pinned") or [])
+        return self._set_paging(pinned=have + [n for n in names if n not in have])
+
+    def unpin(self, *panels: str) -> Self:
+        """Let pinned panels go back to their places (none given: all of them)."""
+        have = list(self.paging.get("pinned") or [])
+        gone = set(panels) if panels else set(have)
+        return self._set_paging(pinned=[n for n in have if n not in gone])
+
+    @property
+    def pinned(self) -> list[str]:
+        """The pinned panels' names (``pin``, here or in the browser)."""
+        names = self.panels()
+        return [n for n in self.paging.get("pinned") or [] if n in names]
 
     def close(self) -> Self:
         """Back to all panels from an opened one."""
@@ -1747,7 +1817,15 @@ class Trellis:
         spec = self._pages_spec()
         if spec is None:
             return [list(range(len(self.panels())))]
-        return page_list(self._shown_order(), spec["rows"] * spec["cols"], spec.get("groups"))
+        return page_list(self._shown_order(), spec["rows"] * spec["cols"], spec.get("groups"),
+                         self._pin_indices(spec))  # fmt: skip
+
+    def _pin_indices(self, pages: dict[str, Any]) -> list[int]:
+        """The pinned panels' indices (a grid's pages: none, each panel keeps its cell)."""
+        if pages.get("grid"):
+            return []
+        names = self.panels()
+        return [names.index(n) for n in self.paging.get("pinned") or [] if n in names]
 
     def _sortable(self) -> None:
         if self._page and (self._row or self._col):
@@ -2331,6 +2409,20 @@ class Trellis:
         self._highlight = masks
         self._send_highlight()
 
+    def _send_shown(self) -> None:
+        """A view started, from the spec: the layers shown otherwise now (another page, a
+        panel opened, pinned or compared from another, more detail), as a ``detail``
+        message. A page turned before the plot was first shown reaches it so."""
+        if self._widget is None or self._scene_cache is None:
+            return
+        spec, _ = self._scene()
+        layers = [{"index": i, "of": base["coords"]["id"], "layer": shown}
+                  for i, (base, shown) in enumerate(zip(spec["layers"], self._shown_layers,
+                                                        strict=True))
+                  if shown is not base and base.get("coords")]  # fmt: skip
+        if layers:
+            self._widget.send({"type": "detail", "layers": layers})
+
     def _send_highlight(self) -> None:
         """Tell the browser which marks the link highlights (it asks when it starts)."""
         if self._widget is None:
@@ -2361,6 +2453,7 @@ class Trellis:
 
             spec, _ = self._scene()
             state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus,
+                     "compare_panel": self._compare,
                      "selection": self._selection, "paging": dict(self._paging),
                      "_live": self._link_group is not None}  # fmt: skip
             self._widget = TrellisWidget(self, state)
@@ -2384,6 +2477,7 @@ class Trellis:
             "buffers": {k: base64.b64encode(v).decode("ascii") for k, v in buffers.data.items()},
             "renderer": self.renderer,
             "focus": self.focused,
+            "compare": self.compared,
             "selection": self._current_selection(),
             "paging": self.paging,
         }
@@ -3118,6 +3212,7 @@ class Trellis:
             "aspect": self._aspect(drawn, grid, xd, yd, x_levels, y_levels),
             "legend_position": self._legend["position"],
             "fit_y": self.fit_y,
+            "panel_buttons": self.panel_buttons,
             "pages": pages,
             "theme": self.theme.spec(),
         }
@@ -3211,11 +3306,15 @@ class Trellis:
         """``_wanted``, of a paged wrap's page size and its panels' names."""
         paging = self.paging
         shown = panel_order(self._stats, names, paging)
-        listed = page_list(shown, pages["rows"] * pages["cols"], pages.get("groups"))
+        pins = [] if pages.get("grid") else \
+            [names.index(n) for n in paging.get("pinned") or [] if n in names]  # fmt: skip
+        listed = page_list(shown, pages["rows"] * pages["cols"], pages.get("groups"), pins)
         page = min(max(int(paging.get("page", 0)), 0), len(listed) - 1)
         want = {i for k in range(max(0, page - 1), page + 2) if k < len(listed) for i in listed[k]}
         if self.focused in names:
             want.add(names.index(self.focused))
+        if self.compared in names:  # its marks, faint in every panel
+            want.add(names.index(self.compared))
         brush = self._current_selection()
         if self._link and brush is not None and brush.get("panel") is not None:
             want.add(int(brush["panel"]))  # its keys select the marks of the pages turned to
@@ -3489,6 +3588,7 @@ class Trellis:
         shadow = self._shadow
         shadow._paging = self.paging
         shadow._focus = self.focused
+        shadow._compare = self.compared
         shadow._selection = self._current_selection()
         shadow._view = self._view
         shadow._scene_cache = None

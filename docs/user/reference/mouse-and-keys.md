@@ -19,6 +19,7 @@ shortcuts don't also act on them.
 | Hover | lines coloured by category | every series at the nearest x, top to bottom |
 | Click | a panel, with a tooltip shown | pin the tooltip: it stays, to compare with the next one and to copy from |
 | Double-click | a panel | see it alone |
+| Hover | a panel | its buttons at its top right: open it, pin it first on every page (a paged wrap), compare every panel with it (`Trellis(..., panel_buttons=False)` leaves them out) |
 | Hover | a legend entry | its marks stand out in every panel, the others fade |
 | Click | a legend entry | select that colour's marks |
 | Shift, Cmd or Ctrl+click | a legend entry | add or remove a colour |
@@ -60,8 +61,11 @@ its text. A click away from the marks, ++esc++ or its
 | ++z++ | drag draws a zoom box, and back (Shift+drag always does) |
 | ++y++ | fit y to the data in view, and keep fitting it as x changes; again to stop |
 | ++s++ | drag draws a selection brush, and back |
-| ++esc++ | unpin the tooltip; with none, show every legend entry again; then clear the selection; then back to all panels |
-| ++enter++ | open the panel under the pointer |
+| ++esc++ | unpin the tooltip; with none, show every legend entry again; then let the arrow keys' ring go; then stop comparing; then clear the selection; then back to all panels |
+| ++left++ ++right++ ++up++ ++down++ | move a ring from panel to panel (its name is said) |
+| ++enter++ | open the panel the ring is on, or the one under the pointer |
+| ++p++ | pin that panel first on every page of a paged wrap, and unpin it |
+| ++c++ | compare every panel with that one: its marks in grey in the others; again to stop |
 | ++page-up++ / ++page-down++ | the previous / next panel, at the same zoom; with none opened, the previous / next page of a paged wrap |
 | ++backspace++ | back to all panels |
 | ++e++ | the Export menu: copy, download or save an image |
@@ -88,6 +92,8 @@ toolbar, each with its way back:
 | 267 of 693 marks selected | Clear: no selection |
 | Selected in a linked plot | Clear: that plot's selection |
 | 2 filters: 12 of 40 panels | Clear: the paged wrap's filters and name search |
+| Compared with Japan, in grey | Clear: compare with none |
+| 2 pinned | Unpin: the pinned panels back in their places |
 
 A plot scrolled by accident, or a selection made a while ago, then explains itself. y
 fitted to the data in view (++y++) is not counted as a zoom: its button shows it.

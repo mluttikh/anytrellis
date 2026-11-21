@@ -26,7 +26,7 @@ import numpy as np
 from anytrellis.channels import dash_pattern, dash_pieces, shape_paths
 from anytrellis.codec import DTYPES, Buffers
 from anytrellis.formats import axis_format, number_format
-from anytrellis.pages import page_list
+from anytrellis.pages import page_list, pins_of
 from anytrellis.theme import CONTEXTS, NARROW, PRESETS
 from anytrellis.transforms import TRANSFORMS, forward, inverse
 
@@ -488,6 +488,8 @@ class PanelBox:
     label: str
     note: str = ""
     """A paged wrap's value of the statistic sorted by, at the strip's right end."""
+    pinned: bool = False
+    """Pinned first on every page: a pin at its strip's left."""
     y_axis_x: float | None = None
     """Where its y axis's labels may start (left), or None: it draws none."""
 
@@ -502,6 +504,8 @@ class Strip:
     """Over the columns (``"top"``) or right of the rows (``"right"``)."""
     span: bool = False
     """It spans several panels (a nested strip's outer level)."""
+    pin: bool = False
+    """A pinned panel's: a pin before its label."""
 
 
 @dataclass
@@ -1267,14 +1271,17 @@ def _draw_back(svg: _Svg, spec: dict[str, Any], views: list[_View], th: dict[str
 
 
 def _draw_marks(svg: _Svg, layer: _Marks, coords: np.ndarray, colors: np.ndarray,
-                views: list[_View], base_x: np.ndarray, base_y: np.ndarray) -> None:  # fmt: skip
+                views: list[_View], base_x: np.ndarray, base_y: np.ndarray,
+                source: int | None = None) -> None:  # fmt: skip
     """One pass over a layer's marks in every view: runs of one colour as one path, as the
-    Canvas 2D renderer draws them."""
+    Canvas 2D renderer draws them. ``source``: panel ``source``'s marks in every other."""
     opacity = float(layer.spec["opacity"])
     kind = layer.kind
     width = max(0.5, layer.half_width * 2)
     for v in views:
-        p = v.panel
+        if source is not None and v.panel == source:
+            continue
+        p = v.panel if source is None else source
         start, end = int(layer.starts[p]), int(layer.starts[p + 1])
         if end <= start:
             continue
@@ -1677,7 +1684,7 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
     strip = _filled_strip if look["strip_fill"] else _flat_strip
     for box in lay.panels:
         if box.strip is not None:
-            strip(svg, th, look, Strip(box.strip, box.label, False), box.note)
+            strip(svg, th, look, Strip(box.strip, box.label, False, pin=box.pinned), box.note)
     for s in lay.strips:
         strip(svg, th, look, s)
 
@@ -1702,6 +1709,20 @@ def _draw_front(svg: _Svg, spec: dict[str, Any], lay: Layout, views: list[_View]
                 'stroke-opacity="0.8"/>')  # fmt: skip
 
 
+PIN_W = 11
+"""The room a pin takes before a pinned panel's label (px)."""
+GHOST = (184, 190, 198)
+"""The compared panel's marks in the others: the context grey, at a share of their opacity."""
+GHOST_ALPHA = 0.7
+
+
+def _draw_pin(svg: _Svg, x: float, y: float, color: str) -> None:
+    """A pin (a pinned panel's, in its strip): its left at x, centred on y (drawing.ts)."""
+    svg.add(f'<circle cx="{_n(x + 4)}" cy="{_n(y - 1.5)}" r="3" fill="{color}"/>')
+    svg.add(f'<path d="M{_n(x + 4)} {_n(y + 1.5)}V{_n(y + 5.5)}" stroke="{color}" '
+            'stroke-width="1.5" stroke-linecap="round"/>')  # fmt: skip
+
+
 def _filled_strip(svg: _Svg, th: dict[str, str], look: dict[str, Any], s: Strip,
                   note: str = "") -> None:  # fmt: skip
     """A filled strip: its label centred or at the left (a row's on its side), a paged wrap's
@@ -1709,6 +1730,9 @@ def _filled_strip(svg: _Svg, th: dict[str, str], look: dict[str, Any], s: Strip,
     rect, label = s.rect, s.label
     bold = look["strip_bold"]
     svg.rect(rect, th["strip"])
+    if s.pin:  # a pin, then the label in the room left
+        _draw_pin(svg, rect.x + STRIP_PAD, rect.y + rect.h / 2, th["accent"])
+        rect = Rect(rect.x + PIN_W, rect.y, rect.w - PIN_W, rect.h)
     svg.open(svg.clip(rect))
     cx, cy = rect.x + rect.w / 2, rect.y + rect.h / 2
     if s.vertical:
@@ -1742,6 +1766,9 @@ def _flat_strip(svg: _Svg, th: dict[str, str], look: dict[str, Any], s: Strip,
     rect, label = s.rect, s.label
     bold = look["strip_bold"]
     right = s.side == "right"
+    if s.pin:
+        _draw_pin(svg, rect.x + 1, rect.y + rect.h / 2, th["accent"])
+        rect = Rect(rect.x + PIN_W, rect.y, rect.w - PIN_W, rect.h)
     if s.span:
         d = (f"M{_n(rect.x + 0.5)} {_n(rect.y)}V{_n(rect.y + rect.h)}" if right
              else f"M{_n(rect.x)} {_n(rect.y + rect.h - 0.5)}H{_n(rect.x + rect.w)}")  # fmt: skip
@@ -2083,8 +2110,12 @@ def _page(plot: Trellis, spec: dict[str, Any]) -> list[int] | None:
     return plot._page_list()[plot.page - 1]
 
 
-def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging) -> None:
-    """Each strip's value of the statistic sorted by, at its right (``noteSorted``)."""
+def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging,
+                 pins: Sequence[int] = ()) -> None:  # fmt: skip
+    """Each strip's value of the statistic sorted by, at its right, and a pinned panel's
+    pin (``noteSorted``)."""
+    for box in lay.panels:
+        box.pinned = box.index in pins
     stats = (spec.get("pages") or {}).get("stats", [])
     stat = next((s for s in stats if s["name"] == paging.get("sort")), None)
     if stat is None:
@@ -2176,7 +2207,9 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
             placed, legend_h = _legend_below(groups, width)
         lay = plot_layout(width, legend_h)
     if focused is None:
-        _note_sorted(spec, lay, plot.paging)
+        pages = spec.get("pages") or {}
+        pins = pins_of(plot._pin_indices(pages), pages["rows"] * pages["cols"]) if pages else []
+        _note_sorted(spec, lay, plot.paging, pins)
     inset_legend = bool(placed) and legend_h == 0
 
     total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box
@@ -2199,6 +2232,15 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         svg.text(width / 2, lay.height * 0.4, "No panel matches the filters", th["muted"],
                  size=size, anchor="middle", baseline="top")  # fmt: skip
 
+    ref = names.index(plot.compared) if plot.compared in names else None
+    if ref is not None:  # the compared panel's marks, grey, in every other (view.ts)
+        for layer in marks:
+            if layer.spec.get("context"):
+                continue
+            grey = np.empty_like(layer.colors)
+            grey[:, :3] = GHOST
+            grey[:, 3] = np.round(layer.colors[:, 3] * GHOST_ALPHA).astype(np.uint8)
+            _draw_marks(svg, layer, layer.coords, grey, views, base_x, base_y, source=ref)
     masks: list[np.ndarray | None] = []
     fractions: list[np.ndarray | None] = [None] * len(marks)
     if brush:

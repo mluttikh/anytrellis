@@ -13,6 +13,8 @@ interface Payload {
   renderer: RendererPreference;
   /** The panel opened in Python (Trellis.open), or null. */
   focus?: string | null;
+  /** The panel drawn faintly in every other (Trellis.compare), or null. */
+  compare?: string | null;
   selection?: Brush | null;
   /** The page, sort and filters of a paged wrap. */
   paging?: Paging | null;
@@ -37,6 +39,7 @@ async function start(host: HTMLElement): Promise<void> {
     const view = new TrellisView(host, { source: embeddedSource(payload.buffers), renderer });
     (window.anytrellisViews ??= []).push(view);
     if (payload.focus) view.setFocusName(payload.focus);
+    if (payload.compare) view.setCompareName(payload.compare);
     if (payload.selection) view.setSelection(payload.selection);
     if (payload.paging) view.setPaging(payload.paging);
     await view.setSpec(payload.spec);

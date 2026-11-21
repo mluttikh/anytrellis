@@ -41,9 +41,14 @@ function within(v: number | null, lo: number | null, hi: number | null): boolean
 
 /** The pages: the panels shown (in order), rows × cols a page; with page columns, each
  * level's panels on pages of their own, the levels in order (one the filters leave empty:
- * none). At least one page, maybe empty. In step with `page_list` in pages.py. */
-export function pageList(shown: number[], pages: PagesSpec): number[][] {
-  const per = Math.max(1, pages.rows * pages.cols);
+ * none). Pinned panels first on every page, whatever the filters and the sort (as many as
+ * leave a place for another). At least one page, maybe empty. In step with `page_list` in
+ * pages.py. */
+export function pageList(shown: number[], pages: PagesSpec, pinned: number[] = []): number[][] {
+  const all = Math.max(1, pages.rows * pages.cols);
+  const pins = pages.grid ? [] : pinsOf(pinned, all);
+  const per = all - pins.length;
+  if (pins.length) shown = shown.filter((i) => !pins.includes(i));
   const groups = pages.groups ?? null;
   let members: number[][] = [shown];
   if (groups) {
@@ -57,8 +62,13 @@ export function pageList(shown: number[], pages: PagesSpec): number[][] {
     members = [...by.keys()].sort((a, b) => a - b).map((g) => by.get(g)!);
   }
   const out: number[][] = [];
-  for (const m of members) for (let k = 0; k < m.length; k += per) out.push(m.slice(k, k + per));
-  return out.length ? out : [[]];
+  for (const m of members) for (let k = 0; k < m.length; k += per) out.push([...pins, ...m.slice(k, k + per)]);
+  return out.length ? out : [pins];
+}
+
+/** The pinned panels kept: the first, as many as leave a place on a page of `per`. */
+export function pinsOf(pinned: number[], per: number): number[] {
+  return [...new Set(pinned)].slice(0, Math.max(0, per - 1));
 }
 
 /** Each page's name: its page level ("2 of 3" after it, when the level has more pages); ""
@@ -67,7 +77,11 @@ export function pageLabels(list: number[][], pages: PagesSpec): string[] {
   const groups = pages.groups;
   const levels = pages.levels ?? [];
   if (!groups) return list.map(() => "");
-  const first = list.map((p) => (p.length ? (levels[groups[p[0]]] ?? "") : ""));
+  // a page's level: its last panel's (the pinned lead every page)
+  const first = list.map((p) => {
+    const own = p[p.length - 1];
+    return own !== undefined ? (levels[groups[own]] ?? "") : "";
+  });
   return first.map((name, k) => {
     const same = first.flatMap((other, j) => (other === name ? [j] : []));
     return same.length === 1 ? name : `${name} (${same.indexOf(k) + 1} of ${same.length})`;

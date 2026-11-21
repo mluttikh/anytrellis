@@ -8,6 +8,8 @@ buffers, drawn in the browser. This module is the protocol between them.
   messages, each with one binary chunk of at most ``CHUNK_BYTES``; an id Python does not
   have is answered ``{"type": "missing", "id"}``.
 * ``open_panel`` (synced both ways): the name of the panel shown alone, or None.
+* ``compare_panel`` (synced both ways): the panel whose marks every other panel shows
+  faintly, or None.
 * ``selection`` (synced both ways): the brush, ``{"x": [lo, hi] | None, "y": ...}`` in axis
   units relative to the spec's origins, or None (the browser sends it on release).
 * ``_live`` (synced): send the brush while it is dragged, about 20 times a second (a
@@ -72,6 +74,8 @@ class TrellisWidget(anywidget.AnyWidget):
     renderer = traitlets.Unicode("auto").tag(sync=True)
     #: The opened panel's name (``Trellis.open``, or a double-click in the browser), or None.
     open_panel = traitlets.Unicode(None, allow_none=True).tag(sync=True)
+    #: The panel drawn faintly in every other (``Trellis.compare``, or the reader), or None.
+    compare_panel = traitlets.Unicode(None, allow_none=True).tag(sync=True)
     #: The selection's brush (``Trellis.select``, or one drawn in the browser), or None.
     selection = traitlets.Dict(None, allow_none=True).tag(sync=True)
     #: The page, sort and filters of a paged wrap (``Trellis.show_page``, ``sort_panels``,
@@ -85,6 +89,7 @@ class TrellisWidget(anywidget.AnyWidget):
         super().__init__(**state)
         self.on_msg(self._on_msg)
         self.observe(self._on_focus, names="open_panel")
+        self.observe(self._on_compare, names="compare_panel")
         self.observe(self._on_selection, names="selection")
         self.observe(self._on_paging, names="paging")
 
@@ -95,6 +100,10 @@ class TrellisWidget(anywidget.AnyWidget):
     def _on_paging(self, change: dict[str, Any]) -> None:
         self._plot._paging = Paging(**change["new"])  # turned in the browser: save_html keeps it
         self._plot._send_detail()  # the data of the panels around the page shown
+
+    def _on_compare(self, change: dict[str, Any]) -> None:
+        self._plot._compare = change["new"]  # chosen in the browser: save_html keeps it
+        self._plot._send_detail()  # a panel of another page: its data
 
     def _on_focus(self, change: dict[str, Any]) -> None:
         self._plot._focus = change["new"]  # opened in the browser: save_html keeps it
@@ -124,7 +133,8 @@ class TrellisWidget(anywidget.AnyWidget):
         elif kind == "view":  # what the browser shows: save_png and save_svg draw it
             self._plot._view = {k: content.get(k) for k in ("width", "x", "y", "panels")}
             self._plot._send_detail()  # and its layers in more detail, zoomed in
-        elif kind == "ready":  # a view started: what a link highlights in it
+        elif kind == "ready":  # a view started: the layers as shown, what a link highlights
+            self._plot._send_shown()
             self._plot._send_highlight()
         elif kind == "clear":  # a click in a linked plot with no brush of its own
             self._plot._clear_link()
