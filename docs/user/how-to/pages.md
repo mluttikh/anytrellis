@@ -45,6 +45,25 @@ the panel's value at its right end. Panels without a value go last.
 statistic, a low end, a high end or both, and counts the filters set. The bar says how many
 panels are kept, out of how many.
 
+## Pin panels
+
+A pinned panel stays first on every page, whatever the sort and the filters: a reference
+to compare each page with, or the few panels you came for. Point at a panel and click the
+pin at the right of its strip (or press ++p++ with the pointer, or the arrow keys' ring,
+on it); its strip then starts with a pin, and the header counts the pinned, with *Unpin*
+to let them all go. As many can be pinned as leave a place on a page for another.
+
+```python
+plot.pin("station 12", "station 40")
+plot.pinned           # ["station 12", "station 40"]
+plot.unpin("station 40")
+plot.unpin()          # all
+```
+
+Pins go with the page, the sort and the filters to Python (`plot.paging["pinned"]`), to
+the images it saves and to a page from `save_html`. A grid's pages show every cell in its
+place, so they don't pin.
+
 ## Your own statistics
 
 Anything you can compute per panel can sort and filter it: give a table with the facet
@@ -78,7 +97,7 @@ plot.show_page(2)                                  # from 1
 plot.shown_panels()   # the names on the page shown
 plot.page, plot.pages # the page shown, and how many there are
 plot.stats()          # {"panel": [...], "rows": [...], "mean temp": [...], ...}
-plot.paging           # the page, sort and filters, as the browser shows them
+plot.paging           # the page, sort, filters and pins, as the browser shows them
 ```
 
 A statistic's name with a space goes in a dict, as above; one without can be a keyword:

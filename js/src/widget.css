@@ -776,3 +776,30 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 .atr-empty[hidden] {
   display: none;
 }
+
+/* a panel's buttons, on the panel under the pointer: open, pin, compare */
+.atr-panel-tools {
+  position: absolute;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 4px;
+  background: var(--atr-bg);
+  box-shadow: 0 0 0 1px var(--atr-grid);
+  z-index: 2;
+}
+.atr-panel-tools[hidden] {
+  display: none;
+}
+.atr-panel-tools .atr-button {
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+}
+.atr-panel-tools .atr-button[hidden] {
+  display: none;
+}
+.atr-panel-tools .atr-button.atr-on {
+  color: var(--atr-accent);
+  background: color-mix(in srgb, var(--atr-accent) 14%, transparent);
+}

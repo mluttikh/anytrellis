@@ -48,6 +48,18 @@ All notable changes to anytrellis. The format follows
   (`stat="proportion"`, `"percent"` or `"count"`; `complementary=True` for survival).
 - Both come from the database with `load="pages"`: the bars as a grouped query, the ECDF
   counted in 1,024 bins.
+- **Compare every panel with one**: *Compare with this* on a panel (its button, or `c`)
+  draws that panel's marks in grey in every other, a reference chosen as you go;
+  `t.compare("Japan")` from Python, `t.compare()` to stop. A chip says which panel, and
+  saved images draw it too.
+- **Pinned panels**: in a paged wrap, a pinned panel (its pin button, or `p`) stays first
+  on every page, whatever the sort and the filters, with a pin in its strip;
+  `t.pin(...)`, `t.unpin(...)` and `t.pinned` from Python. Pins travel with the paging to
+  Python, saved images and `save_html` pages, and with `load="pages"` their data comes
+  with every page.
+- **Moving between panels with the keys**: the arrow keys move a ring from panel to panel
+  (its name is said to screen readers), Enter opens it, `p` pins it, `c` compares with it,
+  Esc lets it go. Pointing at a panel shows its buttons: open, pin, compare.
 - **Names at the ends of lines**: `line(color="country", label="end")` writes each
   series' name at the end of its line, in its colour, in place of the legend: once in the
   plot, in the panel where the line ends rightmost, moved apart where lines end close

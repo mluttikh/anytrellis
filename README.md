@@ -229,15 +229,20 @@ the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next
 same zoom, and Backspace, Esc, a double-click or *All panels* goes back. The zoom stays
 linked: back in the grid, the panels that share its scales show what the opened one
 showed. From Python: `t.open("station 3")` (a grid's panel: `t.open("north", "s1")`),
-`t.close()`, `t.focused`, and `t.panels()` lists the names.
+`t.close()`, `t.focused`, and `t.panels()` lists the names. The arrow keys move a ring
+between panels (Enter opens). A panel's buttons, shown when you point at it, open it, pin
+it and compare: *Compare with this* (or `c`) draws its marks in grey in every other panel,
+a reference chosen as you go (`t.compare("Japan")`, `t.compare()`).
 
 **Many panels.** A wrap of more than 100 panels shows them a page at a time (6 by 4;
 `rows=` and `cols=` set it, `rows="all"` turns it off), with a bar to turn the pages
 (‹ ›, Page Up and Page Down), sort the panels by a statistic of each (rows, mean, median,
 min, max, sd and trend of the values drawn, plus any given with `t.panel_stats(table)`),
-filter them by name and by a statistic's range. The strips show the value sorted by. From
-Python: `t.sort_panels("trend temp", descending=True)`, `t.filter_panels("north")`,
-`t.show_page(2)`, `t.shown_panels()`; images and saved pages show the page shown.
+filter them by name and by a statistic's range. The strips show the value sorted by. A
+pinned panel (its pin button, or `p`) stays first on every page, whatever the sort and
+filters. From Python: `t.sort_panels("trend temp", descending=True)`,
+`t.filter_panels("north")`, `t.show_page(2)`, `t.pin("station 7")`, `t.shown_panels()`;
+images and saved pages show the page shown.
 
 **Images.** The toolbar's Export button (or `e`) copies the plot as shown, its zoom,
 selection and theme, to the clipboard as a PNG (or as an SVG with a PNG beside it, where
@@ -262,7 +267,9 @@ forbids it (some notebook frames, iPhone Safari) the button is not shown.
 | `s` | drag draws a selection brush, and back |
 | Esc | clear the selection (else: back to all panels) |
 | click a legend entry | select its colour (Shift+click: add or remove one) |
-| Enter | open the panel under the pointer |
+| arrow keys | move a ring from panel to panel |
+| Enter | open the panel the ring is on (or under the pointer) |
+| `p`, `c` | pin that panel first on every page; compare every panel with it |
 | Page Up / Page Down | previous / next panel (with none opened: page) |
 | Backspace | back to all panels |
 | `?` | the keys and mouse, the renderer and the version |

@@ -1,7 +1,7 @@
 """Write the save_html pages the browser checks run on: ``uv run python js/test/pages.py
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
-channels.mjs, labels.mjs)."""
+channels.mjs, labels.mjs, panels.mjs)."""
 
 from __future__ import annotations
 
@@ -115,6 +115,9 @@ def main(out: Path) -> None:
     notes.annotate("Long lives", x=1.5, y=82, panel="Europe & Central Asia", dx=40, dy=20)
     notes.annotate("Replacement", x=2.1, dx=4)
     notes.save_html(out / "notes.html")
+    # pins, the arrow keys, comparing (panels.mjs)
+    countries = Trellis(gapminder, wrap="country", rows=2, cols=4, panel_height=110)
+    countries.line(x="year", y="life_expect", color="region").save_html(out / "pins.html")
 
 
 def site_readings() -> pl.DataFrame:

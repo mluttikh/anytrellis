@@ -286,6 +286,8 @@ export interface Paging {
   descending?: boolean;
   name?: string;
   where?: Record<string, [number | null, number | null] | string | null>;
+  /** Panels first on every page, whatever the sort and filters (their names). */
+  pinned?: string[];
 }
 
 /** Where buffers come from: Python (BufferStore), or a page that embeds them. */

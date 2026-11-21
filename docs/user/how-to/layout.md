@@ -293,8 +293,10 @@ default the colour column's label; with several colour columns, give a dict by c
 
 ## One panel at a time
 
-Double-click a panel to see it alone (or press Enter over it); Page Up and Page Down step
-through the others at the same zoom, and Backspace goes back. From Python:
+Double-click a panel to see it alone, or use the button that shows at its top right when
+you point at it; Page Up and Page Down step through the others at the same zoom, and
+Backspace goes back. The arrow keys move a ring from panel to panel, and Enter opens the
+one it is on (or the one under the pointer). From Python:
 
 ```python exec="on" source="above" result="python" session="layout"
 plot = Trellis(penguins, wrap="island").points(x="flipper_length_mm", y="body_mass_g")
@@ -306,3 +308,23 @@ plot.open("Biscoe")   # a grid's panel: plot.open("female", "Gentoo")
 plot.focused          # "Biscoe", also when opened in the browser
 plot.close()
 ```
+
+## Compare every panel with one
+
+*Compare with this*, the last of a panel's buttons (or ++c++ with the pointer or the ring
+on it), draws that panel's marks in grey in every other: each panel against a reference
+you choose as you go, without writing a layer for it. A chip in the header says which, and
+Clear, ++esc++ or the button again stops it.
+
+```python exec="on" source="above" session="layout" html="true"
+gapminder = load("gapminder")
+plot = Trellis(gapminder, wrap="region", cols=3, panel_height=130)
+plot.line(x="year", y="life_expect", group="country", width=1)
+plot.compare("Europe & Central Asia")
+plot
+print(plot._embed_html())  # markdown-exec: hide
+```
+
+`plot.compare()` stops comparing, and `plot.compared` is the panel compared with. Images
+saved from Python draw it too. To draw all the other panels' rows behind each panel instead
+(each against the rest), give the layer `facet="exclude"`.

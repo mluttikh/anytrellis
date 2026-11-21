@@ -130,6 +130,10 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
       model.set("open_panel", name);
       model.save_changes();
     },
+    onCompare: (name) => {
+      model.set("compare_panel", name);
+      model.save_changes();
+    },
     onSelect: (brush) => {
       lastLive = performance.now();
       model.set("selection", brush);
@@ -175,15 +179,19 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   };
   // Trellis.open / close in Python (or another view of the same widget)
   const onFocus = (): void => view.setFocusName((model.get("open_panel") as string | null) ?? null);
+  // Trellis.compare in Python (or another view)
+  const onCompare = (): void => view.setCompareName((model.get("compare_panel") as string | null) ?? null);
   // Trellis.select in Python (or another view)
   const onSelection = (): void => view.setSelection((model.get("selection") as Brush | null) ?? null);
   // Trellis.show_page, sort_panels, filter_panels in Python (or another view)
   const onPaging = (): void => view.setPaging((model.get("paging") as Paging | null) ?? null);
   model.on("change:_spec", load);
   model.on("change:open_panel", onFocus);
+  model.on("change:compare_panel", onCompare);
   model.on("change:selection", onSelection);
   model.on("change:paging", onPaging);
   onFocus();
+  onCompare();
   onSelection();
   onPaging();
   load();
@@ -191,6 +199,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   return () => {
     model.off("change:_spec", load);
     model.off("change:open_panel", onFocus);
+    model.off("change:compare_panel", onCompare);
     model.off("change:selection", onSelection);
     model.off("change:paging", onPaging);
     s.views.delete(view);

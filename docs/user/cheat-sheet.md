@@ -194,6 +194,9 @@ t.panels()  # the panels' names
 t.open("2005")  # one panel alone; t.close() goes back
 t.focused  # the opened panel's name
 t.close()
+t.compare("1955")  # 1955's marks, grey, in every other panel; compare() stops
+t.compared  # the panel compared with
+t.compare()
 ```
 
 ```python
@@ -223,6 +226,8 @@ t.sort_panels("trend temp", descending=True)
 t.filter_panels("station 1", **{"mean temp": (10, None)})  # filter_panels() clears
 t.panel_stats({"station": ["station 1", "station 2"], "region": ["north", "south"]})
 t.shown_panels()  # the panels on the page shown
+t.pin("station 7")  # first on every page, whatever the sort and filters
+t.pinned  # the pinned panels; t.unpin("station 7"), or t.unpin() for all
 t.paging  # the page, sort and filters shown
 ```
 

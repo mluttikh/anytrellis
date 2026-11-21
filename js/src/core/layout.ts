@@ -38,6 +38,8 @@ export interface PanelBox {
   label: string;
   /** A paged wrap's value of the statistic sorted by, at the strip's right end. */
   note?: string;
+  /** Pinned first on every page: a pin at its strip's left. */
+  pinned?: boolean;
   /** Where its x and y axes are drawn (tick labels included), or null: the pointer zooms
    * and pans one axis there. */
   xAxis: Rect | null;
@@ -53,6 +55,8 @@ export interface Strip {
   side: "top" | "right";
   /** It spans several panels (a nested strip's outer level). */
   span: boolean;
+  /** A pinned panel's: a pin before its label. */
+  pin?: boolean;
 }
 
 export interface Layout {
