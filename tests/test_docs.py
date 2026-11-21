@@ -90,7 +90,9 @@ def test_every_gallery_plot_can_be_made() -> None:
     entries = gallery.entries()
     assert len({e.slug for e in entries}) == len(entries)
     for e in entries:
-        e.plot()._scene()
+        plot = e.plot()
+        for p in getattr(plot, "plots", [plot]):  # a figure (Concat): each of its plots
+            p._scene()
     gallery._glance()._scene()
     targets = {label["target"].split(":")[0] for label in gallery.GLANCE_LABELS}
     assert targets <= {"title", "toolbar", "strip", "panel", "yaxis", "xaxis", "legend", "badge"}

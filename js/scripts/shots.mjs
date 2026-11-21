@@ -1,7 +1,8 @@
 // Pictures of save_html pages for the documentation (scripts/docs_gallery.py writes the
 // pages and the manifest):
 //   node scripts/shots.mjs <manifest.json>
-// The manifest lists {page, out, width, height, scale?, labels?}. A label puts a numbered badge on a
+// The manifest lists {page, out, width, height, scale?, labels?}; a page of a figure
+// (concat) is pictured whole. A label puts a numbered badge on a
 // part of the plot: "title", "toolbar", "legend", or "strip:i",
 // "panel:i", "yaxis:i", "xaxis:i" for the i-th panel's.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -30,7 +31,11 @@ for (const shot of shots) {
   page.on("pageerror", (e) => errors.push(String(e)));
   // Canvas 2D: the same picture on every machine, GPU or not
   await page.goto(`file://${shot.page}?renderer=canvas2d`);
-  await page.waitForSelector(".anytrellis-embed[data-state='ready']", { timeout: 30000 });
+  // every plot of the page drawn (a figure of several: compose.py)
+  await page.waitForFunction(() => {
+    const hosts = [...document.querySelectorAll(".anytrellis-embed")];
+    return hosts.length > 0 && hosts.every((h) => h.dataset.state === "ready");
+  }, null, { timeout: 30000 });
   await page.waitForTimeout(300);
   if (shot.labels?.length) {
     await page.evaluate((labels) => {
@@ -77,7 +82,9 @@ for (const shot of shots) {
       }
     }, shot.labels);
   }
-  await page.locator(".atr-root").screenshot({ path: shot.out });
+  // a figure: all of it; a plot: its root
+  const figure = page.locator(".anytrellis-concat");
+  await ((await figure.count()) ? figure.first() : page.locator(".atr-root")).screenshot({ path: shot.out });
   if (errors.length) {
     failed++;
     console.error(`${shot.page}: ${errors.join("; ")}`);

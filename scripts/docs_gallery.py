@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from anytrellis import Trellis
+    from anytrellis import Concat, Trellis
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "user" / "assets" / "gallery"
@@ -38,13 +38,13 @@ class Entry:
     slug: str
     title: str
     guide: str  # relative to docs/user/, with an anchor
-    plot: Callable[[], Trellis]
+    plot: Callable[[], Trellis | Concat]
 
 
 def _gallery() -> list[Entry]:
     import polars as pl
 
-    from anytrellis import Trellis, pairs
+    from anytrellis import Trellis, concat, pairs
     from anytrellis.datasets import load
     from anytrellis.synthetic import scatter, sensors
 
@@ -286,6 +286,10 @@ def _gallery() -> list[Entry]:
               .order("site", by="median", of="yield", descending=True)
               .order("variety", by="median", of="yield")
               .points(x="yield", y="variety", color="year", size=6)),
+        Entry("Layout and scales", "concat", "Different plots in one figure",
+              "how-to/figures.md",
+              lambda: concat(Trellis(cars, wrap="origin", cols=2).points(x="weight", y="mpg"),
+                             Trellis(cars).hist(x="mpg", color="origin"), widths=[3, 2])),
 
         Entry("Many panels, much data", "pages", "Pages of panels, sorted", "how-to/pages.md",
               lambda: Trellis(sensors(stations=150, sensors=1, hours=24 * 7), wrap="station")
@@ -351,14 +355,17 @@ def cards(section: str) -> str:
 
 
 def main() -> None:
+    from anytrellis import Concat
+
     OUT.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         shots = []
         for e in entries():
             plot = e.plot()
-            if plot.height is None and plot.panel_height is None and plot.aspect is None:
-                plot.height = HEIGHT  # the picture's height: no card half empty
+            for p in plot.plots if isinstance(plot, Concat) else [plot]:  # a figure: each
+                if p.height is None and p.panel_height is None and p.aspect is None:
+                    p.height = HEIGHT  # the picture's height: no card half empty
             page = plot.save_html(work / f"{e.slug}.html")
             shots.append({"page": str(page), "out": str(OUT / f"{e.slug}.png"),
                           "width": 720, "height": 480})  # fmt: skip

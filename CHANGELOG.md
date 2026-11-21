@@ -8,6 +8,14 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **Different plots in one figure**: `a | b` side by side, `a / b` one under another, and
+  `concat(*plots, cols=, widths=, title=)` a grid, nested as deep as you like. A figure
+  shows in Jupyter (an ipywidgets grid of the plots) and marimo, saves as one page
+  (`save_html`, linked plots still linked) and one image (`save_svg`, `save_png`), each
+  plot in the same place.
+- A plot too narrow for its title and toolbar puts the toolbar on a line under the title,
+  its buttons on two lines when they don't fit on one.
+
 - **Panels move to their places**: a sort, a filter or a panel opened (and back) slides
   each panel from where it was to where it goes in 250 ms, the panels new to the plot
   growing in about their middles. At once when the system asks for reduced motion, and for

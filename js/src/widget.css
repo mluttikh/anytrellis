@@ -330,10 +330,13 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 }
 
 /* header: the title, the way back from an opened panel, and the toolbar */
+/* a plot too narrow for its title and toolbar side by side (one of several in a figure):
+   the toolbar on a line under the title */
 .atr-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
   min-height: 26px;
   padding: 2px 4px 0 8px;
   box-sizing: border-box;
@@ -346,6 +349,13 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
+}
+.atr-heading:not(:empty) {
+  min-width: min(8em, 100%);
+}
+/* as high as a chip: one appearing beside the title doesn't make the header taller */
+.atr-heading {
+  min-height: 22px;
 }
 .atr-title {
   font-weight: 600;
@@ -404,6 +414,10 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   gap: 2px;
   flex: none;
   margin-left: auto;
+  /* narrower than its buttons: on two lines, right-aligned */
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 /* the drag mode: one of three, always one on */
 .atr-segmented {
@@ -430,10 +444,12 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   background: var(--atr-text);
 }
 /* what differs from the start (zoomed, selected, filtered), each with its way back */
+/* the room left beside the title: a chip never wraps the header (the plot would move
+   under a brush being drawn) */
 .atr-chips {
   display: flex;
   gap: 4px;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
 }

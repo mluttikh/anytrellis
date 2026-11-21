@@ -242,8 +242,20 @@ html = both.to_html()  # one page of both, linked without a kernel
 both.unlink()
 ```
 
+```python
+from anytrellis import Concat, concat
+
+c = Trellis(cars).box(x="origin", y="mpg")
+(a | b) / c  # a figure: a and b side by side, c under them
+figure = concat(a, b, c, cols=2, widths=[2, 1], title="Cars")  # a grid; a Concat
+figure.plots  # its plots, row by row
+figure.save_html("figure.html")  # one page; to_html() as text
+figure.save_svg("figure.svg")  # one image; save_png too
+assert isinstance(figure, Concat)
+```
+
 See [Select data and use it in Python](tutorials/select.md) and
-[Link plots](how-to/link.md).
+[Link plots](how-to/link.md); figures: [one figure](how-to/figures.md).
 
 ## Many panels
 

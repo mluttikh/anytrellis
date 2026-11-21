@@ -245,6 +245,18 @@ another table, so link it `on=` a key column. In a notebook Python relays the se
 `save_html` on the returned link writes the plots to one page that stays linked without a
 kernel. `unlink()` the link to set them apart.
 
+**Different plots in one figure.** `a | b` puts plots side by side and `a / b` one under
+another; `concat(a, b, c, cols=2, widths=[2, 1], title="Cars")` makes a grid. A figure
+shows in a notebook (marimo too), saves as one page (`save_html`, linked plots still
+linked) and as one image (`save_svg`, `save_png`), each plot in the same place.
+
+```python
+from anytrellis import concat
+
+(scatter | power) / boxes
+concat(scatter, power, boxes, cols=2, widths=[2, 1], title="Cars").save_png("cars.png")
+```
+
 **One panel at a time.** Double-click a panel (or press Enter over it) to see it alone on
 the whole plot; Page Up and Page Down (or ‹ ›) step to the previous and next panel at the
 same zoom, and Backspace, Esc, a double-click or *All panels* goes back. The zoom stays
