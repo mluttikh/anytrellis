@@ -7,6 +7,7 @@ from anytrellis.compose import Concat, concat
 from anytrellis.linking import Link, link
 from anytrellis.pairs import Pairs, pairs
 from anytrellis.plot import Trellis
+from anytrellis.shortcuts import area, bars, box, density, ecdf, hexbin, hist, line, points, violin
 from anytrellis.theme import Theme, get_theme, set_theme
 
 __all__ = [
@@ -15,11 +16,21 @@ __all__ = [
     "Pairs",
     "Theme",
     "Trellis",
+    "area",
+    "bars",
+    "box",
     "concat",
+    "density",
+    "ecdf",
     "get_theme",
+    "hexbin",
+    "hist",
+    "line",
     "link",
     "pairs",
+    "points",
     "set_theme",
+    "violin",
 ]
 try:
     __version__ = _version("anytrellis")

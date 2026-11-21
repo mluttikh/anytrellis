@@ -19,6 +19,27 @@ t.points(x="weight", y="mpg", color="cylinders")
 t  # the last line of a notebook cell shows it
 ```
 
+```python
+import anytrellis as at
+
+at.points(cars, x="weight", y="mpg", wrap="origin")  # the same in one call
+at.line(cars, x="weight", y="mpg"); at.bars(cars, x="origin", y="mpg", stat="mean")
+at.area(cars, x="weight", y="mpg"); at.hist(cars, x="mpg"); at.density(cars, x="mpg")
+at.box(cars, x="origin", y="mpg"); at.violin(cars, x="origin", y="mpg")
+at.ecdf(cars, x="mpg"); at.hexbin(cars, x="weight", y="mpg")
+
+import pandas as pd
+
+pd.options.plotting.backend = "anytrellis"  # df.plot draws with anytrellis
+cars.to_pandas().plot.scatter(x="weight", y="mpg", by="origin")  # by=: wrap=
+
+import anytrellis.polars  # df.trellis on Polars tables (anytrellis.pandas: pandas)
+
+cars.trellis.hist(x="mpg", color="origin")
+```
+
+See [Make a plot in one call](how-to/one-call.md).
+
 Every method that adds or changes something returns the plot, so calls chain. The data
 can be Polars, pandas, PyArrow, DuckDB, Ibis or a dict of arrays
 ([Plot your own tables](how-to/tables.md)).

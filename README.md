@@ -38,6 +38,13 @@ t.rule(y=0)
 t  # click it, then scroll to zoom; panels that share a scale zoom together
 ```
 
+The same in one call, as in Plotly Express: `at.line(df, x="time", y="temp",
+color="sensor", wrap="station")` (`import anytrellis as at`); each argument goes to
+`Trellis()` or to the mark by its name. There is one for each common mark (`at.points`,
+`at.bars`, `at.hist`, ...). With `pd.options.plotting.backend = "anytrellis"`, pandas'
+`df.plot(...)` draws with anytrellis; `import anytrellis.polars` (or `.pandas`) gives
+tables a `df.trellis.line(...)`.
+
 A grid crosses two facet columns, and keeps empty cells so rows and columns stay aligned:
 
 ```python
