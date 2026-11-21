@@ -23,7 +23,8 @@ axis) is refused with the reason, and the plot stays as it was.
 
 A plot given `panel_height=` or `height=` has its panels' height set by it, and the panel
 shape shows it (*200 px high*). Choosing a shape lets that height go: the shape sets the
-panels' height from then on, and the code says `aspect=` instead. Setting `t.panel_height`
+panels' height from then on, and the code says `aspect=` instead. *200 px high* stays in
+the list, to go back to. Setting `t.panel_height`
 or `t.height` again takes over from the shape; the latest of the two decides.
 
 ## Read it back in Python

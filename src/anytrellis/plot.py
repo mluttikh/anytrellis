@@ -356,6 +356,9 @@ class Trellis:
         self._tables: dict[int, Table] = {}
         self._height = _pixels("height", height)
         self._panel_height = _pixels("panel_height", panel_height)
+        self._let_go: tuple[Any, Any] | None = None
+        """The height and panel height a panel shape replaced, for the settings panel to
+        offer again."""
         self._aspect_given = _aspect_of(aspect)
         self._banked: float | None = None
         """``aspect="bank"`` with ``load="pages"``: the aspect banked from the rows read
@@ -1677,7 +1680,15 @@ class Trellis:
         """A panel shape chosen: it sets the panels' height, so a height or panel height
         given before lets go (the settings panel's "Panel shape" does the same)."""
         self._aspect_given, self._banked = _aspect_of(aspect), None
+        if self._height is not None or self._panel_height is not None:
+            self._let_go = (self._height, self._panel_height)
         self._height = self._panel_height = None
+
+    def _set_height(self) -> None:
+        """The height a panel shape replaced, chosen again in the settings panel."""
+        if self._height is None and self._panel_height is None and self._let_go is not None:
+            self._height, self._panel_height = self._let_go
+            self._aspect_given, self._banked = None, None
 
     @property
     def share_x(self) -> bool | str:
@@ -1880,10 +1891,14 @@ class Trellis:
         if any(lr.mark in ("line", "smooth") for lr in self._layers):
             shapes.append(("bank", "Banked to 45°"))
         shape: Any = self._aspect_given
-        if self._panel_height is not None or self._height is not None:  # their height set
+        height, panel_height = self._height, self._panel_height
+        if height is not None or panel_height is not None:  # their height set
             shape = "fixed"
-            high = (f"{self._panel_height} px high" if self._panel_height is not None
-                    else f"Plot {self._height} px high")  # fmt: skip
+        elif self._let_go is not None:  # replaced by a shape: offered again
+            height, panel_height = self._let_go
+        if height is not None or panel_height is not None:
+            high = (f"{panel_height:g} px high" if panel_height is not None
+                    else f"Plot {height:g} px high")  # fmt: skip
             shapes.insert(0, ("fixed", high))
         layout.append(choice("aspect", "Panel shape", shape, shapes))
         scales: list[dict[str, Any]] = []
@@ -1942,7 +1957,7 @@ class Trellis:
         """Changes from the settings panel, by name; all or none (a change the plot can't
         draw raises, and the plot is as it was)."""
         saved = (self._cols, self._aspect_given, self._banked, self._height,
-                 self._panel_height, dict(self._share),
+                 self._panel_height, self._let_go, dict(self._share),
                  dict(self._scales), dict(self._reverse), dict(self._orders),
                  [(lr, lr.color, lr.shape, lr.dash_by, lr.second)
                   for lr in self._layers])  # fmt: skip
@@ -1951,7 +1966,9 @@ class Trellis:
                 if name == "cols":
                     self._cols = None if value is None else int(value)
                 elif name == "aspect":
-                    if value != "fixed":  # (the height given, chosen again: kept)
+                    if value == "fixed":  # the height given (or replaced) chosen again
+                        self._set_height()
+                    else:
                         self._set_aspect(value)
                 elif name in ("share_x", "share_y"):
                     self._share[name[-1]] = share_mode(value)
@@ -1966,7 +1983,7 @@ class Trellis:
             self._changed()
         except Exception:
             (self._cols, self._aspect_given, self._banked, self._height, self._panel_height,
-             share, scales, reverse, orders, layers) = saved  # fmt: skip
+             self._let_go, share, scales, reverse, orders, layers) = saved  # fmt: skip
             self._share, self._scales, self._reverse, self._orders = share, scales, reverse, orders
             for lr, color, shape, dash_by, second in layers:
                 lr.color, lr.shape, lr.dash_by, lr.second = color, shape, dash_by, second

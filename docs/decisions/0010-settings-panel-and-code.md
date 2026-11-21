@@ -37,7 +37,8 @@ name in Python.
   leave the plot, the panel and `code()` disagreeing.
 - **Every control does what it says.** A height given (`panel_height=`, `height=`) sets
   the panels' height over a shape, so the panel shows it as the shape (*200 px high*), and
-  choosing a shape lets the height go. In Python alike: of `aspect` and a height, the one
+  choosing a shape lets the height go; the height stays a choice, to go back to. In
+  Python alike: of `aspect` and a height, the one
   set last decides.
 - **`code()` writes the calls that made the plot**, recorded as they were made (the
   constructor's arguments that differ from its defaults, then each method), with what was

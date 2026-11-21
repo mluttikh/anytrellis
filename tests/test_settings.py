@@ -242,7 +242,15 @@ def test_a_panel_shape_replaces_a_height() -> None:
     assert 'Trellis(data, wrap="origin", aspect=1)' in t.code()
     by = {s["name"]: s for sec in t.widget._spec["settings"] for s in sec["settings"]}
     assert by["aspect"]["value"] == 1
-    assert "fixed" not in [o[0] for o in by["aspect"]["options"]]
+    assert by["aspect"]["options"][0] == ["fixed", "200 px high"]  # still there, to go back
+    t.widget._on_msg(t.widget, {"type": "settings", "request": 3,
+                                "changes": {"aspect": None}}, [])  # fmt: skip
+    t.widget._on_msg(t.widget, {"type": "settings", "request": 4,
+                                "changes": {"aspect": "fixed"}}, [])  # fmt: skip
+    assert (t.panel_height, t.aspect) == (200, None)
+    assert t.widget._spec["panel_height"] == 200
+    assert 'Trellis(data, wrap="origin", panel_height=200)' in t.code()
+    t.aspect = 1
     # and a height set after it takes over again
     t.panel_height = 150
     assert (t.panel_height, t.aspect) == (150, None)
