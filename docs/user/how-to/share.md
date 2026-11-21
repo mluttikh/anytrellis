@@ -74,6 +74,7 @@ app.
 | `link=` within the plot | Yes |
 | The panel opened with `open()` and a selection made with `select()` | Yes, as the page opens |
 | Plots linked with `link()` | Yes, saved together with `Link.save_html` ([link plots](link.md#save-linked-plots-to-one-page)) |
+| Views (`save_view`, or kept in the page) | Yes; a link ending `#view=<name>` opens on one. Views kept in the page last until it closes |
 | `selected()` | No: there is no Python |
 
 ### Size

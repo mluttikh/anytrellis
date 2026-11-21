@@ -419,6 +419,10 @@ class Trellis:
         self._places = None if layout is None else self._layout_places(layout)
         self._given_stats: Table | None = None
         self._paging: Paging = {}
+        self._views: dict[str, dict[str, Any]] = {}
+        self._start_zoom: dict[str, Any] | None = None
+        """A view's zoom (``show_view``) the browser has not shown yet: sent when a view
+        starts, and the zoom a saved page opens with."""
         self._stats: list[Stat] = []
         self._share: dict[str, Share] = {
             "x": share_mode(share_x),
@@ -2205,6 +2209,9 @@ class Trellis:
             calls.append(call_text("pin", list(paging["pinned"]), {}))
         if self.compared is not None:
             calls.append(call_text("compare", [self.compared], {}))
+        for name, view in self._views.items():  # (what it leaves out: as the plot starts)
+            kept = {k: v for k, v in view.items() if v not in (None, False, "", 0, [], {})}
+            calls.append(call_text("save_view", [name, kept], {}))
         return chained(call_text("Trellis", given.args, kwargs), calls)
 
     def _sync_code(self) -> None:
@@ -2769,8 +2776,84 @@ class Trellis:
             raise ValueError("this plot does not page: give rows= (and wrap=)")
         raise ValueError(f"no statistic {name!r}; there are {[s.name for s in self._stats]}")
 
+    # ---- views ----------------------------------------------------------------------------
+
+    def save_view(self, name: str, view: dict[str, Any] | None = None) -> Self:
+        """Keep what the plot shows under a name: its page, sort, filters and pins, the
+        panel opened and the one compared, and the zoom. ``show_view`` shows it again, and
+        so does the reader, from the Views menu in a paged plot's bar (in a saved page too,
+        or a link to it ending ``#view=<name>``). ``view``: one given instead, as ``views``
+        has them (``code()`` writes them so).
+
+        ```python
+        t.sort_panels("trend temp", descending=True).filter_panels(rows=(100, None))
+        t.save_view("warming")
+        t.show_view("warming")
+        ```
+        """
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("save_view(): give the view a name")
+        if view is None:
+            view = self._view_now()
+        elif not isinstance(view, dict) or set(view) - set(VIEW_KEYS):
+            extra = sorted(set(view) - set(VIEW_KEYS)) if isinstance(view, dict) else view
+            raise ValueError(f"save_view(): a view has {list(VIEW_KEYS)}, not {extra!r}")
+        self._views = {**self._views, name.strip(): json.loads(json.dumps(view))}
+        self._send_views()
+        return self
+
+    def show_view(self, name: str) -> Self:
+        """Show a view kept with ``save_view`` (or saved by the reader in the browser): its
+        page, sort, filters and pins, opened and compared panels, and zoom."""
+        view = self._views.get(name)
+        if view is None:
+            raise ValueError(f"no view {name!r}; the views are {list(self._views)}")
+        self._put_paging({k: copy.deepcopy(view[k]) for k in Paging.__annotations__ if k in view})
+        self._set_focus(view.get("open"))
+        self._set_compare(view.get("compare"))
+        zoom = view.get("zoom") or {"x": [], "y": []}  # none: as the plot starts
+        self._view = {**(self._view or {}), "x": zoom["x"], "y": zoom["y"]}  # images too
+        self._start_zoom = zoom
+        if self._widget is not None:
+            self._widget.send({"type": "zoom", "zoom": zoom})
+        return self
+
+    def drop_view(self, name: str) -> Self:
+        """Forget a view."""
+        if name not in self._views:
+            raise ValueError(f"no view {name!r}; the views are {list(self._views)}")
+        self._views = {k: v for k, v in self._views.items() if k != name}
+        self._send_views()
+        return self
+
+    @property
+    def views(self) -> dict[str, dict[str, Any]]:
+        """The views kept (``save_view``, or by the reader in the browser): ``{name: view}``,
+        each with the keys ``page``, ``sort``, ``descending``, ``name``, ``where``,
+        ``pinned``, ``open``, ``compare`` and ``zoom`` it has."""
+        return copy.deepcopy(self._views)
+
+    def _view_now(self) -> dict[str, Any]:
+        """What the plot shows now, as a view."""
+        out: dict[str, Any] = dict(self.paging)
+        out["open"] = self.focused
+        out["compare"] = self.compared
+        shown = self._view or {}
+        zoom = self._start_zoom
+        if zoom is None and (shown.get("x") or shown.get("y")):
+            zoom = {"x": shown.get("x") or [], "y": shown.get("y") or []}
+        out["zoom"] = zoom if zoom and (zoom["x"] or zoom["y"]) else None
+        return out
+
+    def _send_views(self) -> None:
+        if self._widget is not None:
+            self._widget.views = copy.deepcopy(self._views)
+        self._sync_code()
+
     def _set_paging(self, **changes: Any) -> Self:
-        state: dict[str, Any] = {**self.paging, **changes}
+        return self._put_paging({**self.paging, **changes})
+
+    def _put_paging(self, state: dict[str, Any]) -> Self:
         self._paging = state  # ty: ignore[invalid-assignment]
         if self._widget is not None:
             self._widget.paging = state
@@ -3528,6 +3611,7 @@ class Trellis:
             state = {"_spec": spec, "renderer": self.renderer, "open_panel": self._focus,
                      "compare_panel": self._compare, "_code": self.code(),
                      "selection": self._selection, "paging": dict(self._paging),
+                     "views": copy.deepcopy(self._views),
                      "_live": self._link_group is not None}  # fmt: skip
             self._widget = TrellisWidget(self, state)
         return self._widget
@@ -3555,6 +3639,8 @@ class Trellis:
             "code": self.code() if self.controls else None,
             "selection": self._current_selection(),
             "paging": self.paging,
+            "views": self._views,
+            "zoom": self._start_zoom,
             "link": link,
         }
         data = json.dumps(payload).replace("</", "<\\/")
@@ -4727,6 +4813,10 @@ def page_html(body: str, title: str) -> str:
         f"<script>{script.read_text(encoding='utf-8')}</script></body></html>"
     )
 
+
+VIEW_KEYS = ("page", "sort", "descending", "name", "where", "pinned", "open", "compare", "zoom")
+"""What a view (``save_view``) keeps: the paging, the opened and compared panels, the zoom
+(``{"x": [[group, [lo, hi]], ...], "y": ...}`` in the spec's units; None: as it starts)."""
 
 FROM_ZERO = ("bars", "area", "hist", "density", "barstat", "ecdf")
 """Marks drawn from zero up, which a log y axis has no place for; on a sqrt or symlog

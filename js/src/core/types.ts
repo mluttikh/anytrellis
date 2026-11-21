@@ -308,6 +308,20 @@ export interface Paging {
   pinned?: string[];
 }
 
+/** A view kept (Trellis.save_view, or the reader's Views menu): the paging, the panel
+ * opened and the one compared (names), and the zoom (each scale group's range, in the
+ * spec's units; null: as the plot starts). */
+export interface SavedView extends Paging {
+  open?: string | null;
+  compare?: string | null;
+  zoom?: Zoom | null;
+}
+
+export interface Zoom {
+  x: [number, [number, number]][];
+  y: [number, [number, number]][];
+}
+
 /** Where buffers come from: Python (BufferStore), or a page that embeds them. */
 export interface DataSource {
   has(id: string): boolean;

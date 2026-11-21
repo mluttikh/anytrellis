@@ -3,7 +3,7 @@
 import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
-import type { Paging, RendererPreference, TrellisSpec } from "./core/types";
+import type { Paging, RendererPreference, SavedView, TrellisSpec } from "./core/types";
 import { type DetailLayer, type Highlight, TrellisView } from "./core/view";
 
 interface AnyModel {
@@ -52,6 +52,9 @@ function stateFor(model: AnyModel): ModelState {
     } else if (msg?.type === "highlight") {
       state.highlight = highlightOf(msg, buffers);
       state.views.forEach((v) => v.setHighlight(state.highlight));
+    } else if (msg?.type === "zoom") {
+      // Trellis.show_view: its zoom
+      state.views.forEach((v) => v.setZoom(msg.zoom ?? null));
     }
   });
   state.store.onStall = (stalled) => state.views.forEach((v) => v.setStatus(stalled ? NO_DATA_HINT : null));
@@ -155,6 +158,10 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     },
     // what it shows: Trellis.save_png and save_svg draw the same view
     onView: (shown) => model.send({ type: "view", ...shown }),
+    onViews: (views) => {
+      model.set("views", views);
+      model.save_changes();
+    },
     onPaging: (paging) => {
       model.set("paging", paging);
       model.save_changes();
@@ -190,11 +197,15 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   const onSelection = (): void => view.setSelection((model.get("selection") as Brush | null) ?? null);
   // Trellis.show_page, sort_panels, filter_panels in Python (or another view)
   const onPaging = (): void => view.setPaging((model.get("paging") as Paging | null) ?? null);
+  // Trellis.save_view, drop_view in Python (or another view)
+  const onViews = (): void => view.setViews((model.get("views") as Record<string, SavedView> | null) ?? null);
   model.on("change:_spec", load);
   model.on("change:open_panel", onFocus);
   model.on("change:compare_panel", onCompare);
   model.on("change:selection", onSelection);
   model.on("change:paging", onPaging);
+  model.on("change:views", onViews);
+  onViews();
   onFocus();
   onCompare();
   onSelection();
@@ -207,6 +218,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     model.off("change:compare_panel", onCompare);
     model.off("change:selection", onSelection);
     model.off("change:paging", onPaging);
+    model.off("change:views", onViews);
     s.views.delete(view);
     window.anytrellisViews = window.anytrellisViews?.filter((v) => v !== view);
     view.destroy();

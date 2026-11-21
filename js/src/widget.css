@@ -873,7 +873,7 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
 }
 .atr-filter-rows {
   display: grid;
-  grid-template-columns: auto auto auto auto;
+  grid-template-columns: auto auto auto auto auto;
   align-items: center;
   gap: 4px 6px;
 }
@@ -885,7 +885,70 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   white-space: nowrap;
 }
 .atr-filter-row .atr-search {
-  grid-column: span 3;
+  grid-column: span 4;
+}
+
+/* a statistic's values over the panels: every panel's faint, those the other filters keep
+   on top, its range a band; drag across to filter */
+.atr-hist {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+.atr-hist-all {
+  fill: var(--atr-border);
+}
+.atr-hist-kept {
+  fill: var(--atr-accent);
+  opacity: 0.75;
+}
+.atr-hist-range {
+  fill: var(--atr-accent);
+  fill-opacity: 0.12;
+  stroke: var(--atr-accent);
+  stroke-opacity: 0.6;
+  pointer-events: none;
+}
+
+/* the views: a list to show (and delete) and a name to keep the one shown */
+.atr-button.atr-views-button {
+  width: auto;
+  gap: 4px;
+  padding: 0 6px 0 4px;
+}
+.atr-views-button svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.atr-views-label {
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.atr-views {
+  min-width: 14em;
+}
+.atr-view-rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 6px;
+  width: 100%;
+}
+.atr-view-name {
+  justify-self: start;
+  text-align: left;
+}
+.atr-view-name[aria-current="true"] {
+  font-weight: 600;
+}
+.atr-view-save {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
 }
 
 /* a paged wrap whose filters keep no panel */
