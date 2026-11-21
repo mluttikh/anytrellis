@@ -31,6 +31,11 @@ buffers, drawn in the browser. This module is the protocol between them.
   width, height], ...]}``: the plot's width, each scale group's range as shown (relative to
   the origins) and the panels shown (their size in CSS px), sent a moment after they
   change; ``Trellis.save_png`` and ``save_svg`` draw that view.
+* ``views`` (synced both ways): the views kept (``Trellis.save_view``, or the reader's
+  Views menu), ``{name: {page, sort, ..., open, compare, zoom}}``.
+* ``{"type": "zoom", "zoom": {"x": [[group, [lo, hi]], ...], "y": ...}}`` (Python to the
+  browser, ``Trellis.show_view``): zoom to these ranges (none given: as the plot starts).
+  Python sends it again when a view starts, until the browser reports a ``view``.
 * ``{"type": "settings", "request", "changes": {name: value}}``: the settings panel's
   changes (``Trellis._apply_settings``: each the property or method of that name); the new
   ``_spec`` follows, and Python answers ``{"type": "answer", "request"}``, with ``error``
@@ -86,6 +91,8 @@ class TrellisWidget(anywidget.AnyWidget):
     #: The page, sort and filters of a paged wrap (``Trellis.show_page``, ``sort_panels``,
     #: ``filter_panels``, or the reader in the browser).
     paging = traitlets.Dict({}).tag(sync=True)
+    #: The views kept (``Trellis.save_view``, or saved by the reader): ``{name: view}``.
+    views = traitlets.Dict({}).tag(sync=True)
     #: Send the brush while it is dragged, not only on release (a linked plot).
     _live = traitlets.Bool(False).tag(sync=True)
     #: ``Trellis.code()``, kept current: the settings panel's "Copy as Python" copies it at
@@ -100,6 +107,7 @@ class TrellisWidget(anywidget.AnyWidget):
         self.observe(self._on_compare, names="compare_panel")
         self.observe(self._on_selection, names="selection")
         self.observe(self._on_paging, names="paging")
+        self.observe(self._on_views, names="views")
 
     def _on_selection(self, change: dict[str, Any]) -> None:
         self._plot._selection = change["new"]  # drawn in the browser: save_html keeps it
@@ -109,6 +117,10 @@ class TrellisWidget(anywidget.AnyWidget):
         self._plot._paging = Paging(**change["new"])  # turned in the browser: save_html keeps it
         self._plot._sync_code()  # its sort, filters and pins
         self._plot._send_detail()  # the data of the panels around the page shown
+
+    def _on_views(self, change: dict[str, Any]) -> None:
+        self._plot._views = dict(change["new"])  # saved in the browser: save_html keeps them
+        self._plot._sync_code()
 
     def _on_compare(self, change: dict[str, Any]) -> None:
         self._plot._compare = change["new"]  # chosen in the browser: save_html keeps it
@@ -142,8 +154,11 @@ class TrellisWidget(anywidget.AnyWidget):
             self.send(answer)
         elif kind == "view":  # what the browser shows: save_png and save_svg draw it
             self._plot._view = {k: content.get(k) for k in ("width", "x", "y", "panels")}
+            self._plot._start_zoom = None  # shown: a view's zoom too
             self._plot._send_detail()  # and its layers in more detail, zoomed in
         elif kind == "ready":  # a view started: the layers as shown, what a link highlights
+            if self._plot._start_zoom is not None:  # a view shown before (show_view)
+                self.send({"type": "zoom", "zoom": self._plot._start_zoom})
             self._plot._send_shown()
             self._plot._send_highlight()
         elif kind == "clear":  # a click in a linked plot with no brush of its own

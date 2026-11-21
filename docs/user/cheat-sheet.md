@@ -262,6 +262,9 @@ t.shown_panels()  # the panels on the page shown
 t.pin("station 7")  # first on every page, whatever the sort and filters
 t.pinned  # the pinned panels; t.unpin("station 7"), or t.unpin() for all
 t.paging  # the page, sort and filters shown
+t.save_view("warming")  # the sort, filters, pins, page and zoom shown, kept by name
+t.show_view("warming")  # and shown again; the bar's Views menu lists them
+t.views  # {"warming": {...}}; t.drop_view("warming") forgets one
 ```
 
 `synthetic.sales()` and `synthetic.scatter()` make other test tables. See [Page through

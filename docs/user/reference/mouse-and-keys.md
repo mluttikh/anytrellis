@@ -106,7 +106,9 @@ arrow keys move along them. Then fit y (++y++), reset (++r++), settings (++comma
 changes the layout, scales, colour and order, and copies the plot's Python ([Change a plot
 from its settings panel](../how-to/settings.md)). With a panel opened, the strip over it
 has *All panels* and the previous and next buttons. Over a paged wrap, a bar turns the
-pages, sorts the panels and filters them ([Page through many panels](../how-to/pages.md)).
+pages, sorts the panels and filters them (a drag across a statistic's histogram sets its
+range, a click clears it), and shows or keeps views ([Page through many
+panels](../how-to/pages.md)).
 
 ## What the plot shows
 

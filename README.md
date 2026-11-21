@@ -257,11 +257,13 @@ a reference chosen as you go (`t.compare("Japan")`, `t.compare()`);
 `rows=` and `cols=` set it, `rows="all"` turns it off), with a bar to turn the pages
 (‹ ›, Page Up and Page Down), sort the panels by a statistic of each (rows, mean, median,
 min, max, sd and trend of the values drawn, plus any given with `t.panel_stats(table)`),
-filter them by name and by a statistic's range. The strips show the value sorted by. A
+filter them by name and by a statistic's range (drag across its histogram), and keep views
+of the sort, filters, page and zoom to show again. The strips show the value sorted by. A
 pinned panel (its pin button, or `p`) stays first on every page, whatever the sort and
 filters. From Python: `t.sort_panels("trend temp", descending=True)`,
-`t.filter_panels("north")`, `t.show_page(2)`, `t.pin("station 7")`, `t.shown_panels()`;
-images and saved pages show the page shown.
+`t.filter_panels("north")`, `t.show_page(2)`, `t.pin("station 7")`, `t.shown_panels()`,
+`t.save_view("warming")`, `t.show_view("warming")`; images and saved pages show the page
+shown, and a saved page's link ending `#view=warming` opens on that view.
 
 **Images.** The toolbar's Export button (or `e`) copies the plot as shown, its zoom,
 selection and theme, to the clipboard as a PNG (or as an SVG with a PNG beside it, where

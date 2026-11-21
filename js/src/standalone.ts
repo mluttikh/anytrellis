@@ -6,7 +6,7 @@
 import { LinkGroup, type SavedLink, readLink } from "./core/savedlink";
 import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
-import type { Paging, RendererPreference, TrellisSpec } from "./core/types";
+import type { Paging, RendererPreference, SavedView, TrellisSpec, Zoom } from "./core/types";
 import { TrellisView } from "./core/view";
 
 interface Payload {
@@ -24,6 +24,15 @@ interface Payload {
   code?: string | null;
   /** Its marks' keys in a link saved with it (Link.save_html), or null. */
   link?: SavedLink | null;
+  /** The views kept (Trellis.save_view): the Views menu's, and #view=<name>'s. */
+  views?: Record<string, SavedView> | null;
+  /** The zoom it opens with (a view shown in Python), or null: as the plot starts. */
+  zoom?: Zoom | null;
+}
+
+/** The view a link to the page names: #view=<name>. */
+function viewInHash(): string | null {
+  return new URLSearchParams(location.hash.slice(1)).get("view");
 }
 
 /** The page's links, by group. */
@@ -75,7 +84,11 @@ async function start(host: HTMLElement): Promise<void> {
     if (payload.compare) view.setCompareName(payload.compare);
     if (payload.selection) view.setSelection(payload.selection);
     if (payload.paging) view.setPaging(payload.paging);
+    if (payload.views) view.setViews(payload.views);
+    if (payload.zoom) view.setZoom(payload.zoom);
     await view.setSpec(payload.spec);
+    const named = viewInHash();
+    if (named) view.showView(named);
     if (group && link) {
       group.add(view, readLink(link));
       if (payload.selection) group.changed(view); // a selection saved: it leads
@@ -120,6 +133,12 @@ function startAll(): void {
   );
   hosts.forEach((h) => observer.observe(h));
 }
+
+// a link to another view of the page (#view=<name>): each plot that has it shows it
+window.addEventListener("hashchange", () => {
+  const named = viewInHash();
+  if (named) window.anytrellisViews?.forEach((v) => v.showView(named));
+});
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startAll);
 else startAll();

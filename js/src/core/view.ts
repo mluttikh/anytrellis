@@ -47,7 +47,7 @@ export type { Highlight } from "./selection";
 import { type Hit, type HitPoint, type LayerData, type PanelMap, type Scene, barsAlongY, buildScene, bufferIds, hitPoint, layerMap, panelMap, pick, xUnits, yExtent, yUnits } from "./scene";
 import { numberFormat } from "./format";
 import { formatHeight, formatValue } from "./ticks";
-import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type TrellisSpec, isMark } from "./types";
+import { type DataSource, type LegendSpec, type MarkLayerSpec, type Paging, type RendererPreference, type SavedView, type TrellisSpec, type Zoom, isMark } from "./types";
 
 /** Versions of the selected marks' sets: never used twice, as the renderers keep a set's
  * buffers by key and version (a selection cleared and made again under the same key must
@@ -78,6 +78,8 @@ export interface ViewOptions {
   onView?: (view: ShownView) => void;
   /** The reader turned a page, sorted or filtered a paged wrap's panels. */
   onPaging?: (paging: Paging) => void;
+  /** The reader kept a view or deleted one (the views now). */
+  onViews?: (views: Record<string, SavedView>) => void;
   /** Layers in detail were drawn (Python sends a highlight for them again). */
   onDetail?: () => void;
   /** The settings panel's changes, by name: Python applies them and sends the new spec
@@ -363,6 +365,13 @@ export class TrellisView {
   private ghostSets = new Map<LayerData, InstanceSet>();
   /** A panel to open once the spec is in (the name Python asked for). */
   private pendingFocus: string | null = null;
+  /** A zoom given before the spec came (Python's show_view, a saved page's). */
+  private pendingZoom: Zoom | null = null;
+  private savedViews: Record<string, SavedView> = {};
+  /** The view last shown or kept (of views alike, the bar names it). */
+  private lastView: string | null = null;
+  /** The zoom the bar's view name was found for. */
+  private zoomKey = "";
   private gridHeight = 0;
   private readonly pager: Pager;
   /** A paged wrap's page, sort and filters, and the panels they show, in order (null: it
@@ -462,7 +471,11 @@ export class TrellisView {
     this.settingsPanel.hidden = true;
     this.toolbar.append(this.backButton, modes, this.fitButton, this.resetButton, this.settingsButton, this.exportButton, this.helpButton, this.fullButton);
     this.header.append(this.heading, this.chips, this.toolbar);
-    this.pager = new Pager((paging) => this.setPaging(paging, true));
+    this.pager = new Pager((paging) => this.setPaging(paging, true), {
+      show: (name) => this.showView(name, true),
+      save: (name) => this.keepView(name),
+      drop: (name) => this.dropView(name),
+    });
     this.pager.el.hidden = true;
     this.legend = el("div", "atr-legend");
     this.subtitle = el("div", "atr-subtitle");
@@ -575,6 +588,10 @@ export class TrellisView {
     this.pendingFocus = null;
     this.focused = this.indexOf(openName);
     this.computeOrder();
+    if (this.pendingZoom) {
+      this.applyZoom(this.pendingZoom);
+      this.pendingZoom = null;
+    }
     this.renderLegend(spec.legends);
     this.setStatus(null);
     this.updateHeader();
@@ -716,6 +733,120 @@ export class TrellisView {
     this.setPaging({ ...this.paging, pinned }, true);
     this.notify(on ? `${name} pinned: first on every page` : `${name} unpinned`);
     this.updateTools();
+  }
+
+  // ---- views ------------------------------------------------------------------------------
+
+  /** The views kept (Python's save_view, a saved page's), in the Views menu. */
+  setViews(views: Record<string, SavedView> | null): void {
+    this.savedViews = { ...(views ?? {}) };
+    this.updateHeader();
+  }
+
+  get keptViews(): Record<string, SavedView> {
+    return { ...this.savedViews };
+  }
+
+  /** What the plot shows now, as a view. */
+  currentView(): SavedView {
+    const spec = this.spec;
+    const z = this.zoomState();
+    return {
+      ...this.paging,
+      open: spec && this.focused !== null ? panelName(spec, this.focused) : null,
+      compare: this.compareName,
+      zoom: { x: z.x, y: z.y },
+    };
+  }
+
+  /** Show the view kept as `name`; `user`: the reader chose it (tell Python). */
+  showView(name: string, user = false): boolean {
+    const view = this.savedViews[name];
+    if (!view || !this.spec) return false;
+    const { open, compare, zoom, ...paging } = view;
+    this.setPaging(paging, user);
+    const index = this.indexOf(open ?? null);
+    if (index !== this.focused) this.setFocus(index, user);
+    if ((compare ?? null) !== this.compareName) {
+      this.compareName = compare ?? null;
+      if (user) this.opts.onCompare?.(this.compareName);
+      this.updateTools();
+    }
+    this.lastView = name;
+    this.setZoom(zoom ?? null);
+    this.notify(`View: ${name}`);
+    this.updateHeader();
+    return true;
+  }
+
+  /** Keep what the plot shows as the view `name` (one of that name: replaced). */
+  private keepView(name: string): void {
+    const had = name in this.savedViews;
+    this.savedViews = { ...this.savedViews, [name]: this.currentView() };
+    this.lastView = name;
+    this.opts.onViews?.(this.keptViews);
+    this.notify(had ? `View ${name} kept again, as shown now` : `View ${name} kept`);
+    this.updateHeader();
+  }
+
+  private dropView(name: string): void {
+    const { [name]: _, ...rest } = this.savedViews;
+    this.savedViews = rest;
+    this.opts.onViews?.(this.keptViews);
+    this.notify(`View ${name} deleted`);
+    this.updateHeader();
+  }
+
+  /** The view kept that the plot shows (its page, sort, filters, pins, opened and
+   * compared panels and zoom), or null. */
+  private viewShown(): string | null {
+    const spec = this.spec;
+    if (!spec) return null;
+    const now = this.currentView();
+    // the zoom: the ranges that differ from the start's, to 6 digits (none: as it starts)
+    const start = new Map<string, Range>();
+    for (const p of spec.panels) {
+      start.set(`x${p.xg}`, p.x);
+      start.set(`y${p.yg}`, p.y);
+    }
+    const round = (v: number): number => +v.toPrecision(6);
+    const zoomed = (z: Zoom | null | undefined): string[] =>
+      (["x", "y"] as const)
+        .flatMap((a) => (z?.[a] ?? []).map(([g, r]): [string, Range] => [`${a}${g}`, r]))
+        .filter(([k, r]) => {
+          const s = start.get(k);
+          return !s || round(s[0]) !== round(r[0]) || round(s[1]) !== round(r[1]);
+        })
+        .map(([k, r]) => `${k}:${round(r[0])}:${round(r[1])}`)
+        .sort();
+    const key = (v: SavedView): string =>
+      JSON.stringify([v.page ?? 0, v.sort ?? null, !!v.descending, v.name ?? "", Object.entries(v.where ?? {}).filter(([, c]) => c !== null && c !== "").sort(), v.pinned ?? [], v.open ?? null, v.compare ?? null, zoomed(v.zoom)]);
+    const want = key(now);
+    const same = Object.keys(this.savedViews).filter((n) => key(this.savedViews[n]) === want);
+    // views alike: the one last shown or kept
+    return this.lastView !== null && same.includes(this.lastView) ? this.lastView : (same[0] ?? null);
+  }
+
+  /** Zoom to these ranges (Python's show_view; null or none given: as the plot starts). */
+  setZoom(zoom: Zoom | null): void {
+    if (!this.spec) {
+      this.pendingZoom = zoom ?? { x: [], y: [] };
+      return;
+    }
+    this.remember();
+    this.applyZoom(zoom ?? { x: [], y: [] });
+  }
+
+  private applyZoom(zoom: Zoom): void {
+    this.resetViews();
+    for (const [g, r] of zoom.x ?? []) if (this.xView.has(g)) this.setX(g, [r[0], r[1]]);
+    for (const [g, r] of zoom.y ?? []) {
+      if (!this.yView.has(g)) continue;
+      this.yView.set(g, [r[0], r[1]]);
+      this.slice("y", g, [r[0], r[1]]);
+    }
+    this.hideTip();
+    this.request();
   }
 
   // ---- pages ------------------------------------------------------------------------------
@@ -1314,8 +1445,10 @@ export class TrellisView {
     if (paged) {
       const pages = spec!.pages!;
       const list = this.pageList ?? [[]];
-      this.pager.update(pages, this.paging, this.order!.length, spec!.panels.length, list.length, pageLabels(list, pages));
-    } else this.pager.toggleMenu(false);
+      const names = spec!.panels.map((_, i) => panelName(spec!, i));
+      this.pager.update(pages, this.paging, this.order!.length, spec!.panels.length, list.length, pageLabels(list, pages), names);
+      this.pager.setViews(Object.keys(this.savedViews), this.viewShown());
+    } else this.pager.closeMenus();
     this.root.classList.toggle("atr-open", open);
     if (!spec || this.focused === null) return;
     const crumb = el("span", "atr-crumb");
@@ -1492,7 +1625,17 @@ export class TrellisView {
     this.front_.lassos = lasso ? views.filter(own).map((v) => ({ clip: v.rect, points: lasso.map(([a, b]): [number, number] => [v.map.ox + a * v.map.sx, v.map.oy + b * v.map.sy]) })) : [];
     drawFront(front, this.spec, this.lay, views, this.panelTheme(), this.front_);
     this.updateChips();
+    this.updateViewName();
     this.reportView();
+  }
+
+  /** The bar's name of the view shown, again when the zoom changed (a zoom can leave it). */
+  private updateViewName(): void {
+    if (!this.spec?.pages || !Object.keys(this.savedViews).length) return;
+    const key = JSON.stringify([[...this.xView], [...this.yView]]);
+    if (key === this.zoomKey) return;
+    this.zoomKey = key;
+    this.pager.setViews(Object.keys(this.savedViews), this.viewShown());
   }
 
   // ---- state chips ----------------------------------------------------------------------
@@ -1768,7 +1911,7 @@ export class TrellisView {
         if (!this.exportMenu.hidden && !path.includes(this.exportMenu) && !path.includes(this.exportButton)) this.toggleExport(false);
         if (!this.settingsPanel.hidden && !path.includes(this.settingsPanel) && !path.includes(this.settingsButton)) this.toggleSettings(false);
         if (!this.help.hidden && !path.includes(this.help) && !path.includes(this.helpButton)) this.toggleHelp(false);
-        if (this.pager.menuOpen && !path.includes(this.pager.el)) this.pager.toggleMenu(false);
+        if (this.pager.menuOpen && !path.includes(this.pager.el)) this.pager.closeMenus();
       },
       { signal, capture: true },
     );
@@ -2035,7 +2178,7 @@ export class TrellisView {
         // typing in the pager's fields: Escape closes the filters, other keys are the field's
         if ((e.target as HTMLElement).closest("input, select, textarea")) {
           if (e.key === "Escape" && this.pager.menuOpen) {
-            this.pager.toggleMenu(false);
+            this.pager.closeMenus();
             this.root.focus();
             e.preventDefault();
             e.stopPropagation();
@@ -2135,7 +2278,7 @@ export class TrellisView {
           return true;
         }
         if (this.pager.menuOpen) {
-          this.pager.toggleMenu(false);
+          this.pager.closeMenus();
           return true;
         }
         if (this.pinned) {

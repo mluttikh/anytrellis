@@ -44,6 +44,13 @@ All notable changes to anytrellis. The format follows
   click in one highlights the same rows in the others, a histogram's bars filled to the
   share selected, as in a notebook; the selection made in Python is saved with it. Plots
   reading DuckDB (`load="pages"`) are saved with every row and link `on=` their keys.
+- **Views**: `save_view(name)` keeps what a plot shows (sort, filters, pins, page, the
+  panel opened or compared, the zoom), `show_view(name)` shows it again, `drop_view` and
+  `views`. The page bar's Views menu lists them, shows one and keeps the one shown; a saved
+  page keeps them, and a link to it ending `#view=<name>` opens on one.
+- **Filter histograms**: in the page bar's filters, each number statistic shows its values
+  over the panels as a small histogram (the panels the other filters keep on top). Drag
+  across it to filter by that range; a click clears it.
 
 ### Changed
 

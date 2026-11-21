@@ -2,7 +2,7 @@
 <dir>``, then ``node js/test/select.mjs <dir>/years.html`` (and legend.mjs, zoom.mjs,
 many.mjs, details.mjs, paging.mjs, levels.mjs, reverse.mjs, tooltip.mjs, legends.mjs,
 channels.mjs, labels.mjs, panels.mjs, settings.mjs, marks.mjs, layout.mjs, lasso.mjs,
-savedlink.mjs)."""
+savedlink.mjs, views.mjs)."""
 
 from __future__ import annotations
 
@@ -139,6 +139,7 @@ def main(out: Path) -> None:
     layouts(out)
     lassos(out)
     saved_links(out)
+    views(out)
 
 
 def lassos(out: Path) -> None:
@@ -157,6 +158,34 @@ def lassos(out: Path) -> None:
         t.select(**chosen)
         t.save_html(out / f"{name}.html")
         (out / f"{name}.selected.json").write_text(json.dumps(len(t.selected())))
+
+
+def views(out: Path) -> None:
+    """A paged wrap with views kept in Python (views.mjs): "warm" (sorted, filtered, a page
+    on), "zoomed" (the first half of x) and "pinned"; per view, the panels Python shows and
+    its zoom (``views.json``)."""
+    import json
+
+    t = Trellis(pl.DataFrame(sensors(stations=60, sensors=1, hours=48)), wrap="station",
+                rows=2, cols=4, title="Stations")  # fmt: skip
+    t.line(x="time", y="temp", width=1)
+    spec, _ = t._scene()
+    lo, hi = spec["panels"][0]["x"]
+    t.sort_panels("mean temp", descending=True).filter_panels(**{"mean temp": (8, None)})
+    t.show_page(2).save_view("warm")
+    t.sort_panels(None).filter_panels().show_page(1)
+    t.save_view("zoomed", {"zoom": {"x": [[0, [lo, (lo + hi) / 2]]], "y": []}})
+    t.pin("station 7").save_view("pinned").unpin()
+    want = {}
+    for name in t.views:
+        t.show_view(name)
+        panels = [t.panels().index(n) for n in t.shown_panels()]
+        want[name] = {"panels": panels, "zoom": t.views[name]["zoom"]}
+    t.sort_panels(None).filter_panels().unpin().show_page(1)
+    t._start_zoom = None  # the page opens as the plot starts
+    t._view = None
+    t.save_html(out / "views.html")
+    (out / "views.json").write_text(json.dumps(want))
 
 
 def saved_links(out: Path) -> None:

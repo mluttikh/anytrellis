@@ -45,6 +45,36 @@ the panel's value at its right end. Panels without a value go last.
 statistic, a low end, a high end or both, and counts the filters set. The bar says how many
 panels are kept, out of how many.
 
+Beside each number statistic, a small histogram shows its values over the panels: grey for
+every panel, blue for the panels the other filters keep. Drag across it to keep the panels
+in that range (drag past an end to leave that end open); the boxes beside it follow, and
+the range shows as a band. A click on it clears that filter. With one filter set, the other
+histograms show where the panels it keeps lie: a filter on `mean temp` shows which
+`trend temp` those panels have.
+
+## Views
+
+A view keeps what the bar and the plot show: the sort, the filters and pins, the page, the
+panel opened or compared, and the zoom. The **Views** button at the right of the bar lists
+the views kept; click one to show it again. Type a name under them and press *Keep* to keep
+the view shown (a name used again replaces that view), and **×** deletes one. While the
+plot shows a view, the button carries its name; turn the page, sort, filter or zoom
+elsewhere and it says *Views* again.
+
+```python
+plot.sort_panels("trend temp", descending=True).filter_panels(rows=(100, None))
+plot.save_view("warming")          # what the plot shows now
+plot.save_view("north", {"name": "north", "sort": "mean temp"})  # one given
+plot.show_view("warming")
+plot.views                         # {"warming": {"sort": "trend temp", ...}, ...}
+plot.drop_view("north")
+```
+
+Views kept in the browser reach Python (`plot.views`), and `plot.code()` writes each one.
+A page from `save_html` keeps them in its Views menu, and a link to it ending
+`#view=warming` opens on that view. `save_png` and `save_svg` draw a view shown in Python,
+its zoom too.
+
 ## Pin panels
 
 A pinned panel stays first on every page, whatever the sort and the filters: a reference
@@ -98,6 +128,7 @@ plot.shown_panels()   # the names on the page shown
 plot.page, plot.pages # the page shown, and how many there are
 plot.stats()          # {"panel": [...], "rows": [...], "mean temp": [...], ...}
 plot.paging           # the page, sort, filters and pins, as the browser shows them
+plot.show_view("warming")  # a view kept (see Views, above)
 ```
 
 A statistic's name with a space goes in a dict, as above; one without can be a keyword:
