@@ -13,6 +13,7 @@ labels sit, thin out and fit as they do on screen.
 from __future__ import annotations
 
 import datetime as dt
+import io
 import itertools
 import math
 import re
@@ -2230,10 +2231,13 @@ def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging,
 
 
 def figure_svg(plot: Trellis, *, width: float | None = None, height: float | None = None,
-               theme: str = "light", ids: str = "") -> str:  # fmt: skip
+               theme: str = "light", ids: str = "",
+               page_label: str | None = None) -> str:  # fmt: skip
     """The plot as shown, as an SVG ``width`` by ``height`` CSS pixels (default: the
     width it was last shown at, else ``DEFAULT_WIDTH``; the height its layout's). ``ids``:
-    before its ids, for one of several plots in an image (``compose.Concat``)."""
+    before its ids, for one of several plots in an image (``compose.Concat``). ``page_label``: a
+    line under the title saying which page it is, where the browser's page bar is (a PDF
+    of a paged plot's pages)."""
     if theme not in THEMES:
         raise ValueError(f"theme must be one of {list(THEMES)}, got {theme!r}")
     th = THEMES[theme]
@@ -2257,9 +2261,10 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         else []
     )
     sub_h = len(subtitle) * size * LINE + 4 if subtitle else 0
+    page_h = size * LINE + 6 if page_label else 0  # as widget.css .atr-pager's padding
     cap_line = size * CAPTION * LINE
     cap_h = len(caption) * cap_line + 8 if caption else 0
-    top = header + sub_h
+    top = header + sub_h + page_h
     stage_h = None if height is None else height - top - cap_h
     if stage_h is not None and stage_h < 60:
         raise ValueError(f"height {height} leaves no room for the plot")
@@ -2327,6 +2332,10 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
                  size=title_size, bold=True)  # fmt: skip
     for k, line in enumerate(subtitle):
         svg.text(8, header + (k + 0.5) * size * LINE, line, th["muted"], size=size)
+    if page_label:
+        svg.text(8, header + sub_h + 2 + size * LINE / 2, fit(page_label, width - 16, size),
+                 th["text"],
+                 size=size)  # fmt: skip
     plot_top = top + legend_h if above else top
     svg.open(f'transform="translate(0 {_n(plot_top)})"' if plot_top else 'class="plot"')
 
@@ -2424,6 +2433,26 @@ def svg_to_png(svg: str, scale: float = PNG_SCALE, background: str | None = None
         ) from None
     png = bytes(resvg_py.svg_to_bytes(svg_string=svg, zoom=scale, background=background))
     return png_dpi(png, CSS_DPI * scale)
+
+
+def pdf_pages(pages: list[tuple[str, bytes]]) -> bytes:
+    """One PDF of the pages of several (``svg_to_pdf``'s), in turn, each with a bookmark of
+    its name (needs the optional ``pypdf``)."""
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        raise ImportError(
+            "a PDF of several pages needs pypdf: pip install 'anytrellis[pdf]'"
+        ) from None
+    out = PdfWriter()
+    for name, pdf in pages:
+        at = len(out.pages)
+        out.append(PdfReader(io.BytesIO(pdf)))
+        out.add_outline_item(title=name, page_number=at)
+    out.page_mode = "/UseOutlines"  # the bookmarks shown: the pages by name
+    buffer = io.BytesIO()
+    out.write(buffer)
+    return buffer.getvalue()
 
 
 # ---- sizes for print: mm, cm, in, pt and dpi ---------------------------------------------

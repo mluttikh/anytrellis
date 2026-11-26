@@ -38,6 +38,7 @@ examples = [
     { name = "polars" },
 ]
 pdf = [
+    { name = "pypdf" },
     { name = "vl-convert-python" },
 ]
 png = [
@@ -56,6 +57,7 @@ dev = [
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow" },
+    { name = "pypdf" },
     { name = "pytest" },
     { name = "resvg-py" },
     { name = "ruff" },
@@ -70,6 +72,7 @@ requires-dist = [
     { name = "narwhals", specifier = ">=1.30" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "polars", marker = "extra == 'examples'", specifier = ">=1.30" },
+    { name = "pypdf", marker = "extra == 'pdf'", specifier = ">=5" },
     { name = "resvg-py", marker = "extra == 'png'", specifier = ">=0.5.0" },
     { name = "vl-convert-python", marker = "extra == 'pdf'", specifier = ">=1.7" },
 ]
@@ -87,6 +90,7 @@ dev = [
     { name = "pandas", specifier = ">=2.3" },
     { name = "polars", specifier = ">=1.30" },
     { name = "pyarrow", specifier = ">=20" },
+    { name = "pypdf", specifier = ">=5" },
     { name = "pytest", specifier = ">=8" },
     { name = "resvg-py", specifier = ">=0.5.0" },
     { name = "ruff", specifier = ">=0.6" },
@@ -2074,6 +2078,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ad/17/2db4b414de89659144488e0d9c6c0bf0c8395841dc12d81d0532cc6ef310/pymdown_extensions-11.0.2.tar.gz", hash = "sha256:9506fcbe66fa355a775b768084334238dd6805020ac4b92bea0c0dda6f8f223d", size = 855419, upload-time = "2026-08-22T19:28:47.236Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a6/43/9f45ec4d14e596efc32c925a78104934790438b0c0628b70d741016734ad/pymdown_extensions-11.0.2-py3-none-any.whl", hash = "sha256:259910762019732caa1dfd76f3faa62c59f191d46573e80bcb1d13c0f675bbe5", size = 269929, upload-time = "2026-08-22T19:28:45.389Z" },
+]
+
+[[package]]
+name = "pypdf"
+version = "7.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/7b/5dff016bef001c3556c5fdd7645ec80251b78bb496b049d2ab9ec497b087/pypdf-7.2.0.tar.gz", hash = "sha256:b2c637b6f0be3def1f762fd8be20118736bafdffc75badab80db003d7a9ed110", size = 7253070, upload-time = "2026-11-26T15:38:53.825Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/b5/36b52010264f40f35fcd469f62586c0d88753c16682f2e156c42347f884b/pypdf-7.2.0-py3-none-any.whl", hash = "sha256:5edb9b033dd55cecead9303370e6854c1a3b979669bde1c46024cde0228405b1", size = 428449, upload-time = "2026-11-26T15:38:52.262Z" },
 ]
 
 [[package]]

@@ -16,7 +16,7 @@ and the API reference, with live plots; for AI assistants,
 pip install anytrellis
 pip install "anytrellis[examples]"   # with Polars, for the example notebooks and datasets
 pip install "anytrellis[png]"        # with resvg-py, for save_png
-pip install "anytrellis[pdf]"        # with vl-convert-python, for save_pdf
+pip install "anytrellis[pdf]"        # with vl-convert-python and pypdf, for save_pdf
 ```
 
 Status: early development (0.8). One panel per level of the facet columns, every panel
@@ -299,7 +299,7 @@ and `t.save_svg("plot.svg")` draw the same: the zoom last shown, the selection a
 opened panel (`width=`, `height=`, `theme="dark"`; PNGs need the `png` extra). For print,
 sizes take lengths and PNGs a dpi, and `save_pdf` writes a vector PDF (the `pdf` extra):
 `t.save_pdf("figure-2.pdf", width="180mm")`, `t.save_png("figure-2.png", width="180mm",
-dpi=300)`.
+dpi=300)`; `t.save_pdf("pages.pdf", pages="all")` puts a paged plot's every page in one.
 
 **Full screen.** The toolbar's button or `f` shows the plot on the whole screen (`f` or Esc
 leaves). Browsers allow it only from a click or a key, so not from Python; where a page

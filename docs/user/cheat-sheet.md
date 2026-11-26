@@ -329,6 +329,7 @@ t.save_png("cars.png", scale=2)  # needs pip install "anytrellis[png]"
 t.save_svg("figure.svg", width="180mm")  # sizes for print: mm, cm, in, pt
 t.save_png("figure.png", width="180mm", dpi=300)  # 300 pixels an inch, recorded in it
 t.save_pdf("figure.pdf", width="180mm")  # vector; needs pip install "anytrellis[pdf]"
+t.save_pdf("pages.pdf", pages="all")  # a paged plot: every page in one PDF (or [1, "north"])
 t.widget  # the notebook widget that shows the plot
 ```
 

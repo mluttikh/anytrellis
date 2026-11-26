@@ -6,6 +6,14 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A paged plot's pages in one PDF**: `save_pdf(path, pages="all")`, or a list of page
+  numbers or names (`pages=[1, "north"]`). Each page is the grid of that page, in the
+  order shown (sorted, filtered), says under the title which page it is, and is a bookmark
+  of the PDF. The plot shown stays on its page; with `load="pages"` the rows are read a few
+  pages at a time. The `pdf` extra now also installs `pypdf`.
+
 ### Changed
 
 - `save_html` of a `load="pages"` plot reads the rows a few panels at a time (about two
