@@ -148,3 +148,90 @@ def test_in_a_notebook_a_grid_of_the_plots_widgets(plots: tuple[Trellis, ...]) -
     assert (
         repr(concat(a, b, c, cols=2, title="Cars")) == "Concat(3 items in 2 columns, title='Cars')"
     )
+
+
+def _boxes(fig: Concat, width: float) -> list[tuple[float, float, float, float]]:
+    """Each plot's panels' box in the figure's image: left, top, right, bottom."""
+    from anytrellis.figure import figure_box
+
+    room = width - GAP * (fig.cols - 1)
+    col_w = [room * w / sum(fig.widths) for w in fig.widths]
+    aligned = fig._aligned(col_w)
+    out = []
+    for i, item in enumerate(fig.items):
+        assert isinstance(item, Trellis)
+        c = i % fig.cols
+        frame, height = aligned.get(i, (None, None))
+        box = figure_box(item, col_w[c], height, frame)
+        x = sum(col_w[:c]) + GAP * c
+        out.append((x + box.left, box.top, x + col_w[c] - box.right, box.top + box.height))
+    return out
+
+
+def test_a_figure_lines_its_plots_panels_up(plots: tuple[Trellis, ...]) -> None:
+    a, b, c = plots
+    cars = load("cars")
+    # y labels of different widths, a subtitle over one plot's panels, a narrow column
+    d = Trellis(cars, title="Displacement", subtitle="A line under the title").points(
+        x="weight", y="displacement")  # fmt: skip
+    fig = concat(a, b, c, d, cols=2, widths=[2, 1])
+    (al, at, ar, ab), (bl, bt, br, bb), (cl, ct, cr, cb), (dl, dt, dr, db) = _boxes(fig, 900)
+    assert al == cl  # a column: the same left and right edges
+    assert ar == cr
+    assert bl == dl
+    assert br == dr
+    assert at == bt  # a row: the same top
+    assert ct == dt
+    assert ab == bb  # heights free: as high as each other
+    assert cb == db
+    # as each is alone: not lined up
+    alone = _boxes(concat(a, b, c, d, cols=2, widths=[2, 1], align=False), 900)
+    assert (alone[0][0], alone[0][1]) != (alone[2][0], alone[1][1])
+    assert alone[0][3] != alone[1][3]
+    # the image is drawn so: each plot as figure_svg draws it, framed and stretched
+    from anytrellis.figure import figure_svg
+
+    width = (900 - GAP) / 3
+    frame, height = fig._aligned([width * 2, width])[1]
+    assert height is not None
+    own = figure_svg(b, width=width, height=height, frame=frame, ids="p1-")
+    head = '<svg xmlns="http://www.w3.org/2000/svg" '
+    assert own[len(head) :] in fig._svg(900, "light")
+
+
+def test_a_plot_whose_height_is_set_keeps_it(plots: tuple[Trellis, ...]) -> None:
+    a, _, c = plots
+    cars = load("cars")
+    tall = Trellis(cars, title="Tall", height=500).points(x="weight", y="mpg")
+    square = Trellis(cars, aspect=1).points(x="weight", y="mpg")
+    (_, at, _, ab), (_, tt, _, tb) = _boxes(concat(a, tall), 900)
+    assert at == tt  # its top lined up
+    assert ab != tb  # not stretched, nor the other to it
+    _, placed = _placed(concat(a, tall)._svg(900, "light"))
+    _, alone = _placed(concat(a, tall, align=False)._svg(900, "light"))
+    assert _num(placed[1], "height") == _num(alone[1], "height")  # as high as it says
+    (_, ct, _, _), (sl, st, sr, sb) = _boxes(concat(c, square), 900)
+    assert ct == st
+    assert sb - st == pytest.approx(sr - sl, abs=1)  # square panels kept square
+    with pytest.raises(TypeError, match="align"):
+        concat(a, c, align="yes")  # ty: ignore[invalid-argument-type]
+
+
+def test_the_browser_is_told_where_each_plot_is(plots: tuple[Trellis, ...]) -> None:
+    a, b, c = plots
+    inner = a | b
+    fig = inner / c
+    payloads = [json.loads(s) for s in re.findall(r"<script type='application/json'>(.*?)</script>",
+                                                  fig.to_html())]  # fmt: skip
+    cells = [p["figure"] for p in payloads]
+    assert cells[0] == {"group": inner._group, "row": 0, "col": 0}
+    assert cells[1] == {"group": inner._group, "row": 0, "col": 1}
+    assert cells[2] == {"group": fig._group, "row": 1, "col": 0}
+    assert inner._group != fig._group
+    fig.widget  # noqa: B018 (made: each plot's widget told its place)
+    assert a.widget._figure == cells[0]
+    assert c.widget._figure == cells[2]
+    concat(a, b, align=False).widget  # noqa: B018
+    assert a.widget._figure is None
+    # an unaligned row is kept whole: a | b added to it would line b up after all
+    assert len((concat(a, b, align=False) | c).items) == 2

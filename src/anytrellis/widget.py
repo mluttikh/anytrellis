@@ -101,6 +101,9 @@ class TrellisWidget(anywidget.AnyWidget):
     #: ``Trellis.code()``, kept current: the settings panel's "Copy as Python" copies it at
     #: once (a clipboard write must happen in the click).
     _code = traitlets.Unicode("").tag(sync=True)
+    #: Its place in a figure that lines up its plots' panels (``Concat._cell``: the
+    #: figure's id, its row and column), or None.
+    _figure = traitlets.Dict(None, allow_none=True).tag(sync=True)
 
     def __init__(self, plot: Trellis, state: dict[str, Any]) -> None:
         self._plot = plot

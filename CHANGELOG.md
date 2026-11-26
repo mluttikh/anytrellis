@@ -16,6 +16,12 @@ All notable changes to anytrellis. The format follows
 
 ### Changed
 
+- **A figure's plots line up** (`a | b`, `a / b`, `concat()`), as in patchwork: their
+  panels' left and right edges in a column, their tops in a row, and in a row the plots
+  whose height is free as high as the highest of them, so their x axes line up too. A plot
+  with `height=`, `panel_height=` or `aspect=` keeps its height. In the notebook (Jupyter
+  and marimo), the saved page and the image alike; `concat(..., align=False)` shows each
+  plot as it is alone, as before.
 - `save_html` of a `load="pages"` plot reads the rows a few panels at a time (about two
   million rows), keeping of each what the page draws: saving a table larger than memory
   works, and takes less time. With 30 million rows it needs 1 GB more than the plot

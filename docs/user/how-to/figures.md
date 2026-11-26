@@ -27,6 +27,25 @@ a plot. Each plot keeps its own scales, legend, toolbar and zoom: it is the same
 on its own, given a share of the width. Each row is as high as its highest plot, and each
 plot sits at the top of its row.
 
+## Panels lined up
+
+The plots' panels line up, as in patchwork: in a column their left and right edges, in a
+row their tops. Above, the box plot's panel starts and ends under the scatterplot's,
+however wide their y labels, and the histogram's panel starts level with the
+scatterplot's first row, under its title and toolbar.
+
+In a row, the plots whose height is free are as high as the highest of them, so their x
+axes line up too: the histogram reaches down to the scatterplot's last row. A plot whose
+height you set (`height=`, `panel_height=` or `aspect=`) keeps it; only its top lines up.
+
+Plots line up in the notebook, in the saved page and in the image alike. A figure inside
+a figure lines up its own plots, not with the plots around it. To show each plot as it is
+on its own, give `align=False`:
+
+```python
+concat(scatter, counts, align=False)
+```
+
 ## A grid, widths and a title
 
 `concat()` makes the same figures, and more: a grid of `cols=` columns filled row by row,

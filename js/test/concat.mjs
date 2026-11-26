@@ -60,6 +60,25 @@ check(placed.plots.length === want.length && placed.plots.every((p, i) => near(p
   `each plot where Python's image puts it (${placed.plots.map((p) => `${Math.round(p.x)}+${Math.round(p.w)}`).join(", ")})`);
 check(placed.plots[0].y === placed.plots[1].y && placed.plots[2].y > placed.plots[0].y, "two in the first row, at its top; the third under them");
 
+// lined up (align): the panels' edges in a column and their tops in a row; the scatter and
+// the histogram, their heights free, as high as each other
+const boxes = await page.evaluate(() =>
+  [...document.querySelectorAll(".anytrellis-embed")].map((h) => {
+    const v = window.anytrellisViews.find((x) => h.contains(x.root));
+    const s = v.stage.getBoundingClientRect();
+    const rects = v.lay.panels.map((b) => b.rect);
+    const x0 = Math.min(...rects.map((r) => r.x));
+    const y0 = Math.min(...rects.map((r) => r.y));
+    const x1 = Math.max(...rects.map((r) => r.x + r.w));
+    const y1 = Math.max(...rects.map((r) => r.y + r.h));
+    return { left: s.left + x0, top: s.top + y0, right: s.left + x1, bottom: s.top + y1 };
+  }),
+);
+const [sa, sb, sc] = boxes;
+const show = (b) => `${Math.round(b.left)},${Math.round(b.top)}–${Math.round(b.right)},${Math.round(b.bottom)}`;
+check(near(sa.top, sb.top) && near(sa.bottom, sb.bottom), `a row's panels start and end together (${show(sa)}; ${show(sb)})`);
+check(near(sa.left, sc.left) && near(sa.right, sc.right), `a column's panels have the same left and right edges (${show(sa)}; ${show(sc)})`);
+
 // the narrow plot: its title shown, its toolbar under it
 const narrow = await page.evaluate(() => {
   const h = document.querySelectorAll(".anytrellis-embed")[1];

@@ -3696,10 +3696,12 @@ class Trellis:
 
         return mo.ui.anywidget(self.widget)
 
-    def _embed_html(self, link: dict[str, Any] | None = None) -> str:
+    def _embed_html(self, link: dict[str, Any] | None = None,
+                    figure: dict[str, Any] | None = None) -> str:  # fmt: skip
         """The plot's data in a ``<div class="anytrellis-embed">``, for a page that loads
         ``standalone.js`` and ``widget.css`` once (the documentation's pages); ``link``:
-        its marks' keys in a link saved with it (``Link.to_html``)."""
+        its marks' keys in a link saved with it (``Link.to_html``); ``figure``: its place
+        in a figure that lines up its plots (``Concat._cell``)."""
         spec, buffers = self._full_scene()
         payload = {
             "spec": spec,
@@ -3714,6 +3716,7 @@ class Trellis:
             "zoom": self._start_zoom,
             "table": self._table_view(),
             "link": link,
+            "figure": figure,
         }
         data = json.dumps(payload).replace("</", "<\\/")
         script = f"<script type='application/json'>{data}</script>"

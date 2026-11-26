@@ -94,6 +94,28 @@ export interface LayoutOptions {
   /** A paged wrap's panels on the page shown (indices in spec.panels, in order; default:
    * the first page's). */
   page?: number[] | null;
+  /** Where the panels' box goes, lined up with other plots' in a figure (align.ts). */
+  frame?: Frame | null;
+}
+
+/** The panels' box (not their strips or axes) lined up with other plots' in a figure: its
+ * left edge at least at `left`, its top at least at `top`, and its right edge `right` px
+ * from the plot's right, or further if it must (figure.py: Frame). */
+export interface Frame {
+  left: number;
+  top: number;
+  right: number;
+}
+
+/** The box of a layout's panels (not their strips or axes): what a figure lines up. */
+export function panelsBox(lay: Layout): Rect {
+  const rects = lay.panels.map((b) => b.rect);
+  if (!rects.length) return { x: 0, y: 0, w: 0, h: 0 };
+  const x0 = Math.min(...rects.map((r) => r.x));
+  const y0 = Math.min(...rects.map((r) => r.y));
+  const x1 = Math.max(...rects.map((r) => r.x + r.w));
+  const y1 = Math.max(...rects.map((r) => r.y + r.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** The cell (row, column) of a wrap's `k`-th panel, filled as `dir` says (facets.py: place). */
@@ -271,10 +293,18 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
   const titleH = spec.title && opts.title !== false ? Math.round(fs * 1.6 + 6) : 0;
   const xTitleH = spec.x.title ? Math.round(fs * 1.4 + 4) : 0;
   const yTitle = yTitleRoom(spec, fs);
-  const left = 4 + yTitle.w;
-  const right = 10;
-  const top = 6 + titleH + yTitle.h;
+  // in a figure (frame): the panels' box moved right and down, and its right edge in, to
+  // line up with the other plots'
+  const frame = opts.frame ?? null;
+  const leftMost = 4 + yTitle.w;
+  let left = leftMost;
+  const right = frame ? Math.max(10, frame.right - rightStrip - (rightStrip ? GAP : 0)) : 10;
+  const top = Math.max(6 + titleH + yTitle.h, frame ? frame.top - topStrip - wrapStrip : 0);
   const bottom = 4 + xTitleH;
+  const lineUp = (): void => {
+    if (frame) left = Math.max(leftMost, frame.left - yAxisWidth[0]);
+  };
+  lineUp();
 
   let axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
   const shape = panelShape(spec);
@@ -325,6 +355,7 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
     if (showY[i]) yLabelWidth[i] = Math.max(yLabelWidth[i], yLabelsWidth(spec, p.y, opts, rowH[p.row]));
   });
   yGutters();
+  lineUp();
   [pw, ph] = panelSize();
   [colW, rowH] = sizes(pw, ph);
   // categories that don't fit side by side: on two lines or angled, the axis as high as that
@@ -335,6 +366,12 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
     axisRows = rowHasX.reduce((a, b) => a + (b ? xAxisHeight : 0), 0);
     [pw, ph] = panelSize();
     [colW, rowH] = sizes(pw, ph);
+  }
+  // in a figure: the pixels the panels' widths rounded off, a pixel more to the first
+  // columns, so the right edge lines up to the pixel
+  if (frame && !shape) {
+    const spare = Math.floor(freeWidth() - colW.reduce((a, b) => a + b, 0));
+    for (let c = 0; c < Math.min(spare, cols); c++) colW[c] += 1;
   }
   // panels narrowed to keep their shape: the grid centred
   const shift = Math.max(0, Math.floor((freeWidth() - colW.reduce((a, b) => a + b, 0)) / 2));
@@ -439,7 +476,7 @@ function layoutAt(spec: TrellisSpec, opts: LayoutOptions): Omit<Layout, "fontSiz
     strips,
     title: titleH ? { x: left, y: 6 + fs * 1.2 } : null,
     xTitle: xTitleH ? { x: look.x_title === "end" ? plotRight : centreX, y: plotBottom + xTitleH - 2 } : null,
-    yTitle: yTitle.w ? { x: shift + 4 + fs, y: centreY } : yTitle.h ? { x: left + shift, y: 6 + titleH + yTitle.h / 2 } : null,
+    yTitle: yTitle.w ? { x: left - leftMost + shift + 4 + fs, y: centreY } : yTitle.h ? { x: left + shift, y: top - yTitle.h / 2 } : null,
     spare,
     xAxisHeight,
     xLabels,
