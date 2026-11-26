@@ -127,6 +127,56 @@ const chips = await page.evaluate(() => document.querySelectorAll(".anytrellis-e
 const after = await headerH();
 check(chips > 0 && after === before, `its chip shows (${chips}), the narrow header as high as before (${before} → ${after} px)`);
 
+// legends collected: the figure shows one legend under its plots, none of them their own;
+// its clicks choose in each plot that has the legend
+await page.goto(`file://${join(dir, "concat-legend.html")}${renderer ? `?renderer=${renderer}` : ""}`);
+await page.waitForFunction(() => {
+  const hosts = [...document.querySelectorAll(".anytrellis-embed")];
+  return hosts.length === 3 && hosts.every((h) => h.dataset.state === "ready");
+});
+await page.waitForTimeout(300);
+const shown = await page.evaluate(() => ({
+  own: [...document.querySelectorAll(".anytrellis-embed .atr-legend")].filter((l) => getComputedStyle(l).display !== "none").length,
+  groups: [...document.querySelectorAll(".anytrellis-figure-legend .atr-legend-group")].map((g) => g.textContent),
+  below: document.querySelector(".anytrellis-figure-legend").getBoundingClientRect().top >= Math.max(...[...document.querySelectorAll(".anytrellis-embed")].map((h) => h.getBoundingClientRect().bottom)) - 1,
+}));
+check(shown.own === 0 && shown.groups.length === 1 && shown.groups[0] === "originEuropeJapanUSA" && shown.below, `one legend for the figure, under its plots (${JSON.stringify(shown)})`);
+const chosen = () =>
+  page.evaluate(() =>
+    window.anytrellisViews.map((v) => ({ levels: v.brush?.legend?.levels ?? [], isolated: v.isolated?.level ?? null })),
+  );
+const entry = (label) => page.locator(".anytrellis-figure-legend .atr-legend-pick", { hasText: label });
+await entry("Japan").click();
+await page.waitForTimeout(200);
+let now = await chosen();
+check(JSON.stringify(now.slice(0, 2).map((c) => c.levels)) === "[[1],[1]]" && now[2].levels.length === 0, `a click chooses Japan in both plots that have the legend (${JSON.stringify(now)})`);
+await entry("USA").click({ modifiers: ["Shift"] });
+await page.waitForTimeout(200);
+now = await chosen();
+check(JSON.stringify(now.slice(0, 2).map((c) => c.levels)) === "[[1,2],[1,2]]", `Shift adds USA in both (${JSON.stringify(now)})`);
+const on = await page.evaluate(() => [...document.querySelectorAll(".anytrellis-figure-legend .atr-legend-on")].map((e) => e.textContent));
+check(JSON.stringify(on) === '["Japan","USA"]', `the figure's legend shows them chosen (${on})`);
+await entry("Europe").dblclick();
+await page.waitForTimeout(200);
+now = await chosen();
+check(now[0].isolated === 0 && now[1].isolated === 0 && JSON.stringify(now[0].levels) === "[1,2]", `a double-click shows Europe alone in both, the choice as before it (${JSON.stringify(now)})`);
+// Escape in a plot: shown alone no more, there, in the legend and in the other plot
+await page.evaluate(() => window.anytrellisViews[0].root.focus());
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+const struck = await page.evaluate(() => document.querySelectorAll(".anytrellis-figure-legend .atr-legend-hidden").length);
+now = await chosen();
+check(struck === 0 && now.every((c) => c.isolated === null), `Escape in a plot: no entry alone, in the legend nor in the other plot (${struck} struck; ${JSON.stringify(now)})`);
+const legendBoxes = await page.evaluate(() =>
+  window.anytrellisViews.map((v) => {
+    const s = v.stage.getBoundingClientRect();
+    const rects = v.lay.panels.map((b) => b.rect);
+    return Math.round(s.top + Math.max(...rects.map((r) => r.y + r.h)));
+  }),
+);
+check(new Set(legendBoxes).size === 1, `without their legends, the row's panels still end together (${legendBoxes})`);
+await page.screenshot({ path: join(out, `concat-legend-${tag}.png`), fullPage: true });
+
 check(errors.length === 0, `no page errors (${errors.join("; ")})`);
 await browser.close();
 if (failures.length) process.exit(1);

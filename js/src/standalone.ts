@@ -3,7 +3,8 @@
 // <script type="application/json"> with {spec, buffers (id → base64), renderer}. Plots
 // saved linked (Link.save_html) carry their marks' keys and are linked here (savedlink.ts).
 
-import type { FigureCell } from "./core/align";
+import type { FigurePlace } from "./core/align";
+import { FigureLegend } from "./core/figurelegend";
 import { LinkGroup, type SavedLink, readLink } from "./core/savedlink";
 import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
@@ -32,7 +33,7 @@ interface Payload {
   /** The table view's data (Trellis._table_view). */
   table?: TableView | null;
   /** Its place in a figure that lines up its plots (Concat._cell), or null. */
-  figure?: FigureCell | null;
+  figure?: FigurePlace | null;
 }
 
 /** The view a link to the page names: #view=<name>. */
@@ -118,6 +119,13 @@ async function start(host: HTMLElement): Promise<void> {
 const NEAR = "600px";
 
 function startAll(): void {
+  // a figure's legend, collected from its plots: it fills in as they start
+  for (const host of document.querySelectorAll<HTMLElement>(".anytrellis-figure-legend")) {
+    if (host.dataset.legend && !host.dataset.state) {
+      host.dataset.state = "ready";
+      new FigureLegend(host, host.dataset.legend);
+    }
+  }
   const hosts = document.querySelectorAll<HTMLElement>(".anytrellis-embed");
   if (typeof IntersectionObserver === "undefined") {
     hosts.forEach((h) => void start(h));

@@ -166,7 +166,8 @@ def lassos(out: Path) -> None:
 def figures(out: Path) -> None:
     """Different plots in one figure (concat.mjs): a scatter linked with a histogram, a box
     plot under them, two columns of 2 and 1 shares (``concat.html``); where Python's image
-    puts each plot across a figure 824 px wide, as the page is at 856 (``concat.json``)."""
+    puts each plot across a figure 824 px wide, as the page is at 856 (``concat.json``);
+    three plots whose legends the figure collects (``concat-legend.html``)."""
     import json
     import re
 
@@ -181,6 +182,12 @@ def figures(out: Path) -> None:
     fig.save_html(out / "concat.html")
     placed = re.findall(r'<svg x="([\d.]+)" y="[\d.]+" width="([\d.]+)"', fig._svg(824, "light"))
     (out / "concat.json").write_text(json.dumps([[float(x), float(w)] for x, w in placed]))
+    # the legends collected (concat-legend.html): the same colours in two plots, a third
+    # without a legend; the figure shows one legend, its clicks choose in both
+    d = Trellis(cars, wrap="origin", title="Weight").points(x="weight", y="mpg", color="origin")
+    e = Trellis(cars, title="Horsepower").hist(x="horsepower", color="origin")
+    f = Trellis(cars, title="Acceleration").hist(x="acceleration")
+    concat(d, e, f, cols=3, legend="collect").save_html(out / "concat-legend.html")
 
 
 def keyboard(out: Path) -> None:

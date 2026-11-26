@@ -1,6 +1,7 @@
 // anywidget entry: connects a Python Trellis model (TrellisWidget) to TrellisView.
 
-import type { FigureCell } from "./core/align";
+import type { FigurePlace } from "./core/align";
+import { FigureLegend } from "./core/figurelegend";
 import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
@@ -115,6 +116,12 @@ function ask(model: AnyModel, s: ModelState, content: Record<string, unknown>, b
 }
 
 function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void {
+  // a figure's legend, collected from its plots (FigureLegendWidget)
+  const hub = model.get("_legend_hub") as string | undefined;
+  if (hub) {
+    const legend = new FigureLegend(el, hub);
+    return () => legend.destroy();
+  }
   const s = stateFor(model);
   let lastLive = 0; // when the brush last went to Python
   const view = new TrellisView(el, {
@@ -199,7 +206,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   // Trellis.select in Python (or another view)
   const onSelection = (): void => view.setSelection((model.get("selection") as Brush | null) ?? null);
   // its place in a figure (Concat): lined up with the figure's other plots
-  const onFigure = (): void => view.setFigure((model.get("_figure") as FigureCell | null) ?? null);
+  const onFigure = (): void => view.setFigure((model.get("_figure") as FigurePlace | null) ?? null);
   // Trellis.show_page, sort_panels, filter_panels in Python (or another view)
   const onPaging = (): void => view.setPaging((model.get("paging") as Paging | null) ?? null);
   // Trellis.save_view, drop_view in Python (or another view)

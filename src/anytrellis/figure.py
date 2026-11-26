@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 import itertools
+import json
 import math
 import re
 import struct
@@ -1350,6 +1351,43 @@ class _Svg:
                 f"{about}{defs}{''.join(self.out)}</svg>")  # fmt: skip
 
 
+def legend_key(lg: dict[str, Any]) -> str:
+    """What makes two plots' legends the same one (figurelegend.ts: legendKey): all of it."""
+    return json.dumps(lg, sort_keys=True)
+
+
+def figure_legend(plots: list[Trellis], width: float, theme: str,
+                  ids: str = "") -> tuple[str, float]:  # fmt: skip
+    """The legends of a figure's plots, each once, as under a plot (figurelegend.ts): an SVG
+    ``width`` wide and its height ("", 0: none). Not those of a plot with ``legend("none")``,
+    nor those naming the lines at their ends; the entries chosen are the first plot's that
+    has the legend."""
+    th = THEMES[theme]
+    groups: list[list[_Entry]] = []
+    seen: set[str] = set()
+    size = None
+    for plot in plots:
+        spec, _ = plot._shown_scene()
+        if (spec.get("legend_position") or "auto") == "none":
+            continue
+        chosen = (plot._current_selection() or {}).get("legend") or None
+        for index, lg in enumerate(spec["legends"]):
+            key = legend_key(lg)
+            if lg.get("direct") or key in seen:
+                continue
+            seen.add(key)
+            size = size or look_of(spec)["font_size"]
+            mine = {"legend": {**chosen, "index": 0}} if chosen and chosen.get("index") == index \
+                else None  # fmt: skip
+            groups += _legend_groups({**spec, "legends": [lg]}, mine)
+    if not groups:
+        return "", 0.0
+    placed, h = _legend_below(groups, width)
+    svg = _Svg(width, h, size or FONT_SIZE, ids)
+    _draw_legend(svg, placed, 0, th)
+    return str(svg), h
+
+
 def grid_axes(spec: dict[str, Any]) -> tuple[bool, bool]:
     """Which axes draw grid lines (never a band's): as the look says; ``"auto"``, y, and x
     too for points (a scatter reads off both) or when y is a band (bars along x)."""
@@ -2329,9 +2367,10 @@ class Placed:
 
 
 def _arrange(plot: Trellis, width: float | None, height: float | None,
-             page_label: str | None, frame: Frame | None) -> _Arranged:  # fmt: skip
+             page_label: str | None, frame: Frame | None,
+             legends: bool = True) -> _Arranged:  # fmt: skip
     """``figure_svg``'s arrangement of ``plot``, ``frame`` (in the image) lining up its
-    panels with other plots'."""
+    panels with other plots'; ``legends``: False, none (a figure shows them)."""
     spec, buffers = plot._shown_scene()
     shown = _shown(plot)
     width = float(width or shown["width"] or DEFAULT_WIDTH)
@@ -2365,7 +2404,7 @@ def _arrange(plot: Trellis, width: float | None, height: float | None,
     focused = names.index(focus_name) if focus_name in names else None
     brush = plot._current_selection()
     position = spec.get("legend_position") or "auto"
-    groups = [] if position == "none" else _legend_groups(spec, brush)
+    groups = [] if position == "none" or not legends else _legend_groups(spec, brush)
 
     placed: list[_Placed] = []
     legend_h = 0.0
@@ -2427,9 +2466,10 @@ def _arrange(plot: Trellis, width: float | None, height: float | None,
 
 
 def figure_box(plot: Trellis, width: float | None = None, height: float | None = None,
-               frame: Frame | None = None) -> Placed:  # fmt: skip
-    """Where ``figure_svg`` puts the plot's panels' box in its image (``frame``: lined up)."""
-    a = _arrange(plot, width, height, None, frame)
+               frame: Frame | None = None, legends: bool = True) -> Placed:  # fmt: skip
+    """Where ``figure_svg`` puts the plot's panels' box in its image (``frame``: lined up;
+    ``legends``: False, drawn without them)."""
+    a = _arrange(plot, width, height, None, frame, legends)
     box = panels_box(a.lay)
     spec = a.spec
     free = (a.focused is None and not spec.get("height") and not spec.get("panel_height")
@@ -2440,17 +2480,18 @@ def figure_box(plot: Trellis, width: float | None = None, height: float | None =
 
 def figure_svg(plot: Trellis, *, width: float | None = None, height: float | None = None,
                theme: str = "light", ids: str = "", page_label: str | None = None,
-               frame: Frame | None = None) -> str:  # fmt: skip
+               frame: Frame | None = None, legends: bool = True) -> str:  # fmt: skip
     """The plot as shown, as an SVG ``width`` by ``height`` CSS pixels (default: the
     width it was last shown at, else ``DEFAULT_WIDTH``; the height its layout's). ``ids``:
     before its ids, for one of several plots in an image (``compose.Concat``). ``page_label``:
     a line under the title saying which page it is, where the browser's page bar is (a PDF
     of a paged plot's pages). ``frame``: where its panels' box goes in the image, lined up
-    with other plots' in a figure."""
+    with other plots' in a figure; ``legends``: False, drawn without its legends (a figure
+    collects them, ``figure_legend``)."""
     if theme not in THEMES:
         raise ValueError(f"theme must be one of {list(THEMES)}, got {theme!r}")
     th = THEMES[theme]
-    a = _arrange(plot, width, height, page_label, frame)
+    a = _arrange(plot, width, height, page_label, frame, legends)
     spec, buffers, shown, width = a.spec, a.buffers, a.shown, a.width
     size, title_size, header, subtitle = a.size, a.title_size, a.header, a.subtitle
     caption, sub_h, cap_line, cap_h, top = a.caption, a.sub_h, a.cap_line, a.cap_h, a.top

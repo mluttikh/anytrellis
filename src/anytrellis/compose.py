@@ -14,6 +14,11 @@ a column, their tops in a row, and in a row the plots whose height is free (no
 laid out three times: as it is (where its panels would be), framed (its panels moved to
 the column's and row's edges) and stretched (as high as the row's), each step from the
 one before alone, so the browser's plots (align.ts) reach the same place as an image.
+
+``legend="collect"`` shows the plots' legends once, under the figure (patchwork's
+``guides="collect"``): each plot draws none of its own, and a legend several plots have is
+shown once. In the browser a click on it chooses its entries in every plot that has it
+(figurelegend.ts); in an image it is drawn under the plots (``figure.figure_legend``).
 """
 
 from __future__ import annotations
@@ -50,6 +55,7 @@ class Concat:
         widths: Sequence[float] | None = None,
         title: str | None = None,
         align: bool = True,
+        legend: str = "keep",
     ) -> None:
         from anytrellis.plot import Trellis
 
@@ -76,6 +82,8 @@ class Concat:
             raise TypeError(f"title must be a string, got {type(title).__name__}")
         if not isinstance(align, bool):
             raise TypeError(f"align must be True or False, got {align!r}")
+        if legend not in ("keep", "collect"):
+            raise ValueError(f'legend must be "keep" or "collect", got {legend!r}')
         self.items: list[Item] = items
         """The plots (and figures) in it, row by row."""
         self.cols = cols
@@ -86,6 +94,9 @@ class Concat:
         """The figure's title, over its plots (None: none)."""
         self.align = align
         """Line its plots' panels up (False: each plot as it is alone)."""
+        self.legend = legend
+        """``"collect"``: its plots' legends shown once, under it; ``"keep"``: each plot's
+        own."""
         self._group = uuid.uuid4().hex
         self._widget: Any = None
 
@@ -115,8 +126,10 @@ class Concat:
         return [self.items[i : i + self.cols] for i in range(0, len(self.items), self.cols)]
 
     def _bare(self) -> bool:
-        """A plain row or column to add to: no title, its columns alike, aligned."""
-        return self.title is None and len(set(self.widths)) <= 1 and self.align
+        """A plain row or column to add to: no title, its columns alike, aligned, each
+        plot's legend its own."""
+        return (self.title is None and len(set(self.widths)) <= 1 and self.align
+                and self.legend == "keep")  # fmt: skip
 
     def _cell(self, index: int) -> dict[str, Any] | None:
         """What the browser needs to line item ``index`` up with the others (a plot's), or
@@ -125,64 +138,122 @@ class Concat:
             return None
         return {"group": self._group, "row": index // self.cols, "col": index % self.cols}
 
+    def _collects(self, collected: bool) -> bool:
+        """It shows its plots' legends (not a figure around it, ``collected``)."""
+        return self.legend == "collect" and not collected
+
+    def _places(self) -> dict[int, dict[str, Any] | None]:
+        """Each plot's place, nested figures' too, by ``id``: its cell to line up in
+        (``_cell``: its own figure's), and the figure that collects its legend
+        (``legend``: the outermost that does) with its place among that figure's plots
+        (``order``); None: neither."""
+        out: dict[int, dict[str, Any] | None] = {}
+
+        def walk(fig: Concat, collect: str | None) -> None:
+            collect = collect or (fig._group if fig.legend == "collect" else None)
+            for i, item in enumerate(fig.items):
+                if isinstance(item, Concat):
+                    walk(item, collect)
+                    continue
+                place = dict(fig._cell(i) or {})
+                if collect:
+                    place["legend"] = collect
+                out[id(item)] = place or None
+
+        walk(self, None)
+        for k, plot in enumerate(self.plots):
+            place = out.get(id(plot))
+            if place and "legend" in place:
+                place["order"] = k
+        return out
+
     # ---- in a notebook -------------------------------------------------------------------
 
     @property
     def widget(self) -> Any:
         """The figure in Jupyter: an ipywidgets ``GridBox`` of the plots' widgets."""
         if self._widget is None:
-            import ipywidgets as widgets
-
-            self._place_widgets()
-            children = [item.widget for item in self.items]
-            grid = widgets.GridBox(children, layout=widgets.Layout(
-                grid_template_columns=_columns(self.widths), grid_gap=f"{GAP}px",
-                align_items="flex-start", width="100%"))  # fmt: skip
-            if self.title is None:
-                self._widget = grid
-            else:
-                heading = widgets.HTML(_title_html(self.title))
-                self._widget = widgets.VBox([heading, grid],
-                                            layout=widgets.Layout(width="100%"))  # fmt: skip
+            self._widget = self._box(False)
+        self._place_widgets()
         return self._widget
 
+    def _box(self, collected: bool) -> Any:
+        """Its ipywidgets: a ``GridBox`` of its plots' widgets (and of nested figures'),
+        under its title and over its legend (``collected``: a figure around it shows it)."""
+        import ipywidgets as widgets
+
+        from anytrellis.widget import FigureLegendWidget
+
+        collects = self._collects(collected)
+        children = [item._box(collected or collects) if isinstance(item, Concat)
+                    else item.widget for item in self.items]  # fmt: skip
+        grid = widgets.GridBox(children, layout=widgets.Layout(
+            grid_template_columns=_columns(self.widths), grid_gap=f"{GAP}px",
+            align_items="flex-start", width="100%"))  # fmt: skip
+        parts: list[Any] = []
+        if self.title is not None:
+            parts.append(widgets.HTML(_title_html(self.title)))
+        parts.append(grid)
+        if collects:
+            parts.append(FigureLegendWidget(_legend_hub=self._group))
+        if len(parts) == 1:
+            return grid
+        return widgets.VBox(parts, layout=widgets.Layout(width="100%"))
+
     def _place_widgets(self) -> None:
-        """Tell each plot's widget its place, to line up with the others (``_cell``)."""
-        for i, item in enumerate(self.items):
-            if not isinstance(item, Concat):
-                item.widget._figure = self._cell(i)  # ty: ignore[invalid-assignment]  # allow_none
+        """Tell each plot's widget its place (``_places``), nested figures' too."""
+        places = self._places()
+        for plot in self.plots:
+            plot.widget._figure = places.get(id(plot))  # ty: ignore[invalid-assignment]  # allow_none
 
     def _repr_mimebundle_(self, **kwargs: Any) -> Any:
         return self.widget._repr_mimebundle_(**kwargs)
 
     def _display_(self) -> Any:
         """What marimo shows: stacks of the plots' widgets."""
+        self._place_widgets()
+        return self._stacks(False)
+
+    def _stacks(self, collected: bool) -> Any:
+        """marimo's stacks of its plots (``collected``: a figure around it shows its
+        legend)."""
         import marimo as mo
 
-        self._place_widgets()
+        from anytrellis.widget import FigureLegendWidget
+
+        collects = self._collects(collected)
         rows = []
         for row in self._rows():
-            shown = [item._display_() for item in row]
+            shown = [item._stacks(collected or collects) if isinstance(item, Concat)
+                     else item._display_() for item in row]  # fmt: skip
             shown += [mo.md("") for _ in range(self.cols - len(row))]  # a short last row
             rows.append(mo.hstack(shown, widths=list(self.widths), gap=GAP / 16, align="start"))
         body = rows[0] if len(rows) == 1 else mo.vstack(rows, gap=GAP / 16)
-        if self.title is None:
-            return body
-        return mo.vstack([mo.Html(_title_html(self.title)), body], gap=0)
+        parts = [mo.Html(_title_html(self.title))] if self.title is not None else []
+        parts.append(body)
+        if collects:
+            parts.append(mo.ui.anywidget(FigureLegendWidget(_legend_hub=self._group)))
+        return body if len(parts) == 1 else mo.vstack(parts, gap=0)
 
     # ---- a page --------------------------------------------------------------------------
 
-    def _embed_html(self, links: dict[int, list[dict[str, Any]]] | None = None) -> str:
+    def _embed_html(self, links: dict[int, list[dict[str, Any]]] | None = None,
+                    places: dict[int, dict[str, Any] | None] | None = None,
+                    collected: bool = False) -> str:  # fmt: skip
         """The figure's ``<div>``: a CSS grid of its plots' embeds (each with its marks'
-        keys when it is linked, ``links``: a link's payloads, made once per link)."""
+        keys when it is linked, ``links``: a link's payloads, made once per link; and its
+        place, ``places``), and its legend under them when it collects them."""
         from anytrellis.linking import saved_links
 
         if links is None:
             links = {}
+        if places is None:
+            places = self._places()
+        collects = self._collects(collected)
         cells = []
-        for i, item in enumerate(self.items):
+        for item in self.items:
             if isinstance(item, Concat):
-                inner = item._embed_html(links)
+                inner = item._embed_html(links, places, collected or collects)
             else:
                 group = item._link_group
                 payload = None
@@ -190,7 +261,7 @@ class Concat:
                     if id(group) not in links:
                         links[id(group)] = saved_links(group)
                     payload = links[id(group)][group.plots.index(item)]
-                inner = item._embed_html(payload, figure=self._cell(i))
+                inner = item._embed_html(payload, figure=places.get(id(item)))
             cells.append(f"<div style='min-width:0'>{inner}</div>")
         style = (f"display:grid;grid-template-columns:{_columns(self.widths)};"
                  f"gap:{GAP}px;align-items:start")  # fmt: skip
@@ -199,7 +270,9 @@ class Concat:
         linked = any(p._link_group is not None for p in self.plots)
         kind = "anytrellis-concat anytrellis-link" if linked else "anytrellis-concat"
         title = _title_html(self.title) if self.title is not None else ""
-        return f"<div class='{kind}'>{title}{grid}</div>"
+        legend = (f"<div class='anytrellis-figure-legend' data-legend='{self._group}'></div>"
+                  if collects else "")  # fmt: skip
+        return f"<div class='{kind}'>{title}{grid}{legend}</div>"
 
     def to_html(self, *, title: str | None = None) -> str:
         """The figure as one standalone HTML page: data and code inside, no kernel needed;
@@ -245,9 +318,11 @@ class Concat:
         width = view.get("width")
         return float(width) if width else None
 
-    def _aligned(self, col_w: list[float]) -> dict[int, tuple[Frame, float | None]]:
+    def _aligned(self, col_w: list[float],
+                 legends: bool = True) -> dict[int, tuple[Frame, float | None]]:  # fmt: skip
         """Each plot's frame and height (None: its own) in an image, its column ``col_w``
-        wide, lining its panels up with the others' (align.ts: the browser's)."""
+        wide, lining its panels up with the others' (align.ts: the browser's); ``legends``:
+        False, the plots drawn without theirs."""
         from anytrellis.figure import Frame, figure_box
         from anytrellis.plot import Trellis
 
@@ -258,14 +333,15 @@ class Concat:
                  if isinstance(item, Trellis) and item.focused is None}  # fmt: skip
         cols = self.cols
         width = {i: col_w[i % cols] for i in plots}
-        natural = {i: figure_box(p, width[i]) for i, p in plots.items()}
+        natural = {i: figure_box(p, width[i], legends=legends) for i, p in plots.items()}
         frames = {}
         for i in plots:
             col = [b for j, b in natural.items() if j % cols == i % cols]
             row = [b for j, b in natural.items() if j // cols == i // cols]
             frames[i] = Frame(max(b.left for b in col), max(b.top for b in row),
                               max(b.right for b in col))  # fmt: skip
-        framed = {i: figure_box(p, width[i], frame=frames[i]) for i, p in plots.items()}
+        framed = {i: figure_box(p, width[i], frame=frames[i], legends=legends)
+                  for i, p in plots.items()}  # fmt: skip
         out: dict[int, tuple[Frame, float | None]] = {}
         for i, p in plots.items():
             box = framed[i]
@@ -275,21 +351,35 @@ class Concat:
             if target > box.height:
                 # as much higher as the panels must be, and again for what rounding lost
                 height = box.total + target - box.height
-                got = figure_box(p, width[i], height, frames[i]).height
+                got = figure_box(p, width[i], height, frames[i], legends).height
                 if got != target:
                     height += target - got
             out[i] = (frames[i], height)
         return out
 
-    def _svg_parts(self, width: float, theme: str, ids: str) -> tuple[list[str], float]:
-        """Its plots' SVGs, placed (``<svg x y>`` elements), and the height they take."""
-        from anytrellis.figure import FONT_SIZE, HEADER, THEMES, TITLE, _n, figure_svg, fit
+    def _svg_parts(self, width: float, theme: str, ids: str,
+                   collected: bool = False) -> tuple[list[str], float]:  # fmt: skip
+        """Its plots' SVGs, placed (``<svg x y>`` elements), and the height they take, with
+        its legend under them when it collects them (``collected``: a figure around it
+        does, its plots drawn without theirs)."""
+        from anytrellis.figure import (
+            FONT_SIZE,
+            HEADER,
+            THEMES,
+            TITLE,
+            _n,
+            figure_legend,
+            figure_svg,
+            fit,
+        )
 
         th = THEMES[theme]
         room = width - GAP * (self.cols - 1)
         col_w = [room * w / sum(self.widths) for w in self.widths]
         col_x = [sum(col_w[:c]) + GAP * c for c in range(self.cols)]
-        aligned = self._aligned(col_w)
+        collects = self._collects(collected)
+        legends = not (collected or collects)
+        aligned = self._aligned(col_w, legends)
         out: list[str] = []
         y = 0.0
         if self.title is not None:
@@ -307,19 +397,25 @@ class Concat:
                 n += 1
                 w = col_w[c]
                 if isinstance(item, Concat):
-                    parts, h = item._svg_parts(w, theme, key)
+                    parts, h = item._svg_parts(w, theme, key, not legends)
                     body = "".join(parts)
                     out.append(f'<svg x="{_n(col_x[c])}" y="{_n(y)}" width="{_n(w)}" '
                                f'height="{_n(h)}" overflow="visible">{body}</svg>')  # fmt: skip
                 else:
                     frame, height = aligned.get(n - 1, (None, None))
                     svg = figure_svg(item, width=w, height=height, theme=theme, ids=key,
-                                     frame=frame)  # fmt: skip
+                                     frame=frame, legends=legends)  # fmt: skip
                     h = float(svg.split('height="', 1)[1].split('"', 1)[0])
                     head = '<svg xmlns="http://www.w3.org/2000/svg" '
                     out.append(svg.replace(head, f'<svg x="{_n(col_x[c])}" y="{_n(y)}" ', 1))
                 tallest = max(tallest, h)
             y += tallest + (GAP if r < len(self._rows()) - 1 else 0)
+        if collects:  # under the plots, as the page's (figurelegend.ts)
+            legend, h = figure_legend(self.plots, width, theme, f"{ids}l-")
+            if legend:
+                head = '<svg xmlns="http://www.w3.org/2000/svg" '
+                out.append(legend.replace(head, f'<svg x="0" y="{_n(y)}" ', 1))
+                y += h
         return out, y
 
     def _svg(self, width: float | None, theme: str) -> str:
@@ -402,7 +498,8 @@ class Concat:
 
 
 def concat(*plots: Item, cols: int | None = None, widths: Sequence[float] | None = None,
-           title: str | None = None, align: bool = True) -> Concat:  # fmt: skip
+           title: str | None = None, align: bool = True,
+           legend: str = "keep") -> Concat:  # fmt: skip
     """Plots (or figures) in one figure: a row of them, or a grid of ``cols`` columns,
     filled row by row.
 
@@ -423,8 +520,11 @@ def concat(*plots: Item, cols: int | None = None, widths: Sequence[float] | None
             tops in a row, and in a row those whose height is free (no ``height``,
             ``panel_height`` or ``aspect``) as high as the highest of them. False: each
             plot as it is alone.
+        legend: ``"collect"``: the plots' legends shown once, under the figure (a legend
+            several plots have, once); a click on an entry chooses it in every plot that
+            has it. ``"keep"``: each plot shows its own.
     """
-    return Concat(plots, cols=cols, widths=widths, title=title, align=align)
+    return Concat(plots, cols=cols, widths=widths, title=title, align=align, legend=legend)
 
 
 def beside(left: Item, right: Item) -> Concat:

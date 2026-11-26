@@ -24,6 +24,16 @@ export interface FigureCell {
   col: number;
 }
 
+/** A plot's place in a figure, as Python tells it (Concat._places): its cell to line up in
+ * (none: not lined up), and the figure that shows its legends (none: its own). */
+export interface FigurePlace {
+  group?: string;
+  row?: number;
+  col?: number;
+  legend?: string;
+  order?: number;
+}
+
 /** Where a plot's panels are in its cell, as it is alone; `free`: its height may grow. */
 export interface Natural {
   left: number;

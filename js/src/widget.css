@@ -84,6 +84,10 @@ body.vscode-high-contrast:not(.vscode-high-contrast-light) .atr-root,
   cursor: crosshair;
 }
 
+/* a figure's legend, collected from its plots (figurelegend.ts): under them, as a plot's */
+.atr-root.atr-figure-legend {
+  background: transparent;
+}
 .atr-legend {
   display: flex;
   flex-wrap: wrap;
