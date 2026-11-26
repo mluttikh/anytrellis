@@ -217,6 +217,16 @@ class LineDetail:
         return Window(x0, x1, nx=nx)
 
 
+def shaded(rgba: np.ndarray, counts: np.ndarray, area: np.ndarray, ref: float) -> np.ndarray:
+    """Cells' colours, more opaque the more points they hold: as opaque as their colour
+    at ``ref`` points in a unit of area (cells of other sizes in proportion)."""
+    full = np.maximum(ref * area, 2.0)  # the points of a cell as opaque as it gets
+    alpha = np.clip(0.2 + 0.8 * np.log1p(counts) / np.log1p(full), 0.2, 1.0)
+    out = rgba.copy()
+    out[:, 3] = np.round(out[:, 3] * alpha).astype(np.uint8)
+    return out
+
+
 class PointDetail:
     """A points layer with dense panels: its points (painted, sorted by panel), each one's
     colour level (``codes``) or number (``values``), and the window each dense panel was sent
@@ -240,7 +250,10 @@ class PointDetail:
         """Each dense panel's cells as the plot starts (``start_at``)."""
         self.ref: float | None = None
         """The most points in a unit of area of a cell, as the plot starts: as opaque as a
-        cell gets (cells of other sizes in proportion)."""
+        cell gets (cells of other sizes in proportion); None: no cells yet."""
+        self.unshaded: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+        """The cells last sent: their colours before ``shaded``, points and areas (a saved
+        page's chunks of panels shaded again, by the ``ref`` of them all)."""
 
     def start_at(self, domains: list[tuple[float, float, float, float]],
                  sizes: list[tuple[float, float]]) -> None:  # fmt: skip
@@ -323,12 +336,10 @@ class PointDetail:
             means = np.divide(total, seen, out=np.full(n, np.nan), where=seen > 0)
         area = (cw * ch)[cp]
         if self.ref is None:
-            self.ref = float((counts / area).max()) if n else 1.0
-        full = np.maximum(self.ref * area, 2.0)  # the points of a cell as opaque as it gets
-        alpha = np.clip(0.2 + 0.8 * np.log1p(counts) / np.log1p(full), 0.2, 1.0)
-        rgba = self.cell_colors(n, mix, means).copy()
-        rgba[:, 3] = np.round(rgba[:, 3] * alpha).astype(np.uint8)
-        geom.rgba = rgba
+            self.ref = float((counts / area).max()) if n else None
+        rgba = self.cell_colors(n, mix, means)
+        self.unshaded = (rgba, counts, area)
+        geom.rgba = shaded(rgba, counts, area, 1.0 if self.ref is None else self.ref)
         # the points of each level (the most's: the browser tells it, from the legend)
         columns: dict[str, np.ndarray] = {"points": counts}
         if mix is not None and self.levels and len(self.levels) <= TIP_LEVELS:

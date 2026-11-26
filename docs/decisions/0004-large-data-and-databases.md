@@ -2,9 +2,10 @@
 
 - Status: **implemented**, 7 and 8 November 2026 (0.2 and 0.3): level of detail, lazy
   tables, a window of panels, `load="pages"`, summaries and links computed by the database.
+  26 November 2026 (0.9): a saved page read a few panels at a time.
 - Changes: `data.py` (`Table`), `detail.py`, `query.py`, `summaries.py`, `plot.py`
-  (`_rows_of`, `_wanted_of`, `_window`, `_page_summary`), `linking.py`; `tests/test_detail.py`,
-  `tests/test_page_*.py`, `js/test/live-*.mjs`.
+  (`_rows_of`, `_wanted_of`, `_window`, `_page_summary`, `_chunked_scene`), `linking.py`;
+  `tests/test_detail.py`, `tests/test_page_*.py`, `js/test/live-*.mjs`.
 - Written after the fact, from the code and the pull requests.
 
 ## Context
@@ -34,10 +35,21 @@ there.
   more than `DENSE` (100,000) points is drawn as cells, coloured by their points. When a
   zoom settles, the browser reports what it shows and Python sends those panels in more
   detail, replacing what was drawn.
+- **A saved page reads a few panels at a time.** `save_html` of a paged `load="pages"`
+  plot builds its layers a chunk of panels at a time (`CHUNK_ROWS`, about two million rows;
+  at most `CHUNK_PANELS` panels, whose keys are in the query), as a page turn builds them,
+  and keeps of each chunk what its layers send and the rows that refers to. The chunks'
+  layers are joined into one, the dense points' cells shaded by the densest cell of them
+  all: the page is the one reading every row at once makes, and Python holds a chunk's
+  rows, not the table's. A plot that doesn't page has read every row already: its scene is
+  the saved page's.
 - **Rows find their panel by codes**, not by comparing values, so assigning a million rows
   to a thousand panels stays fast.
 
 ## Known limits
 
-- `save_html` reads every row (a saved page has no database to ask).
+- A saved page holds every panel at the detail the plot starts with, so its size grows
+  with the panels (258 MB for 1000 panels of 100,000 points), and Python holds about its
+  size several times over while writing it.
+- `Link.save_html` of `load="pages"` plots reads every row at once (decision 0014).
 - A page saved without Python shows the plot at its starting level of detail.
