@@ -19,7 +19,7 @@ pip install "anytrellis[png]"        # with resvg-py, for save_png
 pip install "anytrellis[pdf]"        # with vl-convert-python, for save_pdf
 ```
 
-Status: early development (0.7). One panel per level of the facet columns, every panel
+Status: early development (0.8). One panel per level of the facet columns, every panel
 drawn with the same layers (lines, points, bars, areas, rects, segments, text, rugs,
 histograms, box plots, violins, densities, error bars, hexagonal bins, contours, reference
 rules), on shared scales unless told otherwise.

@@ -4,6 +4,19 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
+## 0.8.0
+
+No code stops working. Two things a reader does work differently:
+
+- **With select (or the new lasso) on, a click on a mark selects it**; a click on no mark
+  still clears the selection, as before.
+- **In a panel opened (or a plot of one panel), the arrow keys step through its marks**,
+  showing each one's tooltip; in a grid they still move from panel to panel.
+
+`save_png` takes `dpi=` for the printed size (`dpi=300`); `scale=` still works, but not
+both together. `stats()` now gives the panels' statistics of any plot, not only of a paged
+wrap.
+
 ## 0.7.0
 
 No code stops working. Tooltips have a title line and a row a value, and in the minimal
