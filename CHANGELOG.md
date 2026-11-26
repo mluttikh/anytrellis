@@ -95,6 +95,11 @@ All notable changes to anytrellis. The format follows
 - With select on, a click on a mark selects it; a click on no mark still clears the
   selection.
 
+### Fixed
+
+- Full screen fits a paged wrap on the screen: the pager's bar was left out of the height,
+  so the plot ran past the bottom and its x axis needed a scroll.
+
 ## [0.7.0] - 2026-11-21
 
 ### Added

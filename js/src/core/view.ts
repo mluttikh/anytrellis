@@ -1516,13 +1516,14 @@ export class TrellisView {
     const ctx = this.front.getContext("2d")!;
     ctx.font = `${this.theme.fontSize}px ${this.theme.font}`;
     const base = { width, fontSize: this.theme.fontSize, measure: (t: string) => ctx.measureText(t).width, title: false };
-    // full screen: the screen less the header and the legend; an opened panel otherwise:
+    // full screen: the screen less the header, the pager and the legend; an opened panel otherwise:
     // about the grid's height, so the page does not jump (panels with a shape keep it in both)
     let height: number | null = null;
     if (this.isFullscreen()) {
       const css = getComputedStyle(this.root);
       const pad = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
-      const text = this.header.offsetHeight + this.subtitle.offsetHeight + this.caption.offsetHeight;
+      // (the pager: a paged wrap's bar, shown over the plot; hidden, it is 0 high)
+      const text = this.header.offsetHeight + this.subtitle.offsetHeight + this.pager.el.offsetHeight + this.caption.offsetHeight;
       height = Math.max(200, this.root.clientHeight - pad - text - 4);
     }
     const position = this.spec.legend_position ?? "auto";

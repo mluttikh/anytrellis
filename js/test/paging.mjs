@@ -134,6 +134,18 @@ await settle();
 s = await state();
 check(s.focused === null && s.pager && s.where === "Page 1 of 2", `back to all panels: the page that has it (${s.where})`);
 
+// full screen: the whole plot on the screen, the pager's bar left room (no scrolling to
+// the x axis)
+await page.keyboard.press("f");
+await page.waitForTimeout(400);
+const full = await page.evaluate(() => {
+  const root = document.querySelector(".atr-root");
+  return { on: root.matches(":fullscreen"), scroll: root.scrollHeight, client: root.clientHeight };
+});
+check(full.on && full.scroll <= full.client, `full screen fits the paged plot (${full.scroll} px in ${full.client})`);
+await page.keyboard.press("f");
+await page.waitForTimeout(400);
+
 check(errors.length === 0, `no page errors${errors.length ? `: ${errors.join("; ")}` : ""}`);
 await browser.close();
 if (failures.length) {
