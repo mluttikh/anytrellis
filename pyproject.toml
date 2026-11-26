@@ -38,8 +38,11 @@ dependencies = [
 examples = ["polars>=1.30"]
 # Trellis.save_png (save_svg needs nothing more)
 png = ["resvg-py>=0.5.0"]
-# Trellis.save_pdf: a vector PDF of the plot's SVG
-pdf = ["vl-convert-python>=1.7"]
+# Trellis.save_pdf: a vector PDF of the plot's SVG (pypdf: a paged plot's pages in one)
+pdf = [
+    "pypdf>=5",
+    "vl-convert-python>=1.7",
+]
 
 # pd.options.plotting.backend = "anytrellis": df.plot(...) draws with anytrellis
 [project.entry-points.pandas_plotting_backends]
@@ -71,6 +74,7 @@ dev = [
     "markdown-exec>=1.12.6",
     "duckdb>=1.1",
     "ibis-framework[duckdb]>=10",
+    "pypdf>=5",
 ]
 
 [build-system]

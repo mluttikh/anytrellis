@@ -78,6 +78,24 @@ pip install "anytrellis[pdf]"
 A [figure of several plots](figures.md) takes the same `width` and `dpi`, and has
 `save_pdf` too.
 
+### Every page of a paged plot, one PDF
+
+A paged plot's image is the page shown. `pages=` puts pages in one PDF, each on a page of
+its own: `"all"`, in the order the plot shows them (sorted and filtered as it is), or a
+list of their numbers or names. Each says under the title which page it is ("Page 2 of
+7", or the level of `page=`: "region: coast"), as the page bar does, and is a bookmark of
+the PDF.
+
+```python
+stations.save_pdf("stations.pdf", pages="all", width="180mm")   # a report of every page
+regions.save_pdf("two.pdf", pages=["south", "coast"])           # page="region": by name
+```
+
+The plot shown stays on its page. Each page is its grid, not a panel opened. With
+`load="pages"`, Python reads the rows a few pages at a time, as it does when you turn
+them, so a PDF of a large table's pages needs the memory of a page, not of the table.
+Joining the pages needs `pypdf`, in the same `pdf` extra.
+
 Python draws the text in a common sans-serif font, so the labels can look slightly
 different from the browser's. The Export menu's images are the browser's own.
 

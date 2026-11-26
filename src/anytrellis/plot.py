@@ -2739,6 +2739,10 @@ class Trellis:
         t.show_page("Amsterdam")      # page="site"
         ```
         """
+        return self._set_paging(page=self._page_index(page))
+
+    def _page_index(self, page: int | str) -> int:
+        """A page's index (from 0), of its number (from 1) or its name."""
         self._scene()
         if self._pages_spec() is None:
             raise ValueError("this plot does not page: give rows= (and wrap=), or page=")
@@ -2750,10 +2754,19 @@ class Trellis:
             if not found:
                 shown = ", ".join(repr(n) for n in names[:8]) + (", ..." if len(names) > 8 else "")
                 raise ValueError(f"no page {page!r}; the pages are {shown}")
-            return self._set_paging(page=found[0])
-        if not 1 <= page <= self.pages:
+            return found[0]
+        if isinstance(page, bool) or not isinstance(page, int) or not 1 <= page <= self.pages:
             raise ValueError(f"page must be from 1 to {self.pages}, got {page!r}")
-        return self._set_paging(page=page - 1)
+        return page - 1
+
+    def _page_label(self, index: int) -> str:
+        """What a page is called, as the browser's page bar says it: "Page 2 of 7", or its
+        level of the page columns ("Site: Amsterdam (2 of 3)")."""
+        name = self.page_names[index]
+        if not name:
+            return f"Page {index + 1} of {self.pages}"
+        title = (self._pages_spec() or {}).get("title")
+        return f"{title}: {name}" if title else name
 
     @property
     def pages(self) -> int:
@@ -3786,14 +3799,17 @@ class Trellis:
         return out
 
     def save_pdf(self, path: str | Path, *, width: float | str | None = None,
-                 height: float | str | None = None, theme: str = "light") -> Path:  # fmt: skip
+                 height: float | str | None = None, theme: str = "light",
+                 pages: str | Sequence[int | str] | None = None) -> Path:  # fmt: skip
         """Write the plot as a vector PDF, drawn in Python as ``save_svg`` draws it: its
         text kept as text, its fonts embedded, a page the plot's size (a CSS pixel 0.75
-        pt); returns its path. Needs ``vl-convert-python``: ``pip install
-        "anytrellis[pdf]"``.
+        pt); returns its path. Needs ``vl-convert-python`` (and for ``pages``, ``pypdf``):
+        ``pip install "anytrellis[pdf]"``.
 
         ```python
         t.save_pdf("figure-2.pdf", width="180mm")
+        t.save_pdf("stations.pdf", pages="all")       # a paged plot: each page on one
+        t.save_pdf("two-sites.pdf", pages=["Amsterdam", "Utrecht"])   # page="site"
         ```
 
         Args:
@@ -3801,12 +3817,39 @@ class Trellis:
             width: As ``save_svg``'s: CSS pixels or a length (``"180mm"``).
             height: As ``save_svg``'s.
             theme: ``"light"`` or ``"dark"``.
+            pages: A paged plot's pages, each a page of the PDF: ``"all"`` (in the order
+                shown: sorted and filtered as it is), or a list of their numbers (from 1)
+                or names (``page_names``). Each is the grid of that page (not a panel
+                opened), says under the title which page it is, and is a bookmark of the
+                PDF. Default: the plot as shown, one page. With ``load="pages"``, the rows
+                are read a page at a time.
         """
-        from anytrellis.figure import svg_to_pdf
+        from anytrellis.figure import figure_svg, length, pdf_pages, svg_to_pdf
 
-        svg, _ = self._image_svg(width, height, theme)
         out = Path(path)
-        out.write_bytes(svg_to_pdf(svg))
+        paged = self._scene()[0].get("pages") is not None
+        if pages is None or (pages == "all" and not paged):
+            svg, _ = self._image_svg(width, height, theme)
+            out.write_bytes(svg_to_pdf(svg))
+            return out
+        if isinstance(pages, str) and pages != "all":
+            raise ValueError(f"pages must be 'all' or a list of pages, got {pages!r}")
+        chosen = list(range(self.pages)) if pages == "all" else \
+            [self._page_index(p) for p in pages]  # fmt: skip
+        if not chosen:
+            raise ValueError("pages is empty: give 'all' or the pages to save")
+        w, _ = length(width, "width")
+        h, _ = length(height, "height")
+        turner = self._alone()  # (the plot shown stays on its page)
+        turner._focus = None
+        drawn: list[tuple[str, bytes]] = []
+        for k in chosen:
+            turner._paging = {**turner._paging, "page": k}
+            turner._send_detail()  # (turned: the page's rows read, with load="pages")
+            label = self._page_label(k)
+            svg = figure_svg(turner, width=w, height=h, theme=theme, page_label=label)
+            drawn.append((label, svg_to_pdf(svg)))
+        out.write_bytes(pdf_pages(drawn))
         return out
 
     def __repr__(self) -> str:
@@ -4854,16 +4897,7 @@ class Trellis:
             return scene
         per = round(CHUNK_ROWS * npanels / max(self._data.count(), 1))
         per = max(1, min(CHUNK_PANELS, per))
-        maker = copy.copy(self)  # (its own state, the shown plot's left as it is)
-        maker._widget = None
-        maker._link_group = None
-        maker._read = None
-        maker._made = {}
-        maker._queried = dict(self._queried)
-        maker._linked_counts = {}
-        maker._scene_cache = None
-        maker._full_scene_cache = None
-        maker._shadow = None
+        maker = self._alone()
         pieces: dict[int, list[_Sent]] = {}
         # dense points' cells, each chunk's: before shading, and the most points in a unit
         # of area (the plot's: the most of any chunk's)
@@ -4901,6 +4935,23 @@ class Trellis:
             for i, (d, entry) in enumerate(zip(maker._drawn, entries, strict=True))
         ]
         return {**spec, "layers": layers}, out
+
+    def _alone(self) -> Trellis:
+        """A copy of this plot with a state of its own, to build in without changing what
+        the plot shows (its widget's page, its scene): no widget or link, its page, sort and
+        filters as shown, its scene built again."""
+        out = copy.copy(self)
+        out._paging = self.paging  # (the widget's, while it is shown)
+        out._widget = None
+        out._link_group = None
+        out._read = None
+        out._made = {}
+        out._queried = dict(self._queried)
+        out._linked_counts = {}
+        out._scene_cache = None
+        out._full_scene_cache = None
+        out._shadow = None
+        return out
 
     def _every_row(self) -> Trellis:
         """``load="pages"``: this plot reading every row (``load="all"``), as it is shown:

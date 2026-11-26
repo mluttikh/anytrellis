@@ -1,11 +1,13 @@
 # 0019: Sizes for print, and PDF
 
 - Status: **implemented**, 21 November 2026 (design review, Phase 3: print sizing in mm and
-  dpi; PDF).
+  dpi; PDF). 26 November 2026 (0.9): a paged plot's pages in one PDF.
 - Changes: `figure.py` (`length`, `UNITS`, `CSS_DPI`, `print_size`, `png_scale`,
   `png_dpi`, `svg_to_pdf`; `svg_to_png` records its dpi), `plot.py` (`_image_svg`,
   `save_svg`, `save_png(dpi=)`, `save_pdf`), `compose.py` (the same for figures),
-  `pyproject.toml` (the `pdf` extra); `tests/test_print.py`; `docs/user/how-to/share.md`,
+  `pyproject.toml` (the `pdf` extra); for pages, `plot.py` (`save_pdf(pages=)`,
+  `_page_index`, `_page_label`, `_alone`), `figure.py` (`figure_svg(page_label=)`,
+  `pdf_pages`); `tests/test_print.py`; `docs/user/how-to/share.md`,
   `install.md`.
 
 ## Context
@@ -36,12 +38,22 @@ matplotlib's `savefig(dpi=)` and PDF backend). The review asked for `width="180m
   height times 0.75 (a CSS pixel is 0.75 pt) and its viewBox unchanged: the page is the
   plot's size exactly.
 - **Figures** (`concat`, 0018) take the same `width`, `dpi` and `save_pdf`.
+- **A paged plot's pages in one PDF**: `save_pdf(pages="all" | [numbers or names])`, each
+  page of the PDF the image of the plot turned to that page (its grid, not a panel
+  opened), in the order the plot shows them (its sort and filters). A line under the title
+  says which page, in the page bar's words ("Page 2 of 7", "region: coast"), and each page
+  is a bookmark. The pages are drawn by a copy of the plot (`_alone`), so the plot shown
+  and its widget stay on their page; with `load="pages"` the copy reads the rows as page
+  turns do, a few pages at a time. vl-convert writes one page a PDF, so pypdf (pure
+  Python, BSD, in the `pdf` extra) joins them; the default, one page, needs only
+  vl-convert. `pages="all"` of a plot that does not page is its one image.
 - The browser's Export menu is unchanged (an image of the plot as on screen, twice its
   size): print sizes are for Python, where a figure for a paper is made.
 
 ## Known limits
 
 - vl-convert-python is about 30 MB, for PDFs alone.
-- One page per PDF; no multi-page PDF of a paged wrap's pages.
+- Only `save_pdf` takes `pages`: an SVG or PNG is one image, of the page shown. A figure
+  (`concat`) of paged plots saves the pages shown.
 - Fonts are the system's (`system-ui` and its fallbacks, as for PNGs): a PDF made on
   another machine may use another sans-serif.

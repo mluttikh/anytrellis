@@ -38,8 +38,8 @@ pip install "anytrellis[examples]"
 
 ## For images
 
-`save_svg` needs nothing more. PNGs need `resvg-py` and PDFs `vl-convert-python`, each a
-wheel with no system libraries to install:
+`save_svg` needs nothing more. PNGs need `resvg-py` and PDFs `vl-convert-python` (and
+`pypdf`, for several pages in one), each a wheel with no system libraries to install:
 
 ```bash
 pip install "anytrellis[png]"   # save_png
