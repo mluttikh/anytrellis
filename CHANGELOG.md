@@ -8,6 +8,12 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **One legend for a figure**: `concat(..., legend="collect")` shows its plots' legends
+  once, under the figure, as patchwork's `guides="collect"`; each plot leaves its own out.
+  A click on an entry selects its marks in every plot that has that legend (Shift adds
+  one), hovering shows them, a double-click shows them alone; in the notebook (Jupyter and
+  marimo), the saved page and the image.
+
 - **A paged plot's pages in one PDF**: `save_pdf(path, pages="all")`, or a list of page
   numbers or names (`pages=[1, "north"]`). Each page is the grid of that page, in the
   order shown (sorted, filtered), says under the title which page it is, and is a bookmark

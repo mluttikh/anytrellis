@@ -60,6 +60,27 @@ print(figure._embed_html())  # markdown-exec: hide
 Without `cols=`, the plots go in one row. A titled figure is kept whole when you put it
 beside or under another plot; otherwise `(a | b) | c` is one row of three.
 
+## One legend for the figure
+
+When plots are coloured by the same column, each shows the same legend. `legend="collect"`
+shows it once, under the figure, as patchwork's `guides="collect"`: each plot leaves its
+own out, and a legend several plots have is shown once.
+
+```python exec="on" source="above" session="figures" html="true"
+weights = Trellis(cars, wrap="origin", cols=2, title="Weight and mpg").points(
+    x="weight", y="mpg", color="origin")
+power = Trellis(cars, title="Horsepower").hist(x="horsepower", color="origin")
+
+figure = concat(weights, power, widths=[3, 2], legend="collect")
+figure
+print(figure._embed_html())  # markdown-exec: hide
+```
+
+The legend works as each plot's would, in every plot that has it: a click on an entry
+selects its marks in each (Shift adds one), hovering it shows them, and a double-click
+shows them alone. A plot with `legend("none")` adds none of its legends. The image
+(`save_svg`, `save_png`, `save_pdf`) draws the legend under the plots too.
+
 ## Linked plots in a figure
 
 Plots linked with [`link()`](link.md) stay linked in a figure, in a notebook and in its

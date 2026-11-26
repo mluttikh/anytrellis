@@ -225,3 +225,14 @@ def save_export(name: str, buffers: Any) -> Path:
         target = path.with_name(f"{path.stem}-{n}{path.suffix}")
     target.write_bytes(bytes(buffers[0]))
     return target.resolve()
+
+
+class FigureLegendWidget(anywidget.AnyWidget):
+    """A figure's legend, collected from its plots (``concat(legend="collect")``): drawn and
+    clicked in the browser from the plots of the figure (figurelegend.ts)."""
+
+    _esm = _STATIC / "widget.js"
+    _css = _STATIC / "widget.css"
+
+    #: The figure whose plots' legends it shows (``Concat._group``).
+    _legend_hub = traitlets.Unicode("").tag(sync=True)

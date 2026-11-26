@@ -1,13 +1,19 @@
 # 0018: Different plots in one figure
 
 - Status: **implemented**, 21 November 2026 (design review, Phase 3: concatenation);
-  amended 26 November 2026: the plots' panels lined up (`align`).
+  amended 26 November 2026: the plots' panels lined up (`align`); 27 November 2026: one
+  legend for the figure (`legend="collect"`).
 - Changes: `src/anytrellis/compose.py` (`Concat`, `concat`, `beside`, `under`, `GAP`),
   `plot.py` (`Trellis.__or__`, `__truediv__`), `figure.py` (`figure_svg(ids=)`: ids
   unique among a figure's plots), `__init__.py`; `widget.css` (a narrow header wraps);
   `js/scripts/shots.mjs`, `scripts/docs_gallery.py` (a figure's card);
   `tests/test_compose.py`, `js/test/concat.mjs`; `docs/user/how-to/figures.md`,
   `reference/concat.md`.
+- One legend: `compose.py` (`Concat(legend=)`, `_places`, `_box`, `_stacks`),
+  `figure.py` (`legend_key`, `figure_legend`, `figure_svg(legends=)`), `widget.py`
+  (`FigureLegendWidget`); `js/src/core/legendbox.ts` (a legend's HTML, out of view.ts),
+  `figurelegend.ts`, `view.ts` (`legendPlot`, `legendPosition`), `widget.ts`,
+  `standalone.ts`; `js/test/pages.py` (`concat-legend.html`).
 - Lined up: `compose.py` (`Concat(align=)`, `_cell`, `_aligned`), `figure.py` (`Frame`,
   `panels_box`, `figure_box`, `layout(frame=)`, `figure_svg(frame=)`), `widget.py`
   (`_figure`), `plot.py` (`_embed_html(figure=)`); `js/src/core/align.ts`, `layout.ts`
@@ -74,6 +80,22 @@ one image, nor a grid of unlinked plots.
     start as far left and are as wide. A plot shown alone and then in a figure has one
     widget, so both its views are told the place: the one alone is beside nothing and
     stays as it is.
+- **One legend** (`legend="collect"`, opt-in; patchwork's `guides="collect"`): each plot
+  leaves its legends out, and the figure shows them under its plots, each once: legends
+  are the same when all of them is (`legend_key`: title, kind, entries, colours, shapes),
+  the first plot's (row by row) placing it. Not those of a plot with `legend("none")`,
+  nor those naming the lines at their ends. The outermost figure that collects shows its
+  nested figures' plots' legends too; a figure that collects isn't added to by `|`.
+  - The legend has one state: a click on an entry chooses it in every plot that has that
+    legend and chooses none in the others; hovering it and showing it alone do the same.
+    What a plot chooses by itself (Escape, Python's `select`) the legend shows and the
+    other plots follow (figurelegend.ts: a registry by the figure's id, as align.ts's).
+  - A legend's HTML (entries, gradients, search) is one class, `LegendBox`, drawn by a
+    plot's view and by the figure's legend alike; what a click does is its owner's.
+  - Jupyter: a `FigureLegendWidget` under the grid (the same ESM, which draws a legend
+    when it has `_legend_hub`); marimo: that widget under the stacks; a page: a
+    `.anytrellis-figure-legend` div; an image: the plots' legends drawn as under a plot
+    (`_legend_below`), the entries chosen the first plot's that has the legend.
 - **Narrow plots**: a plot's header wraps, the toolbar on a line under the title when the
   title would get less than 8em, and its buttons on two lines when wider than the plot.
   The state chips take only the room left beside the title (`flex-basis: 0`): a chip
@@ -86,7 +108,8 @@ one image, nor a grid of unlinked plots.
   that plot until it is back.
 - Only the panels' outer edges line up: the panels of two grids with different columns
   don't meet inside them.
-- No legend collected for the figure; each plot keeps its own.
+- The figure's legend goes under its plots only (not to their right), and the image shows
+  the entries chosen in the first plot that has the legend.
 - No shared scales across plots in a figure; `share_y` works within a plot only.
 - In a page, a plot's header height can differ from the image (the toolbar is not drawn
   in images), so rows can differ in height by a toolbar line.

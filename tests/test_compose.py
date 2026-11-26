@@ -235,3 +235,69 @@ def test_the_browser_is_told_where_each_plot_is(plots: tuple[Trellis, ...]) -> N
     assert a.widget._figure is None
     # an unaligned row is kept whole: a | b added to it would line b up after all
     assert len((concat(a, b, align=False) | c).items) == 2
+
+
+@pytest.fixture
+def coloured() -> tuple[Trellis, Trellis, Trellis]:
+    cars = load("cars")
+    d = Trellis(cars, wrap="origin", title="Weight").points(x="weight", y="mpg", color="origin")
+    e = Trellis(cars, title="Horsepower").hist(x="horsepower", color="origin")
+    f = Trellis(cars, title="Cylinders").points(x="weight", y="mpg", color="cylinders")
+    return d, e, f
+
+
+def test_a_figure_collects_its_plots_legends(coloured: tuple[Trellis, ...]) -> None:
+    d, e, f = coloured
+    with pytest.raises(ValueError, match="legend must be"):
+        concat(d, e, legend="right")
+    fig = concat(d, e, f, cols=3, legend="collect")
+    assert len((fig | d).items) == 2  # a figure that collects is kept whole
+    svg = fig._svg(900, "light")
+    _, placed = _placed(svg)
+    plots, legend = placed[:3], placed[3:]
+    # the plots draw no legend of their own; the figure's, under them, has each once
+    for p in plots:
+        assert ">origin<" not in ET.tostring(p, encoding="unicode")
+    assert len(legend) == 1
+    text = ET.tostring(legend[0], encoding="unicode")
+    assert text.count(">origin<") == 1
+    assert ">cylinders<" in text
+    assert _num(legend[0], "y") == pytest.approx(max(_num(p, "height") for p in plots), abs=0.01)
+    assert _num(ET.fromstring(svg), "height") == pytest.approx(
+        _num(legend[0], "y") + _num(legend[0], "height"), abs=0.01
+    )
+    # a plot with legend("none") adds none; nothing to show: no legend at all
+    f.legend("none")
+    text = ET.tostring(_placed(fig._svg(900, "light"))[1][3], encoding="unicode")
+    assert ">cylinders<" not in text
+    plain = Trellis(load("cars")).points(x="weight", y="mpg")
+    assert len(_placed(concat(plain, plain, legend="collect")._svg(900, "light"))[1]) == 2
+
+
+def test_the_browser_is_told_which_figure_shows_the_legends(
+    coloured: tuple[Trellis, ...],
+) -> None:
+    d, e, f = coloured
+    inner = concat(d, e, legend="collect")
+    fig = concat(inner, f, cols=1, legend="collect")
+    page = fig.to_html()
+    payloads = [json.loads(s) for s in re.findall(r"<script type='application/json'>(.*?)</script>",
+                                                  page)]  # fmt: skip
+    places = [p["figure"] for p in payloads]
+    # the outermost figure that collects shows them all: one legend on the page
+    assert [p["legend"] for p in places] == [fig._group] * 3
+    assert [p["order"] for p in places] == [0, 1, 2]
+    assert places[0]["group"] == inner._group  # lined up within its own figure
+    assert page.count("class='anytrellis-figure-legend'") == 1
+    assert f"data-legend='{fig._group}'" in page
+    box = fig.widget
+    from anytrellis.widget import FigureLegendWidget
+
+    legends = [w for w in box.children if isinstance(w, FigureLegendWidget)]
+    assert [w._legend_hub for w in legends] == [fig._group]
+    assert d.widget._figure == places[0]
+    # one that keeps them: no legend of the figure's, nor its group on the plots
+    kept = concat(d, e)
+    kept.widget  # noqa: B018
+    assert "legend" not in d.widget._figure
+    assert "class='anytrellis-figure-legend'" not in kept.to_html()
