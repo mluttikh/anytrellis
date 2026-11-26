@@ -3,6 +3,7 @@
 // <script type="application/json"> with {spec, buffers (id → base64), renderer}. Plots
 // saved linked (Link.save_html) carry their marks' keys and are linked here (savedlink.ts).
 
+import type { FigureCell } from "./core/align";
 import { LinkGroup, type SavedLink, readLink } from "./core/savedlink";
 import type { Brush } from "./core/selection";
 import { embeddedSource } from "./core/transport";
@@ -30,6 +31,8 @@ interface Payload {
   zoom?: Zoom | null;
   /** The table view's data (Trellis._table_view). */
   table?: TableView | null;
+  /** Its place in a figure that lines up its plots (Concat._cell), or null. */
+  figure?: FigureCell | null;
 }
 
 /** The view a link to the page names: #view=<name>. */
@@ -89,6 +92,7 @@ async function start(host: HTMLElement): Promise<void> {
     if (payload.paging) view.setPaging(payload.paging);
     if (payload.views) view.setViews(payload.views);
     if (payload.zoom) view.setZoom(payload.zoom);
+    if (payload.figure) view.setFigure(payload.figure);
     await view.setSpec(payload.spec);
     const named = viewInHash();
     if (named) view.showView(named);
@@ -123,8 +127,9 @@ function startAll(): void {
     (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
-        // a link's plots start together: a selection saved in one shows in the others
-        const link = e.target.closest(".anytrellis-link");
+        // a link's plots start together (a selection saved in one shows in the others), and
+        // a figure's (lined up with each other)
+        const link = e.target.closest(".anytrellis-link, .anytrellis-concat");
         const group = link ? [...link.querySelectorAll<HTMLElement>(".anytrellis-embed")] : [e.target as HTMLElement];
         for (const h of group) {
           observer.unobserve(h);

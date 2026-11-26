@@ -34,7 +34,8 @@ import { canCopyImages, canCopySvg, canDownload, copyPng, copySvg, download, fil
 import { type Glyph, dashPieces, drawGlyph, glyphBox } from "./channels";
 import { type EndLabel, endLabels } from "./labels";
 import { drawMarks } from "./renderers/canvas2d";
-import { type Layout, type Rect, layout as computeLayout, panelName, panelShape } from "./layout";
+import { type FigureCell, FigureMember } from "./align";
+import { type Frame, type Layout, type Rect, layout as computeLayout, panelName, panelShape, panelsBox } from "./layout";
 import { MOTION_MS, motionFrom, reducedMotion, tween } from "./motion";
 import { lookOf } from "./look";
 import { Pager } from "./pager";
@@ -258,6 +259,8 @@ const ICONS = {
 
 export class TrellisView {
   readonly root: HTMLDivElement;
+  /** The element it is drawn in: a figure's cell. */
+  private readonly host: HTMLElement;
   private readonly header: HTMLDivElement;
   private readonly heading: HTMLDivElement;
   private readonly toolbar: HTMLDivElement;
@@ -392,6 +395,8 @@ export class TrellisView {
   /** The zoom the bar's view name was found for. */
   private zoomKey = "";
   private gridHeight = 0;
+  /** Its part in a figure that lines up its plots (setFigure), or null. */
+  private figure: FigureMember | null = null;
   private readonly pager: Pager;
   /** A paged wrap's page, sort and filters, and the panels they show, in order (null: it
    * does not page). */
@@ -534,6 +539,7 @@ export class TrellisView {
     this.stage.append(this.back, this.front, this.tools, this.tip, this.status, this.notice, this.empty);
     this.root.append(this.header, this.subtitle, this.pager.el, this.stage, this.legend, this.caption, this.exportMenu, this.settingsPanel, this.help, this.tableView, this.announcer);
     host.append(this.root);
+    this.host = host;
     this.theme = readTheme(this.root);
     this.rendererReady = this.makeRenderer(opts.renderer);
     this.resizeObserver = new ResizeObserver(() => this.relayout());
@@ -1532,21 +1538,29 @@ export class TrellisView {
     const right = position === "right" && shownLegends(this.spec) > 0;
     const legendW = right ? this.legendWidth(width) : 0;
     let lay: Layout | null = null;
+    // in a figure: lined up with its other plots, unless full screen or a panel is open
+    const member = this.figure;
+    if (member && (this.focused !== null || height !== null)) member.setNatural(null);
     if (this.focused === null) {
       const page = this.pagePanels();
-      let placed = false;
-      if (right) {
-        lay = computeLayout(this.spec, { ...base, width: width - legendW, height, page });
-        placed = this.placeLegend({ x: width - legendW, y: 0, w: legendW, h: lay.height });
-      }
-      if (!placed) {
-        lay = computeLayout(this.spec, { ...base, height, page });
+      // the plot `height` high (the legend's room with it, figure.py: figure_svg's stage),
+      // its panels in `frame` (in the plot's own place)
+      const arrange = (height: number | null, frame: Frame | null): Layout => {
+        if (right) {
+          const narrowed = frame && { ...frame, right: frame.right - legendW };
+          const lay = computeLayout(this.spec!, { ...base, width: width - legendW, height, page, frame: narrowed });
+          if (this.placeLegend({ x: width - legendW, y: 0, w: legendW, h: lay.height })) return lay;
+        }
+        let lay = computeLayout(this.spec!, { ...base, height, page, frame });
         const spare = position === "auto" ? lay.spare : null;
         if (!this.placeLegend(spare) && height !== null) {
-          // under the plot after all: full screen leaves it room
-          lay = computeLayout(this.spec, { ...base, height: height - this.legend.offsetHeight, page });
+          // under the plot after all: the height leaves it room
+          lay = computeLayout(this.spec!, { ...base, height: height - this.legend.offsetHeight, page, frame });
         }
-      }
+        return lay;
+      };
+      lay = arrange(height, null);
+      if (member && height === null) lay = this.lineUp(member, lay, arrange);
       this.gridHeight = lay!.height;
       this.noteSorted(lay!);
       this.empty.hidden = page === null || page.length > 0;
@@ -1597,6 +1611,48 @@ export class TrellisView {
       this.frameRequested = false;
     }
     this.draw();
+  }
+
+  /** The plot laid out (`arrange`) lined up with its figure's others (align.ts), from `lay`:
+   * as it is alone. */
+  private lineUp(member: FigureMember, lay: Layout, arrange: (height: number | null, frame: Frame | null) => Layout): Layout {
+    const spec = this.spec!;
+    // where the plot's canvas is in its cell
+    const cell = this.host.getBoundingClientRect();
+    const stage = this.stage.getBoundingClientRect();
+    const at = { x: stage.left - cell.left, y: stage.top - cell.top, r: cell.right - stage.left - lay.width };
+    const own = panelsBox(lay);
+    const free = !spec.height && !spec.panel_height && !panelShape(spec);
+    const box = { x: cell.left, y: cell.top, w: cell.width };
+    member.setNatural({ left: at.x + own.x, top: at.y + own.y, right: at.r + lay.width - own.x - own.w, height: own.h, free }, box);
+    const f = member.frame();
+    if (!f) return lay;
+    const frame = { left: f.left - at.x, top: f.top - at.y, right: f.right - at.r };
+    const framed = arrange(null, frame);
+    const framedH = panelsBox(framed).h;
+    member.setFramed(framedH);
+    const target = member.target();
+    if (target === null || target <= framedH) return framed;
+    // as much higher as the panels must be, and again for what rounding lost (compose.py)
+    const legendH = this.legend.parentElement === this.root && shownLegends(spec) > 0 ? this.legend.offsetHeight : 0;
+    let height = framed.height + legendH + target - framedH;
+    let stretched = arrange(height, frame);
+    const got = panelsBox(stretched).h;
+    if (got !== target) {
+      height += target - got;
+      stretched = arrange(height, frame);
+    }
+    return stretched;
+  }
+
+  /** Line its panels up with other plots' in a figure (Concat): its place there, or null:
+   * as it is alone. */
+  setFigure(cell: FigureCell | null): void {
+    const was = this.figure?.cell;
+    if (was && cell && was.group === cell.group && was.row === cell.row && was.col === cell.col) return;
+    this.figure?.leave();
+    this.figure = cell ? new FigureMember(cell, () => this.relayout()) : null;
+    this.relayout();
   }
 
   /** The width to lay out at in a box `box` px wide. A plot whose height follows its width
@@ -3617,6 +3673,8 @@ export class TrellisView {
 
   destroy(): void {
     this.destroyed = true;
+    this.figure?.leave();
+    this.figure = null;
     this.abort.abort();
     clearTimeout(this.noticeTimer);
     clearTimeout(this.viewTimer);

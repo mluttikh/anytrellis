@@ -4,6 +4,23 @@ What to change in your code when you upgrade anytrellis. While anytrellis is 0.x
 minor version (0.1 to 0.2) may change the API; each change is listed here with the code
 before and after.
 
+## Unreleased
+
+No code stops working; figures look different.
+
+**A figure's plots line up.** Plots side by side (`a | b`) or one under another
+(`a / b`, `concat()`) have their panels lined up: the panels' edges in a column, their
+tops in a row, and in a row the plots whose height is free as high as each other. Their
+panels may move, or get narrower or higher than in 0.8. To keep the 0.8 layout:
+
+```python
+# 0.8: each plot laid out on its own
+scatter | counts
+
+# now: the same
+concat(scatter, counts, align=False)
+```
+
 ## 0.8.0
 
 No code stops working. Two things a reader does work differently:

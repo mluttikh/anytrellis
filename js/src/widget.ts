@@ -1,5 +1,6 @@
 // anywidget entry: connects a Python Trellis model (TrellisWidget) to TrellisView.
 
+import type { FigureCell } from "./core/align";
 import { bufferIds } from "./core/scene";
 import type { Brush } from "./core/selection";
 import { BufferStore, type PutMessage } from "./core/transport";
@@ -197,6 +198,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   const onCompare = (): void => view.setCompareName((model.get("compare_panel") as string | null) ?? null);
   // Trellis.select in Python (or another view)
   const onSelection = (): void => view.setSelection((model.get("selection") as Brush | null) ?? null);
+  // its place in a figure (Concat): lined up with the figure's other plots
+  const onFigure = (): void => view.setFigure((model.get("_figure") as FigureCell | null) ?? null);
   // Trellis.show_page, sort_panels, filter_panels in Python (or another view)
   const onPaging = (): void => view.setPaging((model.get("paging") as Paging | null) ?? null);
   // Trellis.save_view, drop_view in Python (or another view)
@@ -207,6 +210,8 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
   model.on("change:selection", onSelection);
   model.on("change:paging", onPaging);
   model.on("change:views", onViews);
+  model.on("change:_figure", onFigure);
+  onFigure();
   onViews();
   onFocus();
   onCompare();
@@ -221,6 +226,7 @@ function render({ model, el }: { model: AnyModel; el: HTMLElement }): () => void
     model.off("change:selection", onSelection);
     model.off("change:paging", onPaging);
     model.off("change:views", onViews);
+    model.off("change:_figure", onFigure);
     s.views.delete(view);
     window.anytrellisViews = window.anytrellisViews?.filter((v) => v !== view);
     view.destroy();

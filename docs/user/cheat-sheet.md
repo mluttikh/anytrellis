@@ -270,6 +270,7 @@ c = Trellis(cars).box(x="origin", y="mpg")
 (a | b) / c  # a figure: a and b side by side, c under them
 figure = concat(a, b, c, cols=2, widths=[2, 1], title="Cars")  # a grid; a Concat
 figure.plots  # its plots, row by row
+concat(a, b, align=False)  # panels not lined up: each plot as it is alone
 figure.save_html("figure.html")  # one page; to_html() as text
 figure.save_svg("figure.svg")  # one image; save_png too
 assert isinstance(figure, Concat)

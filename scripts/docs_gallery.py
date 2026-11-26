@@ -363,9 +363,11 @@ def main() -> None:
         shots = []
         for e in entries():
             plot = e.plot()
-            for p in plot.plots if isinstance(plot, Concat) else [plot]:  # a figure: each
-                if p.height is None and p.panel_height is None and p.aspect is None:
-                    p.height = HEIGHT  # the picture's height: no card half empty
+            # the picture's height: no card half empty (a figure's plots left free, to line
+            # up as high as each other)
+            if not isinstance(plot, Concat) and plot.height is None and \
+                    plot.panel_height is None and plot.aspect is None:  # fmt: skip
+                plot.height = HEIGHT
             page = plot.save_html(work / f"{e.slug}.html")
             shots.append({"page": str(page), "out": str(OUT / f"{e.slug}.png"),
                           "width": 720, "height": 480})  # fmt: skip

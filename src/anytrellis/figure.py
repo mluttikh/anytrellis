@@ -500,6 +500,30 @@ class PanelBox:
     """Where its y axis's labels may start (left), or None: it draws none."""
 
 
+@dataclass(frozen=True)
+class Frame:
+    """The panels' box (not their strips or axes) lined up with other plots' in a figure:
+    its left edge at least at ``left``, its top at least at ``top``, and its right edge
+    ``right`` px from the plot's right, or further if it must (layout.ts: Frame)."""
+
+    left: float
+    top: float
+    right: float
+
+
+def panels_box(lay: Layout) -> Rect:
+    """The box of a layout's panels (not their strips or axes): what a figure lines up
+    (layout.ts: panelsBox)."""
+    rects = [b.rect for b in lay.panels]
+    if not rects:
+        return Rect(0, 0, 0, 0)
+    x0 = min(r.x for r in rects)
+    y0 = min(r.y for r in rects)
+    x1 = max(r.x + r.w for r in rects)
+    y1 = max(r.y + r.h for r in rects)
+    return Rect(x0, y0, x1 - x0, y1 - y0)
+
+
 @dataclass
 class Strip:
     rect: Rect
@@ -612,11 +636,11 @@ def _y_title_room(spec: dict[str, Any], fs: float) -> tuple[float, float]:
 
 
 def _y_title_at(spec: dict[str, Any], fs: float, side: tuple[float, float],
-                left: float) -> tuple[float, float] | None:  # fmt: skip
+                left: float, top: float | None = None) -> tuple[float, float] | None:  # fmt: skip
     """Where the y title goes: on its side at ``side``, or level at the left of the line over
-    the plot, from ``left``."""
+    the plot, from ``left``, the line ending at ``top`` (default: its own height down)."""
     w, h = _y_title_room(spec, fs)
-    return side if w else (left, 6 + h / 2) if h else None
+    return side if w else (left, (6 + h if top is None else top) - h / 2) if h else None
 
 
 def panel_shape(spec: dict[str, Any]) -> float | None:
@@ -627,10 +651,12 @@ def panel_shape(spec: dict[str, Any]) -> float | None:
 
 
 def layout(spec: dict[str, Any], width: float, height: float | None = None,
-           focused: int | None = None, page: list[int] | None = None) -> Layout:  # fmt: skip
+           focused: int | None = None, page: list[int] | None = None,
+           frame: Frame | None = None) -> Layout:  # fmt: skip
     """Where the panels, strips and titles sit, ``width`` px wide; ``height``: the plot's
     height, overriding the spec's; ``focused``: that panel alone; ``page``: a paged wrap's
-    panels on the page shown (default: the first page's).
+    panels on the page shown (default: the first page's); ``frame``: where the panels' box
+    goes, lined up with other plots' in a figure (not an opened panel's).
 
     The panels' text is the look's size; ``"auto"`` text (``font_step``) steps from it, to
     11/12 of it when the panels would be under ``NARROW`` px wide (a paged wrap's: those of
@@ -644,7 +670,7 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
         if one:
             assert focused is not None
             return _focus_layout(spec, width, height, focused, fs)
-        return _layout_at(spec, width, height, page, fs)
+        return _layout_at(spec, width, height, page, fs, frame)
 
     if not look["font_step"]:
         return at(base)
@@ -657,7 +683,8 @@ def layout(spec: dict[str, Any], width: float, height: float | None = None,
 
 
 def _layout_at(spec: dict[str, Any], width: float, height: float | None,
-               page: list[int] | None, fs: float) -> Layout:  # fmt: skip
+               page: list[int] | None, fs: float,
+               frame: Frame | None = None) -> Layout:  # fmt: skip
     grid = spec["grid"]
     pages = spec.get("pages")
     shown: list[int] | None = None
@@ -739,11 +766,22 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
     right_strip = sum(row_w)
     x_title_h = _round(fs * 1.4 + 4) if spec["x"]["title"] else 0
     y_title_w, y_title_h = _y_title_room(spec, fs)
-    left = 4 + y_title_w
-    right = 10
-    top = 6 + y_title_h
+    # in a figure (frame): the panels' box moved right and down, and its right edge in, to
+    # line up with the other plots' (layout.ts)
+    left_most = 4 + y_title_w
+    left = left_most
+    gap_right = GAP if right_strip else 0
+    right = max(10, frame.right - right_strip - gap_right) if frame else 10
+    top = max(6 + y_title_h, frame.top - top_strip - wrap_strip if frame else 0)
     bottom = 4 + x_title_h
     axis_rows = sum(x_axis_h for r in row_has_x if r)
+
+    def line_up() -> None:
+        nonlocal left
+        if frame:
+            left = max(left_most, frame.left - y_axis[0])
+
+    line_up()
 
     shape = panel_shape(spec)
 
@@ -792,6 +830,7 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
         if show_y[i]:
             y_label[i] = max(y_label[i], _y_labels_width(spec, p["y"], row_h[p["row"]], fs))
     gutters()
+    line_up()
     pw, ph = panel_size()
     col_w, row_h = sizes(pw, ph)
     # categories that don't fit side by side: on two lines or angled, the axis that high
@@ -803,6 +842,10 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
         axis_rows = sum(x_axis_h for r in row_has_x if r)
         pw, ph = panel_size()
         col_w, row_h = sizes(pw, ph)
+    if frame and not shape:  # the pixels the widths rounded off: the right edge lined up
+        spare = math.floor(free_width() - sum(col_w))
+        for c in range(min(spare, cols)):
+            col_w[c] += 1
     shift = max(0, math.floor((free_width() - sum(col_w)) / 2))  # narrowed panels: centred
 
     col_x: list[float] = []
@@ -894,7 +937,9 @@ def _layout_at(spec: dict[str, Any], width: float, height: float | None,
         panels=boxes,
         strips=strips,
         x_title=(centre_x, plot_bottom + x_title_h - 2) if x_title_h else None,
-        y_title=_y_title_at(spec, fs, (shift + 4 + fs, centre_y), left + shift),
+        y_title=_y_title_at(
+            spec, fs, (left - left_most + shift + 4 + fs, centre_y), left + shift, top
+        ),
         spare=spare,
         x_axis_h=x_axis_h,
         x_labels=x_labels,
@@ -2230,17 +2275,63 @@ def _note_sorted(spec: dict[str, Any], lay: Layout, paging: Paging,
         box.note = stat["text"][box.index]
 
 
-def figure_svg(plot: Trellis, *, width: float | None = None, height: float | None = None,
-               theme: str = "light", ids: str = "",
-               page_label: str | None = None) -> str:  # fmt: skip
-    """The plot as shown, as an SVG ``width`` by ``height`` CSS pixels (default: the
-    width it was last shown at, else ``DEFAULT_WIDTH``; the height its layout's). ``ids``:
-    before its ids, for one of several plots in an image (``compose.Concat``). ``page_label``: a
-    line under the title saying which page it is, where the browser's page bar is (a PDF
-    of a paged plot's pages)."""
-    if theme not in THEMES:
-        raise ValueError(f"theme must be one of {list(THEMES)}, got {theme!r}")
-    th = THEMES[theme]
+@dataclass
+class _Arranged:
+    """A plot's image arranged (``figure_svg``): its scene, the text over and under it, the
+    panels' layout and the legend's place."""
+
+    spec: dict[str, Any]
+    buffers: Buffers
+    shown: dict[str, Any]
+    width: float
+    size: float
+    title_size: float
+    header: float
+    subtitle: list[str]
+    caption: list[str]
+    sub_h: float
+    cap_line: float
+    cap_h: float
+    top: float
+    names: list[str]
+    focused: int | None
+    brush: dict[str, Any] | None
+    placed: list[_Placed]
+    legend_h: float
+    above: bool
+    lay: Layout
+    page: list[int] | None
+    inset_legend: bool
+
+    @property
+    def plot_top(self) -> float:
+        """Where the panels' layout starts: under the text, and a legend over the panels."""
+        return self.top + self.legend_h if self.above else self.top
+
+    @property
+    def total(self) -> float:
+        return _round(self.top + self.lay.height + self.legend_h + self.cap_h)
+
+
+@dataclass(frozen=True)
+class Placed:
+    """Where a plot's panels' box (``panels_box``) sits in its image, to line up with other
+    plots' in a figure: its left edge, top, the room right of it and its height; ``free``:
+    its height follows its width (no height, panel_height or aspect, no panel opened), so a
+    figure may make it higher; ``total``: the image's height."""
+
+    left: float
+    top: float
+    right: float
+    height: float
+    free: bool
+    total: float
+
+
+def _arrange(plot: Trellis, width: float | None, height: float | None,
+             page_label: str | None, frame: Frame | None) -> _Arranged:  # fmt: skip
+    """``figure_svg``'s arrangement of ``plot``, ``frame`` (in the image) lining up its
+    panels with other plots'."""
     spec, buffers = plot._shown_scene()
     shown = _shown(plot)
     width = float(width or shown["width"] or DEFAULT_WIDTH)
@@ -2285,16 +2376,24 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         most = FOCUS_MAX if panel_shape(spec) else layout(spec, width).height
         return stage_h - legend_h if stage_h is not None else max(FOCUS_MIN, min(most, FOCUS_MAX))
 
-    def plot_layout(w: float, legend_h: float) -> Layout:
+    def framed(w: float, above_h: float) -> Frame | None:
+        # the figure's frame, in the image, as the layout's: under the header (and a legend
+        # over the panels), the layout ``w`` wide (a legend right of it)
+        if frame is None or focused is not None:
+            return None
+        return Frame(frame.left, frame.top - top - above_h, frame.right - (width - w))
+
+    def plot_layout(w: float, legend_h: float, above_h: float = 0.0) -> Layout:
         if focused is not None:
             return layout(spec, w, focus_height(legend_h), focused)
-        return layout(spec, w, None if stage_h is None else stage_h - legend_h, page=page)
+        return layout(spec, w, None if stage_h is None else stage_h - legend_h, page=page,
+                      frame=framed(w, above_h))  # fmt: skip
 
     right = None
     above = position == "top" and bool(groups)
     if above:  # over the panels, under the title, as wide as the plot
         placed, legend_h = _legend_below(groups, width)
-        lay = plot_layout(width, legend_h)
+        lay = plot_layout(width, legend_h, legend_h)
     elif position == "right" and groups:
         # a column right of the plot, the plot narrowed for it (layout as wide as the rest)
         lw = legend_width(groups, width * RIGHT_MOST)
@@ -2304,7 +2403,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
     if above or right is not None:
         pass  # placed
     elif focused is None:
-        lay = layout(spec, width, stage_h, page=page)
+        lay = layout(spec, width, stage_h, page=page, frame=framed(width, 0.0))
         spare = lay.spare if position == "auto" else None
         inset = _legend_inset(groups, spare) if groups and spare is not None else None
         if inset is not None:
@@ -2312,7 +2411,7 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         elif groups:
             placed, legend_h = _legend_below(groups, width)
             if stage_h is not None:
-                lay = layout(spec, width, stage_h - legend_h, page=page)
+                lay = layout(spec, width, stage_h - legend_h, page=page, frame=framed(width, 0.0))
     else:
         if groups:
             placed, legend_h = _legend_below(groups, width)
@@ -2322,6 +2421,41 @@ def figure_svg(plot: Trellis, *, width: float | None = None, height: float | Non
         pins = pins_of(plot._pin_indices(pages), pages["rows"] * pages["cols"]) if pages else []
         _note_sorted(spec, lay, plot.paging, pins)
     inset_legend = bool(placed) and legend_h == 0
+    return _Arranged(spec, buffers, shown, width, size, title_size, header, subtitle, caption,
+                     sub_h, cap_line, cap_h, top, names, focused, brush, placed, legend_h,
+                     above, lay, page, inset_legend)  # fmt: skip
+
+
+def figure_box(plot: Trellis, width: float | None = None, height: float | None = None,
+               frame: Frame | None = None) -> Placed:  # fmt: skip
+    """Where ``figure_svg`` puts the plot's panels' box in its image (``frame``: lined up)."""
+    a = _arrange(plot, width, height, None, frame)
+    box = panels_box(a.lay)
+    spec = a.spec
+    free = (a.focused is None and not spec.get("height") and not spec.get("panel_height")
+            and not panel_shape(spec))  # fmt: skip
+    return Placed(box.x, a.plot_top + box.y, a.width - box.x - box.w, box.h, free,
+                  float(a.total))  # fmt: skip
+
+
+def figure_svg(plot: Trellis, *, width: float | None = None, height: float | None = None,
+               theme: str = "light", ids: str = "", page_label: str | None = None,
+               frame: Frame | None = None) -> str:  # fmt: skip
+    """The plot as shown, as an SVG ``width`` by ``height`` CSS pixels (default: the
+    width it was last shown at, else ``DEFAULT_WIDTH``; the height its layout's). ``ids``:
+    before its ids, for one of several plots in an image (``compose.Concat``). ``page_label``:
+    a line under the title saying which page it is, where the browser's page bar is (a PDF
+    of a paged plot's pages). ``frame``: where its panels' box goes in the image, lined up
+    with other plots' in a figure."""
+    if theme not in THEMES:
+        raise ValueError(f"theme must be one of {list(THEMES)}, got {theme!r}")
+    th = THEMES[theme]
+    a = _arrange(plot, width, height, page_label, frame)
+    spec, buffers, shown, width = a.spec, a.buffers, a.shown, a.width
+    size, title_size, header, subtitle = a.size, a.title_size, a.header, a.subtitle
+    caption, sub_h, cap_line, cap_h, top = a.caption, a.sub_h, a.cap_line, a.cap_h, a.top
+    names, focused, brush, placed, legend_h = a.names, a.focused, a.brush, a.placed, a.legend_h
+    above, lay, page, inset_legend = a.above, a.lay, a.page, a.inset_legend
 
     total = _round(top + lay.height + legend_h + cap_h)  # as the page rounds the plot's box
     svg = _Svg(width, total if height is None else float(height), lay.font_size, ids)

@@ -7,16 +7,25 @@ One layout everywhere, so the notebook, a saved page and an image agree: a grid 
 In a notebook it is an ipywidgets ``GridBox`` of the plots' widgets (marimo: stacks of
 them), in a page a CSS grid of their embeds (linked plots stay linked), in an image their
 SVGs side by side (``figure.py``).
+
+Its plots' panels line up (``align``, decision 0018): the panels' left and right edges in
+a column, their tops in a row, and in a row the plots whose height is free (no
+``height``, ``panel_height`` or ``aspect``) as high as the highest of them. Each plot is
+laid out three times: as it is (where its panels would be), framed (its panels moved to
+the column's and row's edges) and stretched (as high as the row's), each step from the
+one before alone, so the browser's plots (align.ts) reach the same place as an image.
 """
 
 from __future__ import annotations
 
 import html
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
+    from anytrellis.figure import Frame
     from anytrellis.plot import Trellis
 
 GAP = 24
@@ -40,6 +49,7 @@ class Concat:
         cols: int | None = None,
         widths: Sequence[float] | None = None,
         title: str | None = None,
+        align: bool = True,
     ) -> None:
         from anytrellis.plot import Trellis
 
@@ -64,6 +74,8 @@ class Concat:
             )
         if title is not None and not isinstance(title, str):
             raise TypeError(f"title must be a string, got {type(title).__name__}")
+        if not isinstance(align, bool):
+            raise TypeError(f"align must be True or False, got {align!r}")
         self.items: list[Item] = items
         """The plots (and figures) in it, row by row."""
         self.cols = cols
@@ -72,6 +84,9 @@ class Concat:
         """Each column's share of the width."""
         self.title = title
         """The figure's title, over its plots (None: none)."""
+        self.align = align
+        """Line its plots' panels up (False: each plot as it is alone)."""
+        self._group = uuid.uuid4().hex
         self._widget: Any = None
 
     # ---- making figures ----------------------------------------------------------------
@@ -100,8 +115,15 @@ class Concat:
         return [self.items[i : i + self.cols] for i in range(0, len(self.items), self.cols)]
 
     def _bare(self) -> bool:
-        """A plain row or column to add to: no title, its columns alike."""
-        return self.title is None and len(set(self.widths)) <= 1
+        """A plain row or column to add to: no title, its columns alike, aligned."""
+        return self.title is None and len(set(self.widths)) <= 1 and self.align
+
+    def _cell(self, index: int) -> dict[str, Any] | None:
+        """What the browser needs to line item ``index`` up with the others (a plot's), or
+        None: not aligned."""
+        if not self.align or isinstance(self.items[index], Concat):
+            return None
+        return {"group": self._group, "row": index // self.cols, "col": index % self.cols}
 
     # ---- in a notebook -------------------------------------------------------------------
 
@@ -111,6 +133,7 @@ class Concat:
         if self._widget is None:
             import ipywidgets as widgets
 
+            self._place_widgets()
             children = [item.widget for item in self.items]
             grid = widgets.GridBox(children, layout=widgets.Layout(
                 grid_template_columns=_columns(self.widths), grid_gap=f"{GAP}px",
@@ -123,6 +146,12 @@ class Concat:
                                             layout=widgets.Layout(width="100%"))  # fmt: skip
         return self._widget
 
+    def _place_widgets(self) -> None:
+        """Tell each plot's widget its place, to line up with the others (``_cell``)."""
+        for i, item in enumerate(self.items):
+            if not isinstance(item, Concat):
+                item.widget._figure = self._cell(i)  # ty: ignore[invalid-assignment]  # allow_none
+
     def _repr_mimebundle_(self, **kwargs: Any) -> Any:
         return self.widget._repr_mimebundle_(**kwargs)
 
@@ -130,6 +159,7 @@ class Concat:
         """What marimo shows: stacks of the plots' widgets."""
         import marimo as mo
 
+        self._place_widgets()
         rows = []
         for row in self._rows():
             shown = [item._display_() for item in row]
@@ -150,7 +180,7 @@ class Concat:
         if links is None:
             links = {}
         cells = []
-        for item in self.items:
+        for i, item in enumerate(self.items):
             if isinstance(item, Concat):
                 inner = item._embed_html(links)
             else:
@@ -160,7 +190,7 @@ class Concat:
                     if id(group) not in links:
                         links[id(group)] = saved_links(group)
                     payload = links[id(group)][group.plots.index(item)]
-                inner = item._embed_html(payload)
+                inner = item._embed_html(payload, figure=self._cell(i))
             cells.append(f"<div style='min-width:0'>{inner}</div>")
         style = (f"display:grid;grid-template-columns:{_columns(self.widths)};"
                  f"gap:{GAP}px;align-items:start")  # fmt: skip
@@ -215,6 +245,42 @@ class Concat:
         width = view.get("width")
         return float(width) if width else None
 
+    def _aligned(self, col_w: list[float]) -> dict[int, tuple[Frame, float | None]]:
+        """Each plot's frame and height (None: its own) in an image, its column ``col_w``
+        wide, lining its panels up with the others' (align.ts: the browser's)."""
+        from anytrellis.figure import Frame, figure_box
+        from anytrellis.plot import Trellis
+
+        if not self.align:
+            return {}
+        # a plot with a panel opened: as it is alone (the browser's too)
+        plots = {i: item for i, item in enumerate(self.items)
+                 if isinstance(item, Trellis) and item.focused is None}  # fmt: skip
+        cols = self.cols
+        width = {i: col_w[i % cols] for i in plots}
+        natural = {i: figure_box(p, width[i]) for i, p in plots.items()}
+        frames = {}
+        for i in plots:
+            col = [b for j, b in natural.items() if j % cols == i % cols]
+            row = [b for j, b in natural.items() if j // cols == i // cols]
+            frames[i] = Frame(max(b.left for b in col), max(b.top for b in row),
+                              max(b.right for b in col))  # fmt: skip
+        framed = {i: figure_box(p, width[i], frame=frames[i]) for i, p in plots.items()}
+        out: dict[int, tuple[Frame, float | None]] = {}
+        for i, p in plots.items():
+            box = framed[i]
+            peers = [b.height for j, b in framed.items() if j // cols == i // cols and b.free]
+            target = max(peers) if box.free else box.height
+            height = None
+            if target > box.height:
+                # as much higher as the panels must be, and again for what rounding lost
+                height = box.total + target - box.height
+                got = figure_box(p, width[i], height, frames[i]).height
+                if got != target:
+                    height += target - got
+            out[i] = (frames[i], height)
+        return out
+
     def _svg_parts(self, width: float, theme: str, ids: str) -> tuple[list[str], float]:
         """Its plots' SVGs, placed (``<svg x y>`` elements), and the height they take."""
         from anytrellis.figure import FONT_SIZE, HEADER, THEMES, TITLE, _n, figure_svg, fit
@@ -223,6 +289,7 @@ class Concat:
         room = width - GAP * (self.cols - 1)
         col_w = [room * w / sum(self.widths) for w in self.widths]
         col_x = [sum(col_w[:c]) + GAP * c for c in range(self.cols)]
+        aligned = self._aligned(col_w)
         out: list[str] = []
         y = 0.0
         if self.title is not None:
@@ -245,7 +312,9 @@ class Concat:
                     out.append(f'<svg x="{_n(col_x[c])}" y="{_n(y)}" width="{_n(w)}" '
                                f'height="{_n(h)}" overflow="visible">{body}</svg>')  # fmt: skip
                 else:
-                    svg = figure_svg(item, width=w, theme=theme, ids=key)
+                    frame, height = aligned.get(n - 1, (None, None))
+                    svg = figure_svg(item, width=w, height=height, theme=theme, ids=key,
+                                     frame=frame)  # fmt: skip
                     h = float(svg.split('height="', 1)[1].split('"', 1)[0])
                     head = '<svg xmlns="http://www.w3.org/2000/svg" '
                     out.append(svg.replace(head, f'<svg x="{_n(col_x[c])}" y="{_n(y)}" ', 1))
@@ -333,7 +402,7 @@ class Concat:
 
 
 def concat(*plots: Item, cols: int | None = None, widths: Sequence[float] | None = None,
-           title: str | None = None) -> Concat:  # fmt: skip
+           title: str | None = None, align: bool = True) -> Concat:  # fmt: skip
     """Plots (or figures) in one figure: a row of them, or a grid of ``cols`` columns,
     filled row by row.
 
@@ -350,8 +419,12 @@ def concat(*plots: Item, cols: int | None = None, widths: Sequence[float] | None
         cols: How many columns (default: every plot in one row; 1: one under another).
         widths: Each column's share of the width (default: equal).
         title: The figure's title, over its plots.
+        align: Line the plots' panels up: their left and right edges in a column, their
+            tops in a row, and in a row those whose height is free (no ``height``,
+            ``panel_height`` or ``aspect``) as high as the highest of them. False: each
+            plot as it is alone.
     """
-    return Concat(plots, cols=cols, widths=widths, title=title)
+    return Concat(plots, cols=cols, widths=widths, title=title, align=align)
 
 
 def beside(left: Item, right: Item) -> Concat:
