@@ -36,8 +36,9 @@ DuckDB in the browser; that is a large dependency for what a link needs.
   a grid of `cols` columns, with the bundle once; the selection made in Python is saved and
   shown in the others when the page opens. A link's plots start together (not each as it
   nears the screen), so the highlight is there to see.
-- **`load="pages"` plots are saved with every row**, as their own `save_html` does
-  (decision 0004), so their keys are real rows and `on=` links them as in memory.
+- **`load="pages"` plots are saved with every row**, read at once (a plot's own
+  `save_html` reads a few panels at a time: decision 0004), so their keys are real rows and
+  `on=` links them as in memory.
 
 ## Known limits
 

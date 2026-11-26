@@ -151,7 +151,10 @@ around it. A page further away (a jump, a sort, a filter) says *Loading the pane
 its data comes, a moment later. Opening a panel of another page brings its data too.
 
 A page from `save_html` (or `to_html`) has no Python to ask, so it holds every panel's
-data: all its pages turn, sort and filter as in the notebook.
+data: all its pages turn, sort and filter as in the notebook. With `load="pages"` it reads
+them a few panels at a time (about two million rows), keeping of each what the page
+draws, so saving a table larger than memory works: it takes the time of reading every row,
+and about the memory of the page.
 
 Two things count only the panels whose data the browser has: `fit_y=True` with a shared
 y fits the panels sent, and the count of selected marks in the header is of the marks

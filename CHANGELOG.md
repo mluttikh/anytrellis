@@ -6,6 +6,13 @@ All notable changes to anytrellis. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `save_html` of a `load="pages"` plot reads the rows a few panels at a time (about two
+  million rows), keeping of each what the page draws: saving a table larger than memory
+  works, and takes less time. With 30 million rows it needs 1 GB more than the plot
+  (was 5.6 GB), and 100 million 3.3 GB (was 9.4 GB). The page is the same.
+
 ## [0.8.0] - 2026-11-26
 
 ### Added

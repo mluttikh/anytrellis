@@ -26,7 +26,7 @@ import numpy as np
 from anytrellis.channels import DASHES, SIZE_RANGE, Channels, dash_units, shape_code
 from anytrellis.code import Call, call_text, chained, literal, recorded, recorded_init
 from anytrellis.codec import Buffers
-from anytrellis.data import MEASURE, Table, number_label, repeated
+from anytrellis.data import MEASURE, Table, number_label, repeated, stacked
 from anytrellis.describe import Axis, describe, facet_phrase
 from anytrellis.detail import (
     DENSE,
@@ -36,6 +36,7 @@ from anytrellis.detail import (
     LineDetail,
     PointDetail,
     Shown,
+    shaded,
 )
 from anytrellis.facets import (
     DIRECTION_NAMES,
@@ -279,7 +280,8 @@ class Trellis:
             side of it, read again as the reader turns the pages; the panels' statistics,
             the axes' ranges and the colours' levels come from the database). For a table
             in a database: lines, points and text drawn from the plot's data (other layers
-            bring their own); not with ``link``. ``save_html`` still reads every row.
+            bring their own); not with ``link``. ``save_html`` reads every panel's rows,
+            a few panels at a time.
         theme: How the plot looks: ``"minimal"``, ``"framed"``, ``"classic"``, or an
             ``anytrellis.Theme`` changing any of their settings (default: ``"minimal"``, or
             what ``anytrellis.set_theme`` set). minimal: nothing behind the data but a faint
@@ -538,7 +540,10 @@ class Trellis:
         """``_full`` as the plot starts (a saved page's)."""
         self._full_scene_cache: tuple[dict[str, Any], Buffers] | None = None
         self._shadow: Trellis | None = None
-        """``load="pages"``: this plot reading every row, for a saved page."""
+        """``load="pages"``: this plot reading every row, for a linked saved page."""
+        self._chunk: frozenset[int] | None = None
+        """``load="pages"``, a saved page's build: the panels read now, in place of those
+        around the page shown (``_chunked_scene``)."""
 
     # ---- layers -------------------------------------------------------------------------
 
@@ -4570,6 +4575,8 @@ class Trellis:
 
     def _wanted_of(self, pages: dict[str, Any], names: list[str]) -> frozenset[int]:
         """``_wanted``, of a paged wrap's page size and its panels' names."""
+        if self._chunk is not None:  # a saved page's build: a chunk of panels
+            return self._chunk
         paging = self.paging
         shown = panel_order(self._stats, names, paging)
         pins = [] if pages.get("grid") else \
@@ -4819,12 +4826,12 @@ class Trellis:
         """The spec and buffers with every panel's data, as the plot starts: a saved page's
         (a paged plot's widget gets the panels around the page shown, as they are shown)."""
         spec, buffers = self._scene()
-        if self._page_tables:  # load="pages": every row, read for the page
+        if self._page_tables and self._window is not None:  # load="pages", paged
             if self._full_scene_cache is None:
-                self._full_scene_cache = self._every_row()._full_scene()
+                self._full_scene_cache = self._chunked_scene()
             return self._full_scene_cache
         if self._window is None:  # it does not page: the spec has every panel's data
-            return spec, buffers
+            return spec, buffers  # (load="pages": every row was read)
         if self._full_scene_cache is None:
             out = Buffers()
             layers = [
@@ -4833,6 +4840,67 @@ class Trellis:
             ]
             self._full_scene_cache = ({**spec, "layers": layers}, out)
         return self._full_scene_cache
+
+    def _chunked_scene(self) -> tuple[dict[str, Any], Buffers]:
+        """``load="pages"``: a saved page's spec and buffers, every panel's rows read a chunk
+        of panels at a time (about ``CHUNK_ROWS`` rows), each chunk's layers built as a page
+        turn builds them. Of a chunk, what its layers send is kept (lines thinned, dense
+        points as cells) and the rows that refers to: Python holds a chunk's rows, not the
+        table's. The database's summaries are every panel's already."""
+        assert self._data is not None
+        scene = self._scene()
+        npanels = len(scene[0]["panels"])
+        if not npanels:  # nothing to read
+            return scene
+        per = round(CHUNK_ROWS * npanels / max(self._data.count(), 1))
+        per = max(1, min(CHUNK_PANELS, per))
+        maker = copy.copy(self)  # (its own state, the shown plot's left as it is)
+        maker._widget = None
+        maker._link_group = None
+        maker._read = None
+        maker._made = {}
+        maker._queried = dict(self._queried)
+        maker._linked_counts = {}
+        maker._scene_cache = None
+        maker._full_scene_cache = None
+        maker._shadow = None
+        pieces: dict[int, list[_Sent]] = {}
+        # dense points' cells, each chunk's: before shading, and the most points in a unit
+        # of area (the plot's: the most of any chunk's)
+        unshaded: dict[int, list[tuple[np.ndarray, np.ndarray, np.ndarray] | None]] = {}
+        most: dict[int, float] = {}
+        spec: dict[str, Any] = {}
+        for start in range(0, npanels, per):
+            maker._chunk = frozenset(range(start, min(start + per, npanels)))
+            if start == 0:  # the spec (and rules' layers) as the plot starts
+                spec, _ = maker._build()
+            else:
+                maker._build(turning=True)
+            for i, (d, entry) in enumerate(zip(maker._drawn, maker._full, strict=True)):
+                if entry[2] is not None and id(d.user) in maker._page_tables:
+                    pieces.setdefault(i, []).append(_rows_used(entry))
+            for i, detail in maker._details:
+                if isinstance(detail, PointDetail):  # its cells: the layer after it
+                    unshaded.setdefault(i + 1, []).append(detail.unshaded)
+                    if detail.ref is not None:
+                        most[i + 1] = max(most.get(i + 1, 0.0), detail.ref)
+        for i, ref in most.items():
+            for cells, colors in zip(pieces[i], unshaded[i], strict=True):
+                if colors is not None and cells[2] is not None:
+                    cells[2].rgba = shaded(*colors, ref)
+        entries = list(maker._full)  # the rest (summaries, rules): every panel's
+        for i, kept in pieces.items():
+            entries[i] = _joined(kept)
+        if maker._link:  # the keys of the rows kept, as _build finds them
+            marks = [(e[0], e[1]) for e in entries if e[2] is not None]
+            keys = link_keys([table for _, table in marks], maker._link)
+            maker._keys = {id(lr): k for (lr, _), k in zip(marks, keys, strict=True)}
+        out = Buffers()
+        layers = [
+            spec["layers"][i] if entry[2] is None else maker._layer_spec(d, entry, out)
+            for i, (d, entry) in enumerate(zip(maker._drawn, entries, strict=True))
+        ]
+        return {**spec, "layers": layers}, out
 
     def _every_row(self) -> Trellis:
         """``load="pages"``: this plot reading every row (``load="all"``), as it is shown:
@@ -5057,6 +5125,49 @@ class _Drawn:
 
 _Sent = tuple[Layer, Table, "Geometry | None", "Part | None"]
 """What a spec layer sends: its layer, table, geometry and summary part."""
+
+CHUNK_ROWS = 2_000_000
+"""``load="pages"``: a saved page reads its panels' rows about so many at a time."""
+CHUNK_PANELS = 2000
+"""... and at most so many panels at a time (the panels' keys are in the query)."""
+
+
+def _rows_used(entry: _Sent) -> _Sent:
+    """A layer's entry with only the rows of its table its geometry refers to (a saved
+    page's chunk of panels: the rest let go)."""
+    layer, table, geom, part = entry
+    assert geom is not None
+    ends = geom.rows_end
+    used = np.unique(geom.rows if ends is None else np.concatenate([geom.rows, ends]))
+    if len(used) == table.n:
+        return entry
+    small = Table(table.take(used))
+    small.categories = table.categories
+    geom = replace(geom, rows=np.searchsorted(used, geom.rows),
+                   rows_end=None if ends is None else np.searchsorted(used, ends))  # fmt: skip
+    return layer, small, geom, None if part is None else replace(part, table=small)
+
+
+def _joined(kept: list[_Sent]) -> _Sent:
+    """One layer's entries of chunks of panels, in their order, as one: their tables one
+    after another, the geometry's rows numbered into that."""
+    some = [e for e in kept if e[2] is not None and e[2].count] or kept[:1]
+    layer, _, _, part = some[0]
+    tables = [e[1] for e in some]
+    at = np.cumsum([0] + [t.n for t in tables[:-1]])
+    geoms = [e[2] for e in some]
+    joined: dict[str, Any] = {}
+    for f in fields(Geometry):
+        values = [getattr(g, f.name) for g in geoms]
+        if all(v is None for v in values):
+            joined[f.name] = None
+        elif f.name in ("rows", "rows_end"):
+            joined[f.name] = np.concatenate([v + k for v, k in zip(values, at, strict=True)])
+        else:
+            joined[f.name] = np.concatenate(values)
+    table = stacked(tables)
+    return layer, table, Geometry(**joined), None if part is None else replace(part, table=table)
+
 
 TIP_HISTORY = 32
 """Layers sent in detail before that a tooltip can still be asked for."""

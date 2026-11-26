@@ -85,6 +85,7 @@ def main(out: Path) -> None:
     paged = Trellis(sensors(stations=150, sensors=1, hours=24 * 7), wrap="station",
                     title="150 stations")  # fmt: skip
     paged.line(x="time", y="temp", width=1).save_html(out / "paged.html")
+    paged_db(out)
     regions = Trellis(sensors(stations=40, sensors=1, hours=48), wrap="station", page="region",
                       rows=2, cols=4, title="Stations by region")  # fmt: skip
     regions.line(x="time", y="temp", width=1).save_html(out / "regions.html")
@@ -226,6 +227,25 @@ def views(out: Path) -> None:
     t._view = None
     t.save_html(out / "views.html")
     (out / "views.json").write_text(json.dumps(want))
+
+
+def paged_db(out: Path) -> None:
+    """paged.html's plot reading DuckDB (``load="pages"``), saved a few panels at a time
+    (paging.mjs: every page of it draws, turns, sorts and filters as paged.html's)."""
+    import duckdb
+
+    import anytrellis.plot as plot
+
+    readings = pl.DataFrame(sensors(stations=150, sensors=1, hours=24 * 7))
+    rel = duckdb.from_arrow(readings.to_arrow())
+    paged = Trellis(rel, wrap="station", title="150 stations", load="pages")
+    paged.line(x="time", y="temp", width=1)
+    chunk = plot.CHUNK_ROWS
+    plot.CHUNK_ROWS = 2000  # chunks of 12 panels
+    try:
+        paged.save_html(out / "paged-db.html")
+    finally:
+        plot.CHUNK_ROWS = chunk
 
 
 def saved_links(out: Path) -> None:

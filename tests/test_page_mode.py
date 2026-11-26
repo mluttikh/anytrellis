@@ -208,15 +208,40 @@ def test_order_by_a_summary_from_the_database() -> None:
     assert paged.panels() == eager.panels()
 
 
-def test_a_saved_page_has_every_row(tmp_path) -> None:
+def same_scene(a: tuple[dict[str, Any], Any], b: tuple[dict[str, Any], Any]) -> None:
+    """Two scenes draw the same: their layers and buffers alike, their panels' statistics
+    as close as a database's sums and Python's are."""
+    (sa, ba), (sb, bb) = a, b
+    drawn = [lr for lr in sa["layers"] if lr.get("count") != 0]  # (no cells: an empty layer)
+    other = [lr for lr in sb["layers"] if lr.get("count") != 0]
+    assert json.dumps(drawn, sort_keys=True) == json.dumps(other, sort_keys=True)
+    assert {k: v for k, v in ba.data.items() if v} == {k: v for k, v in bb.data.items() if v}
+    rest = {k: v for k, v in sa.items() if k not in ("layers", "pages")}
+    assert json.dumps(rest, sort_keys=True) == \
+        json.dumps({k: v for k, v in sb.items() if k in rest}, sort_keys=True)  # fmt: skip
+    if sa["pages"] is None:
+        assert sb["pages"] is None
+        return
+    for s, t in zip(sa["pages"]["stats"], sb["pages"]["stats"], strict=True):
+        assert {k: v for k, v in s.items() if k != "values"} == \
+            {k: v for k, v in t.items() if k != "values"}  # fmt: skip
+        if s["kind"] == "number":
+            assert np.allclose(np.array(s["values"], float), np.array(t["values"], float),
+                               rtol=1e-9, equal_nan=True), s["name"]  # fmt: skip
+        else:
+            assert s["values"] == t["values"]
+
+
+def test_a_saved_page_has_every_row(monkeypatch) -> None:
     paged, _ = plots("duckdb")
     paged.show_page(2)
     assert paged._data is not None
     every = Trellis(paged._data.native, wrap="station").line(x="time", y="temp",
                                                              color="rain").show_page(2)  # fmt: skip
-    a, b = paged._full_scene(), every._full_scene()
-    assert json.dumps(a[0], sort_keys=True) == json.dumps(b[0], sort_keys=True)
-    assert a[1].data.keys() == b[1].data.keys()
+    loads = no_full_read(monkeypatch)
+    a = paged._full_scene()
+    assert loads == []  # never every row at once: a chunk of panels at a time
+    same_scene(a, every._full_scene())
     assert paged._window is not None  # the plot itself still reads pages
     assert paged._full_scene() is a  # read once
 
@@ -270,3 +295,54 @@ def test_a_layer_with_its_own_data_is_read_whole() -> None:
     spec, _ = paged._scene()
     assert len(spec["layers"]) == 2  # the line and the points (no cells: not a page's)
     assert paged._table(paged._layers[1]).n == len(stations)
+
+
+SAVED: dict[str, tuple[dict[str, Any], Any]] = {  # Trellis(...)'s options, and its layers
+    "colours": ({}, lambda t: t.line(x="t", y="temp", color="rain")),
+    "end labels": ({}, lambda t: t.line(x="t", y="temp", group="note", label="end")),
+    "log y": ({"y_scale": "log"}, lambda t: t.points(x="t", y="rain", color="temp")),
+    "text": ({}, lambda t: t.text(x="t", y="temp", text="note")),
+    "link": ({"link": "note"}, lambda t: t.points(x="t", y="temp")),
+    "hist": ({}, lambda t: t.line(x="t", y="temp").hist(x="rain")),
+    "thinned": ({}, lambda t: t.line(x="t", y="temp")),
+    "cells": ({}, lambda t: t.points(x="t", y="temp", color="rain")),
+}
+
+
+@pytest.mark.parametrize("case", list(SAVED))
+def test_a_saved_page_reads_a_chunk_of_panels_at_a_time(case: str, monkeypatch) -> None:
+    import duckdb
+
+    import anytrellis.detail as detail
+    import anytrellis.plot as plot
+
+    monkeypatch.setattr(plot, "CHUNK_ROWS", 400)  # chunks of 4 panels
+    for module in (detail, plot):  # lines thinned, points as cells: in so few rows
+        monkeypatch.setattr(module, "THIN", 50)
+        monkeypatch.setattr(module, "DENSE", 50)
+    df = frame(12_000, stations=120)
+    options, layers = SAVED[case]
+    paged = layers(Trellis(duckdb.from_arrow(df.to_arrow()), wrap="station", load="pages",
+                           **options))  # fmt: skip
+    paged.show_page(3)
+    paged._scene()
+    reads: list[int] = []
+    query = Trellis._query_rows
+
+    def counted(self: Trellis, *args: Any) -> Table:
+        rows = query(self, *args)
+        reads.append(rows.n)
+        return rows
+
+    monkeypatch.setattr(Trellis, "_query_rows", counted)
+    saved = paged._full_scene()
+    assert len(reads) == -(-len(saved[0]["panels"]) // 4)  # (121: one of no station)
+    assert max(reads) <= 4 * 12_000 // 120  # a chunk's panels' rows
+    assert sum(reads) == len(df)  # every row, once
+    same_scene(saved, paged._every_row()._full_scene())
+    spec = saved[0]
+    if case == "thinned":  # (the rows with a temperature: some 98 a panel, 4 columns' kept)
+        assert spec["layers"][0]["count"] < len(df) * 0.9
+    if case == "cells":
+        assert spec["layers"][1]["type"] == "rect"
+        assert spec["layers"][1]["count"] > 0

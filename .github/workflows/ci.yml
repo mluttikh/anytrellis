@@ -143,6 +143,7 @@ jobs:
             node test/export.mjs "$pages/labelled.html" "$shots" "$r"
             node test/details.mjs "$pages" "$shots" "$r"
             node test/paging.mjs "$pages/paged.html" "$shots" "$r"
+            node test/paging.mjs "$pages/paged-db.html" "$shots" "$r"
             node test/levels.mjs "$pages" "$shots" "$r"
             node test/reverse.mjs "$pages/reversed.html" "$shots" "$r"
             node test/tooltip.mjs "$pages" "$shots" "$r"

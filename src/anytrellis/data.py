@@ -287,6 +287,24 @@ class Table:
         return self._frame[name].to_numpy()
 
 
+def stacked(tables: Sequence[Table]) -> Table:
+    """Tables of the same columns one after another (in memory: rows read, not a lazy
+    table's query), as one; their number columns read as categories, the first's."""
+    first = tables[0]
+    if len(tables) == 1:
+        return first
+    if isinstance(first._frame, Mapping):
+        out = Table({k: np.concatenate([np.asarray(t._frame[k]) for t in tables])
+                     for k in first._frame})  # fmt: skip
+    else:
+        import narwhals as nw
+
+        frames = [nw.from_native(t.native, eager_only=True) for t in tables]
+        out = Table(nw.to_native(nw.concat(frames, how="vertical")))
+    out.categories = first.categories
+    return out
+
+
 MEASURE, VALUE = "measure", "value"
 """``Trellis(repeat=...)``'s columns: each melted row's column (the plot's rows) and its
 value (the layers' ``y``)."""
