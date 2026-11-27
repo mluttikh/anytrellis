@@ -1,7 +1,8 @@
 // Different plots in one figure on a save_html page (compose.py): each plot where Python's
 // image puts it (concat.json: across the grid, at 824 px), the figure's title over them, a
 // narrow plot's toolbar on a line under its title, and a brush in one plot lighting up its
-// rows in the plot linked with it.
+// rows in the plot linked with it; legends collected; plots that share ranges zooming
+// together.
 //   node test/concat.mjs <pages dir> [screenshot dir] [renderer]
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -176,6 +177,53 @@ const legendBoxes = await page.evaluate(() =>
 );
 check(new Set(legendBoxes).size === 1, `without their legends, the row's panels still end together (${legendBoxes})`);
 await page.screenshot({ path: join(out, `concat-legend-${tag}.png`), fullPage: true });
+
+// ranges shared: a drag in one plot pans the other with it (x and y), not the third; Reset
+// in the other brings both back
+await page.goto(`file://${join(dir, "concat-shared.html")}${renderer ? `?renderer=${renderer}` : ""}`);
+await page.waitForFunction(() => {
+  const hosts = [...document.querySelectorAll(".anytrellis-embed")];
+  return hosts.length === 3 && hosts.every((h) => h.dataset.state === "ready");
+});
+await page.waitForTimeout(300);
+const ranges = () =>
+  page.evaluate(() =>
+    window.anytrellisViews.map((v) => {
+      const p = v.spec.panels[0];
+      const at = (axis, views) => (views.get(axis === "x" ? p.xg : p.yg) ?? p[axis]).map((n) => +(n + v.spec[axis].origin).toFixed(6));
+      return { title: v.spec.title, x: at("x", v.xView), y: at("y", v.yView), joined: [v.spec.x.joined ?? null, v.spec.y.joined ?? null] };
+    }),
+  );
+const byTitle = (rs) => Object.fromEntries(rs.map((r) => [r.title, r]));
+let rs = byTitle(await ranges());
+check(JSON.stringify(rs.Light.x) === JSON.stringify(rs.Heavy.x) && JSON.stringify(rs.Light.y) === JSON.stringify(rs.Heavy.y) && rs.All.joined.every((j) => j === null) && rs.Light.joined.every(Boolean),
+  `two plots start with one range, the third its own (${JSON.stringify(rs)})`);
+const start = rs;
+const lightBox = await page.evaluate(() => {
+  const v = window.anytrellisViews.find((x) => x.spec.title === "Light");
+  const s = v.stage.getBoundingClientRect();
+  const r = v.lay.panels[0].rect;
+  return { x: s.left + r.x, y: s.top + r.y, w: r.w, h: r.h };
+});
+await page.mouse.move(lightBox.x + lightBox.w * 0.5, lightBox.y + lightBox.h * 0.5);
+await page.mouse.down();
+await page.mouse.move(lightBox.x + lightBox.w * 0.3, lightBox.y + lightBox.h * 0.6, { steps: 6 });
+await page.mouse.up();
+await page.waitForFunction(() => {
+  const [a, b] = ["Light", "Heavy"].map((t) => window.anytrellisViews.find((v) => v.spec.title === t));
+  return JSON.stringify([...a.xView]) !== "[]" && JSON.stringify([...a.xView.values()]) === JSON.stringify([...b.xView.values()]);
+}, null, { timeout: 5000 }).catch(() => {});
+rs = byTitle(await ranges());
+const moved = rs.Light.x[0] > start.Light.x[0] && rs.Light.y[0] > start.Light.y[0];
+check(moved && JSON.stringify(rs.Heavy.x) === JSON.stringify(rs.Light.x) && JSON.stringify(rs.Heavy.y) === JSON.stringify(rs.Light.y),
+  `a drag in one plot pans the plot that shares its ranges (${JSON.stringify([rs.Light, rs.Heavy])})`);
+check(JSON.stringify(rs.All.x) === JSON.stringify(start.All.x) && JSON.stringify(rs.All.y) === JSON.stringify(start.All.y), "the plot that shares nothing stays where it was");
+await page.evaluate(() => window.anytrellisViews.find((v) => v.spec.title === "Heavy").root.querySelector("button[aria-label='Reset zoom']").click());
+await page.waitForTimeout(200);
+rs = byTitle(await ranges());
+check(JSON.stringify(rs.Light.x) === JSON.stringify(start.Light.x) && JSON.stringify(rs.Light.y) === JSON.stringify(start.Light.y),
+  `Reset in the other plot brings both back (${JSON.stringify(rs.Light)})`);
+await page.screenshot({ path: join(out, `concat-shared-${tag}.png`), fullPage: true });
 
 check(errors.length === 0, `no page errors (${errors.join("; ")})`);
 await browser.close();

@@ -336,6 +336,11 @@ def test_a_figure_shares_a_range_among_its_plots() -> None:
     assert spec["y"]["share"] == "all"
     assert {p["yg"] for p in spec["panels"]} == {0}
     assert _ranges(a, "x") != _ranges(b, "x")  # x is each plot's own
+    # the browser zooms them together by the range's name; x has none
+    joined = {t._scene()[0]["y"].get("joined") for t in (a, b)}
+    assert len(joined) == 1
+    assert None not in joined
+    assert "joined" not in spec["x"]
     # a page (the docs embed it) carries the range too
     c, d = _sharing_plots()[:2]
     page = concat(c, d, share_y=True)._embed_html()
@@ -348,6 +353,7 @@ def test_a_figure_shares_a_range_among_its_plots() -> None:
     assert c._joined["y"] == d._joined["y"]
     # a figure that doesn't share gives each plot its own range back
     (a | b)._svg(800, "light")
+    assert "joined" not in a._scene()[0]["y"]
     assert _ranges(a, "y") == own_a
     assert _ranges(b, "y") == own_b
 

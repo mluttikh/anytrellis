@@ -67,9 +67,12 @@ class Shared:
     panels (``Trellis._own``), joined, given to every panel of each (``Trellis._joined``).
     A plot belongs to the group its figure last gave it (``Trellis._sharing``)."""
 
-    def __init__(self, axis: str, plots: list[Trellis]) -> None:
+    def __init__(self, axis: str, plots: list[Trellis], key: str) -> None:
         self.axis = axis
         self.plots = plots
+        self.key = key
+        """Its name in the browser, where its plots zoom together (figurezoom.ts): the
+        figure's id, the axis and its place among the figure's groups."""
         self._busy = False
 
     def members(self) -> list[Trellis]:
@@ -109,13 +112,16 @@ class Shared:
         try:
             plots = self.members()
             target = self.range(plots) if len(plots) > 1 else None
+            key = None if target is None else self.key
             for plot in plots:
-                if plot._joined.get(self.axis) == target:
+                if plot._joined.get(self.axis) == target and plot._join_keys.get(self.axis) == key:
                     continue
-                if target is None:
+                if target is None or key is None:
                     plot._joined.pop(self.axis, None)
+                    plot._join_keys.pop(self.axis, None)
                 else:
                     plot._joined[self.axis] = target
+                    plot._join_keys[self.axis] = key
                 plot._changed()
         finally:
             self._busy = False
@@ -306,7 +312,8 @@ class Concat:
         """Give its plots their shared ranges (``Shared``); a plot it doesn't share an axis
         of has its own again."""
         for axis in ("x", "y"):
-            groups = [Shared(axis, plots) for plots in self._share_groups(axis)]
+            groups = [Shared(axis, plots, f"{self._group}-{axis}{i}")
+                      for i, plots in enumerate(self._share_groups(axis))]  # fmt: skip
             group_of = {id(p): g for g in groups for p in g.plots}
             for plot in self.plots:
                 group = group_of.get(id(plot))
@@ -314,6 +321,7 @@ class Concat:
                     plot._sharing[axis] = group
                 elif plot._sharing.pop(axis, None) is not None and axis in plot._joined:
                     del plot._joined[axis]
+                    plot._join_keys.pop(axis, None)
                     plot._changed()
             for group in groups:
                 group.apply()

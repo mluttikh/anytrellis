@@ -3,7 +3,7 @@
 - Status: **implemented**, 21 November 2026 (design review, Phase 3: concatenation);
   amended 26 November 2026: the plots' panels lined up (`align`); 27 November 2026: one
   legend for the figure (`legend="collect"`); 27 November 2026: one range for its plots
-  (`share_x`, `share_y`).
+  (`share_x`, `share_y`), and the plots zooming together.
 - Changes: `src/anytrellis/compose.py` (`Concat`, `concat`, `beside`, `under`, `GAP`),
   `plot.py` (`Trellis.__or__`, `__truediv__`), `figure.py` (`figure_svg(ids=)`: ids
   unique among a figure's plots), `__init__.py`; `widget.css` (a narrow header wraps);
@@ -17,7 +17,10 @@
   `standalone.ts`; `js/test/pages.py` (`concat-legend.html`).
 - One range: `compose.py` (`Concat(share_x=, share_y=)`, `Concat.share`, `Shared`,
   `_share_groups`, `_share_scales`), `plot.py` (`_build`: `_own`, `_joined`; `_shared`,
-  `_changed` tells its group), `scales.py` (`Range`); `tests/test_compose.py`.
+  `_changed` tells its group, `_joined_spec`: the axis's `joined`), `scales.py` (`Range`);
+  `js/src/core/figurezoom.ts`, `view.ts` (`joinZooms`, `followZoom`, `tellZooms`),
+  `types.ts` (`AxisSpec.joined`); `tests/test_compose.py`, `js/test/figurezoom.test.ts`,
+  `js/test/concat.mjs` (`concat-shared.html`).
 - Lined up: `compose.py` (`Concat(align=)`, `_cell`, `_aligned`), `figure.py` (`Frame`,
   `panels_box`, `figure_box`, `layout(frame=)`, `figure_svg(frame=)`), `widget.py`
   (`_figure`), `plot.py` (`_embed_html(figure=)`); `js/src/core/align.ts`, `layout.ts`
@@ -119,6 +122,16 @@ one image, nor a grid of unlinked plots.
     range (`Shared.apply`, once: a plot built again doesn't start it again).
   - Axes of different kinds (numbers and times, linear and log) raise a ValueError, as do
     axes of categories that differ; categories that are the same need nothing.
+  - The plots zoom together: each shared axis's spec carries `joined`, the group's name
+    (the figure's id, the axis, its place among the figure's groups), and the views meet
+    by it and the range on the page's global object (figurezoom.ts, as align.ts). A view
+    tells the others its axis's range when it draws one that differs from the group's last
+    (in the data's units: the view's plus the axis's origin, so plots of different origins
+    agree), and they follow without telling back; whatever moved it (wheel, drag, box,
+    pinch, Reset, undo, a saved view) is told the same way. A following view keeps no undo
+    step: undo takes back its own zooms. A view that joins later starts where the others
+    are; a range Python changes is a new key, so a new start. y fitted to x fits again
+    after a followed x, unless y is shared too (then it comes from the others).
 - **Narrow plots**: a plot's header wraps, the toolbar on a line under the title when the
   title would get less than 8em, and its buttons on two lines when wider than the plot.
   The state chips take only the room left beside the title (`flex-basis: 0`): a chip
@@ -133,8 +146,6 @@ one image, nor a grid of unlinked plots.
   don't meet inside them.
 - The figure's legend goes under its plots only (not to their right), and the image shows
   the entries chosen in the first plot that has the legend.
-- Zooming a plot in a figure that shares a range doesn't zoom the others: each plot's zoom
-  is its own (a registry by the figure's id, as align.ts's, could carry it).
 - Axes of categories don't join their categories: they share only when they hold the
   same ones.
 - A plot in two figures that share takes the range of the one shown or saved last, its
