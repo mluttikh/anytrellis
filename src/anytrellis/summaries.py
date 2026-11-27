@@ -37,6 +37,7 @@ from anytrellis.stats import (
     HexGrid,
     Keys,
     Labels,
+    Members,
     Part,
     Range,
     Steps,
@@ -975,6 +976,117 @@ def linked_counts(part: Part, whole: Table, grid: Grid, keep: Any) -> np.ndarray
                     value, weights)  # fmt: skip
 
 
+def saved_members(part: Part, whole: Table, grid: Grid, on: tuple[str, ...],
+                  rows: bool) -> tuple[Table, Members] | None:  # fmt: skip
+    """The values of the ``on`` columns of the rows each of a summary's rows stands for,
+    found by the database: a saved page's link (``linking.saved_links``) keys them as a
+    summary's members in memory are keyed. The rows are grouped by what the summary rows
+    test (as ``linked_counts``), by their value in the range each covers (a histogram's
+    bin, else the value itself) and by ``on``. ``rows``: each value as often as its rows
+    (a histogram's bar fills to the share of its rows chosen), else once. Returns the
+    groups read (a table with the ``on`` columns) and the members, rows of it; None: the
+    backend can't run the query."""
+    import narwhals as nw
+
+    where = part.where
+    assert where is not None
+    n = len(where.panel)
+    ask = _Ask(part.layer, whole, grid, {})
+    tests, span = _span_of(where)
+    try:
+        ok = nw.lit(True)
+        for name, scale in where.finite:
+            ok = ok & ask._ok(name, scale)
+        names: list[str] = [*grid.columns]
+        if where.color is not None:
+            names.append(where.color.name)
+        values: dict[int, str] = {}
+        extra: list[Any] = []
+        for i, t in enumerate(tests):
+            if isinstance(t, Labels):
+                names.append(t.name)
+                continue
+            v = ask._test_value(t)
+            alias = f"{VALUE}{i}"
+            values[i] = alias
+            extra.append(v.alias(alias))
+            chosen = np.unique(t.lo)
+            if len(chosen) <= _AMONG:  # the values of the summary rows only (outliers)
+                ok = ok & v.is_in(chosen.tolist())
+        groups = [*dict.fromkeys(n for n in names if n in whole), *values.values()]
+        mids: np.ndarray | None = None
+        if span is not None:
+            v = ask._value(span.name, span.scale)
+            bucket, mids, lo, hi = _buckets(span, v)
+            if np.isfinite(lo):
+                ok = ok & (v >= lo)
+            if np.isfinite(hi):
+                ok = ok & (v <= hi)
+            if mids is not None:  # a histogram's bins: the bin is the value
+                extra.append(bucket.alias(BIN))
+                groups.append(BIN)
+            else:
+                extra.append(v.alias(VALUE))
+                groups.append(VALUE)
+        groups += [name for name in on if name not in groups]
+        found = ask._read(lambda q: q.filter(ok).with_columns(*extra).group_by(*groups)
+                          .agg(_len()))  # fmt: skip
+    except _Unable:
+        return None
+    if not found.n:
+        return found, Members(np.zeros(n + 1, dtype=np.int64), np.zeros(0, dtype=np.int64))
+    value = None
+    if span is not None:
+        value = (found.column(VALUE).values.astype(np.float64) if mids is None
+                 else mids[found.column(BIN).values.astype(np.int64)])  # fmt: skip
+    # the groups' places (all but ``on``): each found once, its mark given to its groups
+    first, inverse = _distinct(found, [g for g in groups if g not in on])
+    heads = Table(found.take(first))
+    panel_of = grid.assign(heads)
+    assert panel_of is not None
+    hit = _hits(where, tests, span, panel_of, panel_of >= 0,
+                lambda name: _labels(heads, name),
+                lambda i, _: heads.column(values[i]).values.astype(np.float64),
+                None if value is None else value[first])[inverse]  # fmt: skip
+    count = found.column(N).values.astype(np.int64) if rows else np.ones(found.n, np.int64)
+    mine = np.flatnonzero(hit >= 0)
+    mine = mine[np.argsort(hit[mine], kind="stable")]
+    per = np.bincount(hit[mine], weights=count[mine], minlength=n).astype(np.int64)
+    return found, Members(np.r_[0, np.cumsum(per)], np.repeat(mine, count[mine]))
+
+
+def _distinct(rows: Table, names: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """The rows with distinct values of ``names``: the first of each, and each row's place
+    among them. Each column's values as small integers (a category's codes, a whole number
+    less the least), joined into one number a row, sorted once."""
+    code = np.zeros(rows.n, dtype=np.int64)
+    span = 1
+    for name in names:
+        column = rows.column(name)
+        if column.kind == "category":
+            part = column.level_codes().astype(np.int64) + 1
+        else:
+            v = np.asarray(column.values, dtype=np.float64)
+            finite = np.isfinite(v)
+            lo = float(v[finite].min()) if finite.any() else 0.0
+            whole = bool(np.all(v[finite] == np.round(v[finite]))) and \
+                float(v[finite].max(initial=lo)) - lo < 2**31  # fmt: skip
+            if whole:
+                part = np.where(finite, v - lo + 1, 0).astype(np.int64)
+            else:
+                _, part = np.unique(v, return_inverse=True)
+                part = part.ravel().astype(np.int64)
+        size = int(part.max(initial=0)) + 1
+        if span * size >= 2**62:  # too large to join: renumbered first
+            _, code = np.unique(code, return_inverse=True)
+            code = code.ravel().astype(np.int64)
+            span = int(code.max(initial=0)) + 1
+        code = code * size + part
+        span *= size
+    _, first, inverse = np.unique(code, return_index=True, return_inverse=True)
+    return first, inverse.ravel()
+
+
 _AMONG = 1_000
 """Up to this many values tested (a box's outliers): only rows of those values are read."""
 _FINE = 1 << 16
@@ -1038,6 +1150,19 @@ def _counted(where: Where, tests: list[Range | Labels], span: Range | None,
     with the values tested (``ok``), their labels and values of each test, and their value
     in the ``span`` (a range per summary row)."""
     n = len(where.panel)
+    hit = _hits(where, tests, span, panel_of, ok, labels, values, value)
+    keep = hit >= 0
+    if weights is None:
+        return np.bincount(hit[keep], minlength=n)
+    return np.bincount(hit[keep], weights=weights[keep], minlength=n).round().astype(np.int64)
+
+
+def _hits(where: Where, tests: list[Range | Labels], span: Range | None,
+          panel_of: np.ndarray, ok: np.ndarray, labels: Callable[[str], np.ndarray],
+          values: Callable[[int, Range], np.ndarray],
+          value: np.ndarray | None) -> np.ndarray:  # fmt: skip
+    """The summary row each row (or group of rows) is one of, or -1: none (``_counted``)."""
+    n = len(where.panel)
     heads = [(where.panel.astype(str), panel_of.astype(str))]
     if where.color is not None:
         heads.append((where.color.labels.astype(str), labels(where.color.name)))
@@ -1073,10 +1198,7 @@ def _counted(where: Where, tests: list[Range | Labels], span: Range | None,
             inside = (v >= span.lo[s]) & np.where(is_open[s], v < span.hi[s], v <= span.hi[s])
             hit[mine[inside]] = s[inside]
     hit[~ok] = -1
-    keep = hit >= 0
-    if weights is None:
-        return np.bincount(hit[keep], minlength=n)
-    return np.bincount(hit[keep], weights=weights[keep], minlength=n).round().astype(np.int64)
+    return hit
 
 
 def _value_expr(whole: Table, name: str, scale: str, mark: str = "") -> Any:

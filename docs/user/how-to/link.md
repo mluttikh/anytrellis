@@ -92,9 +92,11 @@ html = both.to_html(title="Cars")  # the page as a string
 Linked plots in a figure (`scatter | power`, see [one figure](figures.md)) stay linked in
 its saved page too.
 
-Plots reading a database a page at a time are saved with every row, as `save_html` on one
-of them does, so the page links them by their `on=` keys too. The page holds the keys of
-every row once per plot: a few bytes a row beside the data it already has.
+Plots reading a database a page at a time are saved with every panel, as `save_html` on
+one of them does, reading a few panels' rows at a time, so the page links them by their
+`on=` keys too. A summary's marks (a histogram's bars, boxes) get the keys of their rows
+from the database. The page holds a key for each mark's row once per plot: a few bytes a
+row beside the data it already has.
 
 ## Unlink
 

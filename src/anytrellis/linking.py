@@ -248,14 +248,15 @@ def saved_links(link: Link) -> list[dict[str, Any]]:
     and per spec layer the keys of its marks' rows (base64 uint32): a plain mark's row's
     (``keys``, and a line's end's, ``ends``), a summary's rows' (``starts`` per mark into
     ``members``; ``share``: a histogram's bar fills to the share selected); None: a layer
-    not linked (a rule, text, data without the link's columns)."""
-    plans = [p._saved_entries() for p in link.plots]
+    not linked (a rule, text, data without the link's columns). The rows are those the
+    saved page draws (``Trellis._saved_entries``): a ``load="pages"`` plot's read a chunk of
+    panels at a time, never every row at once."""
+    plans = [p._saved_entries(link.on) for p in link.plots]
     tables: dict[int, Table] = {}
-    for plot, entries in plans:
-        for user, _, geom in entries:
-            if geom is not None:
-                table = plot._table(user)
-                tables.setdefault(id(table), table)
+    for entries in plans:
+        for e in entries:
+            if e.geom is not None and e.table is not None:
+                tables.setdefault(id(e.table), e.table)
     keys: dict[int, np.ndarray | None] = {}
     if link.on:
         found = link_keys(list(tables.values()), link.on)
@@ -272,23 +273,25 @@ def saved_links(link: Link) -> list[dict[str, Any]]:
     size = max((int(k.max(initial=-1)) + 1 for k in keys.values() if k is not None), default=0)
     group = uuid.uuid4().hex[:12]
     out = []
-    for plot, entries in plans:
+    for entries in plans:
         layers: list[dict[str, Any] | None] = []
-        for user, part, geom in entries:
-            k = None if geom is None or user.mark == "text" else keys.get(id(plot._table(user)))
+        for e in entries:
+            geom, part = e.geom, e.part
+            k = None if geom is None or e.table is None or e.user.mark == "text" \
+                else keys.get(id(e.table))  # fmt: skip
             if k is None or geom is None:
                 layers.append(None)
-            elif part is None:
+            elif part is None or e.members is None:
                 ends = None if geom.rows_end is None else _b64(k[geom.rows_end])
                 layers.append({"keys": _b64(k[geom.rows]), "ends": ends})
             else:
                 # each mark's summary row's source rows, one after another
-                starts = part.members.starts
+                starts = e.members.starts
                 first, length = starts[geom.rows], np.diff(starts)[geom.rows]
                 bounds = np.r_[0, np.cumsum(length)]
                 place = np.repeat(first - bounds[:-1], length) + np.arange(bounds[-1])
                 share = part.layer.stat == "hist" and part.layer.mark in ("bars", "rect")
-                members = k[part.members.rows[place]]
+                members = k[e.members.rows[place]]
                 layers.append({"starts": _b64(bounds), "members": _b64(members),
                                "share": bool(share)})  # fmt: skip
         out.append({"group": group, "size": size, "layers": layers})

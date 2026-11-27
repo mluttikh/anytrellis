@@ -279,8 +279,7 @@ def test_a_saved_page_of_summaries_reads_no_row(monkeypatch, tmp_path) -> None:
     rel = duckdb.from_arrow(readings(stations=60).to_arrow())
     p = Trellis(rel, wrap="station", load="pages", rows=2, cols=3).hist(x="v", color="sensor")
     p.save_html(tmp_path / "hist.html")
-    assert seen == []
-    assert p._shadow is None  # every panel's summaries, as the plot has them: no rows read
+    assert seen == []  # every panel's summaries, as the plot has them: no rows read
     every = len(panels(p._full[0]))
     assert every > len(panels(p._sent[0]))  # the widget's: the panels around the page
 

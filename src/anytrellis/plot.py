@@ -15,11 +15,12 @@ import html
 import json
 import math
 import numbers
+import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Self, cast
 
 import numpy as np
 
@@ -126,7 +127,7 @@ from anytrellis.styling import (
     rgba,
 )
 from anytrellis.summaries import counts as counts_of_rows
-from anytrellis.summaries import linked_counts
+from anytrellis.summaries import linked_counts, saved_members
 from anytrellis.summaries import parts as queried_parts
 from anytrellis.summaries import selected as summaries_selected
 from anytrellis.theme import Theme, theme_of
@@ -548,8 +549,12 @@ class Trellis:
         self._start: list[_Sent] = []
         """``_full`` as the plot starts (a saved page's)."""
         self._full_scene_cache: tuple[dict[str, Any], Buffers] | None = None
-        self._shadow: Trellis | None = None
-        """``load="pages"``: this plot reading every row, for a linked saved page."""
+        self._full_entries: list[tuple[Layer, _Sent]] | None = None
+        """``load="pages"``, paged: each layer of ``_full_scene``'s spec as built, a chunk
+        of panels at a time (their tables the rows the layers draw): a saved link's keys."""
+        self._reads_on: tuple[str, ...] = ()
+        """The ``on`` columns of the link of the plot it was copied from (``_alone``): read
+        with the rows, for a saved link's keys."""
         self._chunk: frozenset[int] | None = None
         """``load="pages"``, a saved page's build: the panels read now, in place of those
         around the page shown (``_chunked_scene``)."""
@@ -3463,7 +3468,6 @@ class Trellis:
         if all(name in table for table in self._page_tables.values() for name in names):
             return
         self._scene_cache = None
-        self._shadow = None
         if self._widget is not None:
             spec, _ = self._scene()
             self._widget._spec = spec
@@ -3914,7 +3918,6 @@ class Trellis:
 
     def _changed(self) -> Self:
         self._scene_cache = None
-        self._shadow = None
         self._queried = {}
         self._made = {}
         if self._widget is not None:
@@ -4042,7 +4045,7 @@ class Trellis:
         columns, and those of linked rows (``link=``, and a link's ``on=``) and orders."""
         whole = self._data
         assert whole is not None
-        on = self._link_group.on if self._link_group is not None else ()
+        on = self._link_group.on if self._link_group is not None else self._reads_on
         names: list[str | None] = [*self._page, *self._row, *self._col, *self._wrap,
                                    *self._link, *on]  # fmt: skip
         for name, order in self._orders.items():
@@ -4577,6 +4580,7 @@ class Trellis:
         self._sent = []
         self._full = []
         self._full_scene_cache = None
+        self._full_entries = None
         self._window = self._wanted(spec)  # a paged plot: the pages around the one shown
         for i, (d, (layer, _table, geom)) in enumerate(zip(drawn, built, strict=True)):
             if geom is None:
@@ -4904,7 +4908,7 @@ class Trellis:
         spec, buffers = self._scene()
         if self._page_tables and self._window is not None:  # load="pages", paged
             if self._full_scene_cache is None:
-                self._full_scene_cache = self._chunked_scene()
+                self._full_scene_cache, self._full_entries = self._chunked_scene()
             return self._full_scene_cache
         if self._window is None:  # it does not page: the spec has every panel's data
             return spec, buffers  # (load="pages": every row was read)
@@ -4917,17 +4921,20 @@ class Trellis:
             self._full_scene_cache = ({**spec, "layers": layers}, out)
         return self._full_scene_cache
 
-    def _chunked_scene(self) -> tuple[dict[str, Any], Buffers]:
+    def _chunked_scene(
+        self,
+    ) -> tuple[tuple[dict[str, Any], Buffers], list[tuple[Layer, _Sent]] | None]:
         """``load="pages"``: a saved page's spec and buffers, every panel's rows read a chunk
         of panels at a time (about ``CHUNK_ROWS`` rows), each chunk's layers built as a page
         turn builds them. Of a chunk, what its layers send is kept (lines thinned, dense
         points as cells) and the rows that refers to: Python holds a chunk's rows, not the
-        table's. The database's summaries are every panel's already."""
+        table's. The database's summaries are every panel's already. Also returns each
+        spec layer's user layer and entry as built (None: no panels)."""
         assert self._data is not None
         scene = self._scene()
         npanels = len(scene[0]["panels"])
         if not npanels:  # nothing to read
-            return scene
+            return scene, None
         per = round(CHUNK_ROWS * npanels / max(self._data.count(), 1))
         per = max(1, min(CHUNK_PANELS, per))
         maker = self._alone()
@@ -4967,7 +4974,8 @@ class Trellis:
             spec["layers"][i] if entry[2] is None else maker._layer_spec(d, entry, out)
             for i, (d, entry) in enumerate(zip(maker._drawn, entries, strict=True))
         ]
-        return {**spec, "layers": layers}, out
+        users = [d.user for d in maker._drawn]
+        return ({**spec, "layers": layers}, out), list(zip(users, entries, strict=True))
 
     def _alone(self) -> Trellis:
         """A copy of this plot with a state of its own, to build in without changing what
@@ -4976,6 +4984,8 @@ class Trellis:
         out = copy.copy(self)
         out._paging = self.paging  # (the widget's, while it is shown)
         out._widget = None
+        if self._link_group is not None:  # its rows' keys still read
+            out._reads_on = self._link_group.on
         out._link_group = None
         out._read = None
         out._made = {}
@@ -4983,48 +4993,56 @@ class Trellis:
         out._linked_counts = {}
         out._scene_cache = None
         out._full_scene_cache = None
-        out._shadow = None
+        out._full_entries = None
         return out
 
-    def _every_row(self) -> Trellis:
-        """``load="pages"``: this plot reading every row (``load="all"``), as it is shown:
-        made once, its rows read once."""
-        if self._shadow is None:
-            assert self._data is not None
-            shadow = copy.copy(self)
-            shadow._load = "all"
-            shadow._data = Table(self._data.native)
-            shadow._tables = {k: shadow._data if t is self._data else t
-                              for k, t in self._tables.items()}  # fmt: skip
-            shadow._widget = None
-            shadow._link_group = None
-            shadow._page_tables = {}
-            shadow._read = None
-            shadow._queried = {}
-            shadow._shadow = None
-            self._shadow = shadow
-        shadow = self._shadow
-        shadow._paging = self.paging
-        shadow._focus = self.focused
-        shadow._compare = self.compared
-        shadow._selection = self._current_selection()
-        shadow._view = self._view
-        shadow._scene_cache = None
-        return shadow
-
-    def _saved_entries(self) -> tuple[Trellis, list[tuple[Layer, Any, Any]]]:
-        """Each layer of the saved page's spec (``_full_scene``): its user layer, summary
-        part and geometry, and the plot whose tables they index (``load="pages"``: the
-        plot reading every row)."""
-        if self._page_tables:
-            return self._every_row()._saved_entries()
+    def _saved_entries(self, on: tuple[str, ...] = ()) -> list[Saved]:
+        """Each layer of the saved page's spec (``_full_scene``) and what its marks' rows
+        are: a paged ``load="pages"`` plot's as read a chunk of panels at a time (the rows
+        its layers draw, with the link's ``on`` columns); a summary's from the database,
+        the ``on`` values of its rows, found by the database (``saved_members``); in memory,
+        the layers' own tables and a summary's members."""
         self._full_scene()
-        sent = self._sent
-        if self._window is not None:  # as _full_scene: the start's layers with data
-            sent = [s if s[2] is not None else c
-                    for s, c in zip(self._start, self._sent, strict=True)]  # fmt: skip
-        return self, [(d.user, part, geom)
-                      for d, (_, _, geom, part) in zip(self._drawn, sent, strict=True)]  # fmt: skip
+        if self._full_entries is not None:
+            chunked = True
+            pairs = self._full_entries
+        else:
+            chunked = False
+            sent = self._sent
+            if self._window is not None:  # as _full_scene: the start's layers with data
+                sent = [s if s[2] is not None else c
+                        for s, c in zip(self._start, self._sent, strict=True)]  # fmt: skip
+            pairs = [(d.user, e) for d, e in zip(self._drawn, sent, strict=True)]
+        out: list[Saved] = []
+        found: dict[int, tuple[Table, Members] | None] = {}
+        for user, (_, table, geom, part) in pairs:
+            if part is not None and part.where is not None and self._on_page(user):
+                key = id(part)
+                if key not in found:
+                    found[key] = self._saved_members(part, on)
+                got = found[key]
+                out.append(Saved(user, part, geom, None if got is None else got[0],
+                                 None if got is None else got[1]))  # fmt: skip
+                continue
+            source = table if chunked and part is None else self._table(user)
+            out.append(Saved(user, part, geom, source, None if part is None else part.members))
+        return out
+
+    def _saved_members(self, part: Part, on: tuple[str, ...]) -> tuple[Table, Members] | None:
+        """A database summary's members as a saved link keys them (``saved_members``), or
+        None: not linked (no ``on``, or the backend can't find them)."""
+        whole = self._data
+        if not on or whole is None or not all(name in whole for name in on):
+            return None
+        share = part.layer.stat == "hist" and part.layer.mark in ("bars", "rect")
+        got = saved_members(part, whole, self._grid, on, rows=share)
+        if got is None:
+            warnings.warn(
+                f"{part.layer.name}: the database can't find the rows of its summary's marks, "
+                "so the saved page doesn't light them up when the linked plots select",
+                stacklevel=4,
+            )
+        return got
 
     def _highlight_entries(self) -> list[tuple[Layer, Any, Any]]:
         """Each spec layer's user layer, summary part and geometry, as sent."""
@@ -5208,6 +5226,21 @@ class _Drawn:
 
 
 _Sent = tuple[Layer, Table, "Geometry | None", "Part | None"]
+
+
+class Saved(NamedTuple):
+    """A layer of a saved page's spec, as its link keys it (``Trellis._saved_entries``)."""
+
+    user: Layer
+    part: Part | None
+    geom: Geometry | None
+    table: Table | None
+    """The rows its geometry's rows (a summary: its members' rows) are of; None: not
+    linked."""
+    members: Members | None
+    """A summary's: the rows of ``table`` each of its rows stands for."""
+
+
 """What a spec layer sends: its layer, table, geometry and summary part."""
 
 CHUNK_ROWS = 2_000_000

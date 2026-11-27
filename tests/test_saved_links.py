@@ -80,7 +80,39 @@ def sent(plot: at.Trellis) -> list[Any]:
 def marks_selected(plot: at.Trellis) -> list[np.ndarray | None]:
     """The source's marks its brush selects, per spec layer (its points: their rows')."""
     (_, rows), *_ = plot._selected_masks()
-    return [None if geom is None else rows[geom.rows] for _, _, geom in plot._saved_entries()[1]]
+    return [None if e.geom is None else rows[e.geom.rows] for e in plot._saved_entries()]
+
+
+def brushed(plot: at.Trellis, on: tuple[str, ...], panel: str, x: str, xr: tuple[float, float],
+            y: str, yr: tuple[float, float]) -> list[np.ndarray | None]:  # fmt: skip
+    """The marks of the saved page a brush in ``panel`` selects (``xr``, ``yr`` of the
+    columns ``x``, ``y``), per spec layer, from the rows they are of."""
+    index = [p.label for p in plot._grid.panels].index(panel)
+    out: list[np.ndarray | None] = []
+    for e in plot._saved_entries(on):
+        if e.geom is None or e.table is None or e.part is not None:
+            out.append(None)
+            continue
+        xs = np.asarray(e.table.values(x), dtype=float)[e.geom.rows]
+        ys = np.asarray(e.table.values(y), dtype=float)[e.geom.rows]
+        out.append((e.geom.panel == index) & (xs >= xr[0]) & (xs <= xr[1])
+                   & (ys >= yr[0]) & (ys <= yr[1]))  # fmt: skip
+    return out
+
+
+def layer_sizes(page: str) -> list[list[tuple[int, int]]]:
+    """Per plot of a saved page, per linked layer: its marks, and the marks its keys are
+    for (a plain mark's keys, a summary's starts)."""
+    out = []
+    for m in re.findall(r"<script type='application/json'>(.*?)</script>", page):
+        payload = json.loads(m.replace("<\\/", "</"))
+        sizes = []
+        for layer, keys in zip(payload["spec"]["layers"], payload["link"]["layers"], strict=True):
+            if keys is not None:
+                n = len(u32(keys["keys"])) if "keys" in keys else len(u32(keys["starts"])) - 1
+                sizes.append((layer["count"], n))
+        out.append(sizes)
+    return out
 
 
 def same(a: list[Any], b: list[Any]) -> None:
@@ -135,15 +167,25 @@ def test_a_database_link_saves_what_memory_does() -> None:
         a = at.Trellis(data, wrap="year", rows=1, cols=3, load=load_)
         a.points(x="fertility", y="life_expect")
         b = at.Trellis(data, wrap="region", rows=1, cols=2, load=load_).points(x="year", y="pop")
+        b.hist(x="life_expect")  # a summary: from the database with load="pages"
         link = at.link(a, b, on="country")
         a._scene()
         a.select(x=(6, 9), y=(20, 40), panel="1955")
         payloads = saved_links(link)
-        source = marks_selected(a._every_row() if load_ == "pages" else a)
+        source = brushed(a, ("country",), "1955", "fertility", (6, 9), "life_expect", (20, 40))
         chosen = chosen_keys(payloads[0]["layers"], source, payloads[0]["size"])
-        out.append(link_highlight(payloads[1]["layers"], chosen))
+        assert chosen.any()
+        # the layers that draw something (load="pages" adds dense points' cells: none here)
+        out.append([h for h in link_highlight(payloads[1]["layers"], chosen)
+                    if h is not None and len(h[1])])  # fmt: skip
+        # the keys are for the marks the page draws: as many, every panel's (paged plots)
+        sizes = layer_sizes(link.to_html())
+        assert all(drawn == keyed for plot in sizes for drawn, keyed in plot), sizes
+        assert sizes[0][0][0] == df.height  # every panel's points, not the page's
     same(out[1], out[0])
     assert 0 < out[0][0][1].sum() < len(out[0][0][1])
+    assert out[0][1][0] == "fraction"
+    assert 0 < out[0][1][1].max() <= 1
 
 
 def test_the_page_holds_every_plot_and_the_selection(cars: pl.DataFrame) -> None:
@@ -162,3 +204,46 @@ def test_the_page_holds_every_plot_and_the_selection(cars: pl.DataFrame) -> None
     assert payloads[0]["link"]["group"] == payloads[1]["link"]["group"]
     with pytest.raises(ValueError, match="cols"):
         link.to_html(cols=0)
+
+
+def test_a_saved_link_of_database_plots_reads_a_chunk_of_panels_at_a_time(monkeypatch) -> None:
+    from test_query import frame
+
+    import anytrellis.plot as plot
+    from anytrellis import Trellis
+    from anytrellis.data import Table
+
+    monkeypatch.setattr(plot, "CHUNK_ROWS", 400)  # chunks of 4 panels
+    df = frame(12_000, stations=120)
+    rel = duckdb.from_arrow(df.to_arrow())
+    a = Trellis(rel, wrap="station", load="pages").points(x="t", y="temp")
+    b = Trellis(rel, wrap="station", load="pages").points(x="t", y="rain").hist(x="rain")
+    link = at.link(a, b, on="t")
+    a.show_page(2)
+    a._scene()
+    b._scene()
+    reads: list[int] = []
+    loads: list[int] = []
+    query, load_all = Trellis._query_rows, Table._load
+
+    def counted(self: Trellis, *args: Any) -> Table:
+        rows = query(self, *args)
+        reads.append(rows.n)
+        return rows
+
+    def loaded(self: Table) -> None:
+        loads.append(1)
+        load_all(self)
+
+    monkeypatch.setattr(Trellis, "_query_rows", counted)
+    monkeypatch.setattr(Table, "_load", loaded)
+    page = link.to_html()
+    assert loads == []  # no table read whole
+    assert max(reads) <= 4 * 12_000 // 120  # a chunk's panels' rows
+    assert sum(reads) == 2 * len(df)  # each plot's rows, once
+    sizes = layer_sizes(page)
+    assert all(drawn == keyed for plot_ in sizes for drawn, keyed in plot_), sizes
+    assert sizes[0][0][0] == df.filter(pl.col("temp").is_finite()).height  # every panel's
+    drawn = [n for n, _ in sizes[1] if n]  # (dense points' cells: none here)
+    assert drawn[0] == len(df)
+    assert len(drawn) == 2  # the points, and the histogram's bars with their members
