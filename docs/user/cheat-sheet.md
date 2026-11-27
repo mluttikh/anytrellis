@@ -272,6 +272,8 @@ figure = concat(a, b, c, cols=2, widths=[2, 1], title="Cars")  # a grid; a Conca
 figure.plots  # its plots, row by row
 concat(a, b, align=False)  # panels not lined up: each plot as it is alone
 concat(a, b, legend="collect")  # one legend under the figure, its clicks in each plot
+concat(a, b, share_y=True)  # one y range for both ("row", "col": in each row, column)
+(a | b).share(x=True)  # the same, on a figure made with | or /
 figure.save_html("figure.html")  # one page; to_html() as text
 figure.save_svg("figure.svg")  # one image; save_png too
 assert isinstance(figure, Concat)

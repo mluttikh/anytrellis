@@ -8,6 +8,13 @@ All notable changes to anytrellis. The format follows
 
 ### Added
 
+- **One range for a figure's plots**: `concat(..., share_x=, share_y=)`, or
+  `(a | b).share(y=True)`, gives the plots one range on an axis, as Altair's
+  `resolve_scale(y="shared")`: `True` every plot, `"row"` the plots in each row, `"col"`
+  those in each column. The range holds each plot's own over all its panels (`limits()`
+  included), every panel takes it, and a plot changed while shown gives the others the new
+  range; in the notebook (Jupyter and marimo), the saved page and the image alike.
+
 - **One legend for a figure**: `concat(..., legend="collect")` shows its plots' legends
   once, under the figure, as patchwork's `guides="collect"`; each plot leaves its own out.
   A click on an entry selects its marks in every plot that has that legend (Shift adds

@@ -19,6 +19,13 @@ one before alone, so the browser's plots (align.ts) reach the same place as an i
 ``guides="collect"``): each plot draws none of its own, and a legend several plots have is
 shown once. In the browser a click on it chooses its entries in every plot that has it
 (figurelegend.ts); in an image it is drawn under the plots (``figure.figure_legend``).
+
+``share_x`` / ``share_y`` give plots one range on an axis (Altair's ``resolve_scale``):
+``True`` every plot, ``"row"`` those in a row, ``"col"`` those in a column. The range covers
+each plot's own over all its panels (``limits()`` included), and every panel of those
+plots takes it, whatever their own ``share()``. Python works it out and sends it in each
+plot's spec (``Shared``), so a notebook, a page and an image agree; a plot changed later
+gives its peers the new range.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ from typing import TYPE_CHECKING, Any, Union
 if TYPE_CHECKING:
     from anytrellis.figure import Frame
     from anytrellis.plot import Trellis
+    from anytrellis.scales import Range
 
 GAP = 24
 """Space between the plots (CSS px), across and down."""
@@ -40,6 +48,77 @@ TITLE_SPACE = 8
 """Space under a figure's title (CSS px)."""
 
 Item = Union["Trellis", "Concat"]
+
+SHARES = ("none", "all", "row", "col")
+"""How a figure shares an axis's range among its plots (``share_mode``)."""
+
+
+def share_mode(value: bool | str, axis: str) -> str:
+    """``False``: each plot its own; ``True``: one for all; ``"row"``, ``"col"``."""
+    if value is True or value is False:
+        return "all" if value else "none"
+    if value in SHARES:
+        return str(value)
+    raise ValueError(f"share_{axis} must be True, False, 'row' or 'col', got {value!r}")
+
+
+class Shared:
+    """Plots that share a range on an axis in a figure: each one's own range over all its
+    panels (``Trellis._own``), joined, given to every panel of each (``Trellis._joined``).
+    A plot belongs to the group its figure last gave it (``Trellis._sharing``)."""
+
+    def __init__(self, axis: str, plots: list[Trellis]) -> None:
+        self.axis = axis
+        self.plots = plots
+        self._busy = False
+
+    def members(self) -> list[Trellis]:
+        """Its plots that are still its: not given to another figure's group since."""
+        return [p for p in self.plots if p._sharing.get(self.axis) is self]
+
+    def range(self, plots: list[Trellis]) -> tuple[float, float] | None:
+        """The range that holds each plot's own, or None: nothing to share (categories,
+        the same in each)."""
+        owns: list[Range] = []
+        for plot in plots:
+            plot._scene()  # its own range, as built
+            own = plot._own.get(self.axis)
+            if own is not None:
+                owns.append(own)
+        if not owns:
+            return None
+        axis = self.axis
+        kinds = sorted({own.kind for own in owns})
+        if len(kinds) > 1:
+            raise ValueError(f"share_{axis}: the plots' {axis} axes are of different kinds "
+                             f"({', '.join(kinds)}), which can't share a range; give them "
+                             f"the same scale, or leave share_{axis} off")  # fmt: skip
+        if kinds == ["band"]:
+            if len({own.levels for own in owns}) > 1:
+                raise ValueError(f"share_{axis}: the plots' {axis} axes hold different "
+                                 "categories; give them the same ones (order(), or filter "
+                                 f"the data), or leave share_{axis} off")  # fmt: skip
+            return None
+        return (min(own.lo for own in owns), max(own.hi for own in owns))
+
+    def apply(self) -> None:
+        """Give each plot the range (built again where it changed)."""
+        if self._busy:  # a plot built again, telling the group: it has the range already
+            return
+        self._busy = True
+        try:
+            plots = self.members()
+            target = self.range(plots) if len(plots) > 1 else None
+            for plot in plots:
+                if plot._joined.get(self.axis) == target:
+                    continue
+                if target is None:
+                    plot._joined.pop(self.axis, None)
+                else:
+                    plot._joined[self.axis] = target
+                plot._changed()
+        finally:
+            self._busy = False
 
 
 class Concat:
@@ -56,6 +135,8 @@ class Concat:
         title: str | None = None,
         align: bool = True,
         legend: str = "keep",
+        share_x: bool | str = False,
+        share_y: bool | str = False,
     ) -> None:
         from anytrellis.plot import Trellis
 
@@ -97,8 +178,31 @@ class Concat:
         self.legend = legend
         """``"collect"``: its plots' legends shown once, under it; ``"keep"``: each plot's
         own."""
+        self.share_x = share_mode(share_x, "x")
+        """How its plots share an x range: ``"none"``, ``"all"``, ``"row"``, ``"col"``."""
+        self.share_y = share_mode(share_y, "y")
+        """How its plots share a y range (as ``share_x``)."""
         self._group = uuid.uuid4().hex
         self._widget: Any = None
+
+    def share(self, x: bool | str | None = None, y: bool | str | None = None) -> Concat:
+        """One range on an axis for its plots: ``True`` every plot, ``"row"`` the plots in
+        each row, ``"col"`` those in each column, ``False`` each its own (the default).
+
+        ```python
+        (cars | trucks).share(y=True)       # both plots' y from the lowest to the highest
+        concat(a, b, c, d, cols=2).share(x="col", y="row")
+        ```
+
+        The range holds each plot's own over all its panels (``limits()`` included), and
+        every panel of the plots takes it, whatever their own ``share()``. Returns the
+        figure.
+        """
+        if x is not None:
+            self.share_x = share_mode(x, "x")
+        if y is not None:
+            self.share_y = share_mode(y, "y")
+        return self
 
     # ---- making figures ----------------------------------------------------------------
 
@@ -129,7 +233,7 @@ class Concat:
         """A plain row or column to add to: no title, its columns alike, aligned, each
         plot's legend its own."""
         return (self.title is None and len(set(self.widths)) <= 1 and self.align
-                and self.legend == "keep")  # fmt: skip
+                and self.legend == "keep" and self.share_x == self.share_y == "none")  # fmt: skip
 
     def _cell(self, index: int) -> dict[str, Any] | None:
         """What the browser needs to line item ``index`` up with the others (a plot's), or
@@ -167,12 +271,60 @@ class Concat:
                 place["order"] = k
         return out
 
+    def _share_groups(self, axis: str) -> list[list[Trellis]]:
+        """The groups of plots that share a range on ``axis``, by its figures' (nested ones'
+        too) ``share_x`` / ``share_y``: groups with a plot in common are one."""
+        lines: list[list[Trellis]] = []
+
+        def plots_of(items: Sequence[Item]) -> list[Trellis]:
+            return [p for it in items for p in (it.plots if isinstance(it, Concat) else [it])]
+
+        def walk(fig: Concat) -> None:
+            mode = fig.share_x if axis == "x" else fig.share_y
+            if mode == "all":
+                lines.append(fig.plots)
+            elif mode == "row":
+                lines.extend(plots_of(row) for row in fig._rows())
+            elif mode == "col":
+                lines.extend(plots_of(fig.items[c :: fig.cols]) for c in range(fig.cols))
+            for item in fig.items:
+                if isinstance(item, Concat):
+                    walk(item)
+
+        walk(self)
+        # join the lines that meet in a plot
+        groups: list[list[Trellis]] = []
+        for line in lines:
+            ids = {id(p) for p in line}
+            met = [g for g in groups if any(id(p) in ids for p in g)]
+            merged = [p for g in met for p in g] + line
+            groups = [g for g in groups if not any(g is m for m in met)]
+            groups.append(list({id(p): p for p in merged}.values()))
+        return [g for g in groups if len(g) > 1]
+
+    def _share_scales(self) -> None:
+        """Give its plots their shared ranges (``Shared``); a plot it doesn't share an axis
+        of has its own again."""
+        for axis in ("x", "y"):
+            groups = [Shared(axis, plots) for plots in self._share_groups(axis)]
+            group_of = {id(p): g for g in groups for p in g.plots}
+            for plot in self.plots:
+                group = group_of.get(id(plot))
+                if group is not None:
+                    plot._sharing[axis] = group
+                elif plot._sharing.pop(axis, None) is not None and axis in plot._joined:
+                    del plot._joined[axis]
+                    plot._changed()
+            for group in groups:
+                group.apply()
+
     # ---- in a notebook -------------------------------------------------------------------
 
     @property
     def widget(self) -> Any:
         """The figure in Jupyter: an ipywidgets ``GridBox`` of the plots' widgets."""
         if self._widget is None:
+            self._share_scales()  # before the plots' widgets are made: each built once
             self._widget = self._box(False)
         self._place_widgets()
         return self._widget
@@ -201,7 +353,9 @@ class Concat:
         return widgets.VBox(parts, layout=widgets.Layout(width="100%"))
 
     def _place_widgets(self) -> None:
-        """Tell each plot's widget its place (``_places``), nested figures' too."""
+        """Tell each plot's widget its place (``_places``), nested figures' too, and give
+        the plots their shared ranges."""
+        self._share_scales()
         places = self._places()
         for plot in self.plots:
             plot.widget._figure = places.get(id(plot))  # ty: ignore[invalid-assignment]  # allow_none
@@ -247,7 +401,8 @@ class Concat:
 
         if links is None:
             links = {}
-        if places is None:
+        if places is None:  # the whole figure (not one inside another): its ranges first
+            self._share_scales()
             places = self._places()
         collects = self._collects(collected)
         cells = []
@@ -429,6 +584,7 @@ class Concat:
             raise ValueError(
                 f"width must be at least {least} px for {self.cols} columns, got {width}"
             )
+        self._share_scales()
         parts, height = self._svg_parts(width, theme, "")
         names = [p.title for p in self.plots if p.title]
         label = self.title or "; ".join(names) or f"{len(self.plots)} plots"
@@ -498,8 +654,8 @@ class Concat:
 
 
 def concat(*plots: Item, cols: int | None = None, widths: Sequence[float] | None = None,
-           title: str | None = None, align: bool = True,
-           legend: str = "keep") -> Concat:  # fmt: skip
+           title: str | None = None, align: bool = True, legend: str = "keep",
+           share_x: bool | str = False, share_y: bool | str = False) -> Concat:  # fmt: skip
     """Plots (or figures) in one figure: a row of them, or a grid of ``cols`` columns,
     filled row by row.
 
@@ -523,8 +679,13 @@ def concat(*plots: Item, cols: int | None = None, widths: Sequence[float] | None
         legend: ``"collect"``: the plots' legends shown once, under the figure (a legend
             several plots have, once); a click on an entry chooses it in every plot that
             has it. ``"keep"``: each plot shows its own.
+        share_x: One x range for the plots: ``True`` every plot, ``"row"`` those in each
+            row, ``"col"`` those in each column; ``False`` (the default) each its own. The
+            range holds each plot's own over all its panels, and every panel takes it.
+        share_y: One y range for the plots, as ``share_x``.
     """
-    return Concat(plots, cols=cols, widths=widths, title=title, align=align, legend=legend)
+    return Concat(plots, cols=cols, widths=widths, title=title, align=align, legend=legend,
+                  share_x=share_x, share_y=share_y)  # fmt: skip
 
 
 def beside(left: Item, right: Item) -> Concat:

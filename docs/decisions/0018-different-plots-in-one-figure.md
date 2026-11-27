@@ -2,7 +2,8 @@
 
 - Status: **implemented**, 21 November 2026 (design review, Phase 3: concatenation);
   amended 26 November 2026: the plots' panels lined up (`align`); 27 November 2026: one
-  legend for the figure (`legend="collect"`).
+  legend for the figure (`legend="collect"`); 27 November 2026: one range for its plots
+  (`share_x`, `share_y`).
 - Changes: `src/anytrellis/compose.py` (`Concat`, `concat`, `beside`, `under`, `GAP`),
   `plot.py` (`Trellis.__or__`, `__truediv__`), `figure.py` (`figure_svg(ids=)`: ids
   unique among a figure's plots), `__init__.py`; `widget.css` (a narrow header wraps);
@@ -14,6 +15,9 @@
   (`FigureLegendWidget`); `js/src/core/legendbox.ts` (a legend's HTML, out of view.ts),
   `figurelegend.ts`, `view.ts` (`legendPlot`, `legendPosition`), `widget.ts`,
   `standalone.ts`; `js/test/pages.py` (`concat-legend.html`).
+- One range: `compose.py` (`Concat(share_x=, share_y=)`, `Concat.share`, `Shared`,
+  `_share_groups`, `_share_scales`), `plot.py` (`_build`: `_own`, `_joined`; `_shared`,
+  `_changed` tells its group), `scales.py` (`Range`); `tests/test_compose.py`.
 - Lined up: `compose.py` (`Concat(align=)`, `_cell`, `_aligned`), `figure.py` (`Frame`,
   `panels_box`, `figure_box`, `layout(frame=)`, `figure_svg(frame=)`), `widget.py`
   (`_figure`), `plot.py` (`_embed_html(figure=)`); `js/src/core/align.ts`, `layout.ts`
@@ -96,6 +100,25 @@ one image, nor a grid of unlinked plots.
     when it has `_legend_hub`); marimo: that widget under the stacks; a page: a
     `.anytrellis-figure-legend` div; an image: the plots' legends drawn as under a plot
     (`_legend_below`), the entries chosen the first plot's that has the legend.
+- **One range** (`share_x`, `share_y`, opt-in, on `concat()` or `Concat.share()`;
+  Altair's `resolve_scale`): `True` every plot in the figure, `"row"` the plots in each
+  row, `"col"` those in each column (the words of `Trellis.share()`). A nested figure in a
+  row or column is all its plots; groups that meet in a plot are one (a nested figure's
+  own sharing joins the outer's). A row or column of one plot shares nothing.
+  - The range is the least that holds each plot's own: its range over all its panels as
+    if they shared it (padded, its end-label room, `limits()` applied), recorded at each
+    build (`Trellis._own`) before the figure's (`Trellis._joined`) replaces every
+    panel's. Those panels are then one group (`share` "all" in the spec, one `yg`), so
+    they zoom together and grids show the axis once, whatever the plot's own `share()`.
+  - Python works it out: the spec carries the range, so the browser, the saved page and
+    the image need nothing new. It is given when the figure is shown (before its plots'
+    widgets are made, so each is built once with it), saved or drawn (`_share_scales`).
+    A plot belongs to the group its last figure gave it (`Trellis._sharing`), as a widget
+    is told its place: a figure that doesn't share an axis gives its plots their own
+    range back. A shown plot that changes tells its group, which gives its peers the new
+    range (`Shared.apply`, once: a plot built again doesn't start it again).
+  - Axes of different kinds (numbers and times, linear and log) raise a ValueError, as do
+    axes of categories that differ; categories that are the same need nothing.
 - **Narrow plots**: a plot's header wraps, the toolbar on a line under the title when the
   title would get less than 8em, and its buttons on two lines when wider than the plot.
   The state chips take only the room left beside the title (`flex-basis: 0`): a chip
@@ -110,7 +133,13 @@ one image, nor a grid of unlinked plots.
   don't meet inside them.
 - The figure's legend goes under its plots only (not to their right), and the image shows
   the entries chosen in the first plot that has the legend.
-- No shared scales across plots in a figure; `share_y` works within a plot only.
+- Zooming a plot in a figure that shares a range doesn't zoom the others: each plot's zoom
+  is its own (a registry by the figure's id, as align.ts's, could carry it).
+- Axes of categories don't join their categories: they share only when they hold the
+  same ones.
+- A plot in two figures that share takes the range of the one shown or saved last, its
+  view alone too (one widget).
+- A plot whose range changes is built twice (its own range, then the figure's).
 - In a page, a plot's header height can differ from the image (the toolbar is not drawn
   in images), so rows can differ in height by a toolbar line.
 - `Link.save_html(cols=)` stays as it was: `(a | b).save_html()` is the same page of a
