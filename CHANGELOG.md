@@ -13,7 +13,9 @@ All notable changes to anytrellis. The format follows
   `resolve_scale(y="shared")`: `True` every plot, `"row"` the plots in each row, `"col"`
   those in each column. The range holds each plot's own over all its panels (`limits()`
   included), every panel takes it, and a plot changed while shown gives the others the new
-  range; in the notebook (Jupyter and marimo), the saved page and the image alike.
+  range; in the notebook (Jupyter and marimo), the saved page and the image alike. The
+  plots zoom together: zooming or panning one moves the others on the axes they share, and
+  Reset in any brings them all back.
 
 - **One legend for a figure**: `concat(..., legend="collect")` shows its plots' legends
   once, under the figure, as patchwork's `guides="collect"`; each plot leaves its own out.

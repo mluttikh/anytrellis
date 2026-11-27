@@ -479,6 +479,9 @@ class Trellis:
         self._limits: dict[str, tuple[Any, Any]] = {}
         self._joined: dict[str, tuple[float, float]] = {}
         """A figure's range for an axis, which every panel takes (``compose.Shared``)."""
+        self._join_keys: dict[str, str] = {}
+        """The names of the ranges in ``_joined``, which the plots sharing one zoom by
+        together in the browser (the spec's axis ``joined``)."""
         self._sharing: dict[str, Shared] = {}
         """The plots it shares an axis's range with, in the figure last shown or saved."""
         self._own: dict[str, Range] = {}
@@ -4523,12 +4526,14 @@ class Trellis:
                 **_axis_spec(
                     x_kind, x_levels, x_origin, self._shared("x"), x_title, self._reverse["x"]
                 ),
+                **self._joined_spec("x"),
                 "format": self._axis_format("x", x_kind) or self._share_format("x"),
             },
             "y": {
                 **_axis_spec(
                     y_kind, y_levels, y_origin, self._shared("y"), y_title, self._reverse["y"]
                 ),
+                **self._joined_spec("y"),
                 "format": self._axis_format("y", y_kind) or self._share_format("y"),
             },
             "layers": [],
@@ -4696,6 +4701,12 @@ class Trellis:
         """How the axis is shared among the panels: as ``share()`` says, or one range for
         all when a figure shares it."""
         return "all" if axis in self._joined else self._share[axis]
+
+    def _joined_spec(self, axis: str) -> dict[str, str]:
+        """``joined``: the name of the range a figure gives the axis, by which its plots
+        zoom together (figurezoom.ts); none when it has its own."""
+        key = self._join_keys.get(axis)
+        return {"joined": key} if key is not None and axis in self._joined else {}
 
     def _end_room(self, shown: list[Layer], table_of: Callable[[int], Table],
                   colors: _ColorScales, cols: int) -> float:  # fmt: skip

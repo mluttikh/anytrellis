@@ -118,10 +118,14 @@ its limits), the others take the new range. A figure inside a figure shares in i
 rows and columns, and a row of the outer figure that shares holds all of the inner
 figure's plots.
 
+Plots that share a range zoom together: zooming or panning one (the wheel, a drag, a box,
+two fingers) moves the others with it on that axis, and Reset in any of them brings them
+all back. In the notebook and in the saved page alike. Undo (u) takes back a plot's own
+zooms, not those it followed.
+
 Axes share a range only when they are of the same kind: numbers with numbers, times with
 times, log with log. Categories can't be joined: axes of categories share only when they
-hold the same ones, in the same order, which they already show alike. Zooming one plot
-doesn't zoom the others.
+hold the same ones, in the same order, which they already show alike.
 
 ## Linked plots in a figure
 

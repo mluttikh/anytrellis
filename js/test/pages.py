@@ -167,7 +167,8 @@ def figures(out: Path) -> None:
     """Different plots in one figure (concat.mjs): a scatter linked with a histogram, a box
     plot under them, two columns of 2 and 1 shares (``concat.html``); where Python's image
     puts each plot across a figure 824 px wide, as the page is at 856 (``concat.json``);
-    three plots whose legends the figure collects (``concat-legend.html``)."""
+    three plots whose legends the figure collects (``concat-legend.html``); two plots that
+    share their ranges beside one that doesn't (``concat-shared.html``)."""
     import json
     import re
 
@@ -188,6 +189,14 @@ def figures(out: Path) -> None:
     e = Trellis(cars, title="Horsepower").hist(x="horsepower", color="origin")
     f = Trellis(cars, title="Acceleration").hist(x="acceleration")
     concat(d, e, f, cols=3, legend="collect").save_html(out / "concat-legend.html")
+    # ranges shared (concat-shared.html): light and heavy cars zoom together, the third alone
+    light = Trellis(cars.filter(pl.col("weight") < 3000), title="Light").points(
+        x="horsepower", y="mpg")  # fmt: skip
+    heavy = Trellis(cars.filter(pl.col("weight") >= 3000), wrap="origin", title="Heavy").points(
+        x="horsepower", y="mpg")  # fmt: skip
+    alone = Trellis(cars, title="All").points(x="horsepower", y="mpg")
+    shared = concat(light, heavy, share_x=True, share_y=True)
+    concat(shared, alone, widths=[2, 1]).save_html(out / "concat-shared.html")
 
 
 def keyboard(out: Path) -> None:

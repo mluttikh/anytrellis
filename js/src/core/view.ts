@@ -37,6 +37,7 @@ import { LegendBox } from "./legendbox";
 import { type EndLabel, endLabels } from "./labels";
 import { drawMarks } from "./renderers/canvas2d";
 import { type FigurePlace, FigureMember } from "./align";
+import { type Span, ZoomMember } from "./figurezoom";
 import { type Frame, type Layout, type Rect, layout as computeLayout, panelName, panelShape, panelsBox } from "./layout";
 import { MOTION_MS, motionFrom, reducedMotion, tween } from "./motion";
 import { lookOf } from "./look";
@@ -392,6 +393,9 @@ export class TrellisView {
   /** The zoom the bar's view name was found for. */
   private zoomKey = "";
   private gridHeight = 0;
+  /** Each axis's part in a figure's plots that share its range and zoom together
+   * (figurezoom.ts), or null: its zoom is its own. */
+  private zooms: Record<Axis, ZoomMember | null> = { x: null, y: null };
   /** Its part in a figure that lines up its plots (setFigure), or null. */
   private figure: FigureMember | null = null;
   /** Its part in a figure that shows its plots' legends (setFigure), or null: its own. */
@@ -628,6 +632,7 @@ export class TrellisView {
     this.motion = null; // a new spec: in its places at once
     this.moveNext = false;
     this.computeOrder();
+    this.joinZooms(spec);
     if (this.pendingZoom) {
       this.applyZoom(this.pendingZoom);
       this.pendingZoom = null;
@@ -996,6 +1001,50 @@ export class TrellisView {
   }
 
   // ---- zooming --------------------------------------------------------------------------
+
+  /** An axis whose range a figure shares (its `joined`): zoomed with the plots that share
+   * it, starting where they are. The key holds the range, so one Python changes is a new
+   * start. */
+  private joinZooms(spec: TrellisSpec): void {
+    for (const axis of ["x", "y"] as const) {
+      const a = spec[axis];
+      const p = spec.panels[0];
+      const key = a.joined && p ? `${a.joined}|${p[axis][0] + a.origin}|${p[axis][1] + a.origin}` : null;
+      const was = this.zooms[axis];
+      if ((was?.key ?? null) === key) continue;
+      was?.leave();
+      const member = key ? new ZoomMember(key, (at) => this.followZoom(axis, at)) : null;
+      this.zooms[axis] = member;
+      if (member?.at) this.followZoom(axis, member.at);
+    }
+  }
+
+  /** Another plot sharing the axis's range zoomed it to `at` (the data's units): this one
+   * shows the same. Not for undo: its own zooms are. */
+  private followZoom(axis: Axis, at: Span): void {
+    const spec = this.spec;
+    if (!spec) return;
+    const origin = spec[axis].origin;
+    const views = axis === "x" ? this.xView : this.yView;
+    for (const p of spec.panels) views.set(axis === "x" ? p.xg : p.yg, [at[0] - origin, at[1] - origin]);
+    // y fitted to x fits again, unless y is shared too: then it comes from the others
+    if (axis === "x" && this.fitY && !this.zooms.y) this.needFit = true;
+    this.request();
+  }
+
+  /** Tell the plots that share an axis's range where it is now (news only: figurezoom.ts). */
+  private tellZooms(): void {
+    const spec = this.spec!;
+    const p = spec.panels[0];
+    if (!p) return;
+    for (const axis of ["x", "y"] as const) {
+      const member = this.zooms[axis];
+      if (!member) continue;
+      const r = (axis === "x" ? this.xView.get(p.xg) : this.yView.get(p.yg)) ?? p[axis];
+      const origin = spec[axis].origin;
+      member.tell([r[0] + origin, r[1] + origin]);
+    }
+  }
 
   private zoomState(): Snapshot {
     return { x: [...this.xView].map(([g, r]) => [g, [...r]]), y: [...this.yView].map(([g, r]) => [g, [...r]]), fitY: this.fitY };
@@ -1713,6 +1762,7 @@ export class TrellisView {
       this.needFit = false;
       this.fitGroups();
     }
+    this.tellZooms();
     this.settleSelection();
     // the panels on their way to their places: drawn where they are now, a frame at a time
     let lay = this.lay;
@@ -3577,6 +3627,9 @@ export class TrellisView {
     this.figure = null;
     this.legendHub?.leave();
     this.legendHub = null;
+    this.zooms.x?.leave();
+    this.zooms.y?.leave();
+    this.zooms = { x: null, y: null };
     this.abort.abort();
     clearTimeout(this.noticeTimer);
     clearTimeout(this.viewTimer);

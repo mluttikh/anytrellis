@@ -32,6 +32,9 @@ export interface AxisSpec {
   format?: string | null;
   /** From high to low: x right to left, y top to bottom. */
   reverse?: boolean;
+  /** The name of the range a figure gives it (compose.py: Shared): the plots that share it
+   * zoom together (figurezoom.ts). Absent: its own. */
+  joined?: string;
 }
 
 export interface PanelSpec {
