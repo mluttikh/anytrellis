@@ -24,7 +24,8 @@ print(figure._embed_html())  # markdown-exec: hide
 
 `a | b | c` is one row of three, and `a / b / c` one column; `(a | b) / c` puts a row over
 a plot. Each plot keeps its own scales, legend, toolbar and zoom: it is the same plot as
-on its own, given a share of the width. Each row is as high as its highest plot, and each
+on its own, given a share of the width (unless the figure shares a range or a legend, as
+below). Each row is as high as its highest plot, and each
 plot sits at the top of its row.
 
 ## Panels lined up
@@ -80,6 +81,47 @@ The legend works as each plot's would, in every plot that has it: a click on an 
 selects its marks in each (Shift adds one), hovering it shows them, and a double-click
 shows them alone. A plot with `legend("none")` adds none of its legends. The image
 (`save_svg`, `save_png`, `save_pdf`) draws the legend under the plots too.
+
+## One range for several plots
+
+Each plot's axes go from its own lowest value to its own highest, so two plots side by
+side can look alike when their values are far apart. `share_y=True` gives the figure's
+plots one y range, and `share_x=True` one x range, so their marks can be compared by
+where they sit:
+
+```python exec="on" source="above" session="figures" html="true"
+import polars as pl
+
+light = Trellis(cars.filter(pl.col("weight") < 3000), title="Under 3000 lb").points(
+    x="horsepower", y="mpg")
+heavy = Trellis(cars.filter(pl.col("weight") >= 3000), title="3000 lb and over").points(
+    x="horsepower", y="mpg")
+
+figure = concat(light, heavy, share_x=True, share_y=True)
+figure
+print(figure._embed_html())  # markdown-exec: hide
+```
+
+`(light | heavy).share(x=True, y=True)` does the same to a figure made with `|` or `/`.
+`True` shares a range among every plot in the figure; `"row"` among the plots in each row
+and `"col"` among those in each column, as `Trellis.share()` does for panels. In a grid,
+`share_y="row"` with `share_x="col"` reads like a scatterplot matrix:
+
+```python
+concat(a, b, c, d, cols=2, share_x="col", share_y="row")
+```
+
+The shared range holds each plot's own range over all its panels, `limits()` included: a
+plot that starts its y axis at 0 starts the others' there too. Every panel of the plots
+takes it, whatever their own `share()`. When a plot shown in the figure changes (its data,
+its limits), the others take the new range. A figure inside a figure shares in its own
+rows and columns, and a row of the outer figure that shares holds all of the inner
+figure's plots.
+
+Axes share a range only when they are of the same kind: numbers with numbers, times with
+times, log with log. Categories can't be joined: axes of categories share only when they
+hold the same ones, in the same order, which they already show alike. Zooming one plot
+doesn't zoom the others.
 
 ## Linked plots in a figure
 

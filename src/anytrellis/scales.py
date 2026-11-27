@@ -11,7 +11,7 @@ in the browser; sliced panels zoom to the same width, each about its own centre.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import numpy as np
 
@@ -21,6 +21,18 @@ AxisKind = Literal["number", "time", "band", "log", "sqrt", "symlog"]
 """``log``, ``sqrt``, ``symlog``: numbers in a transformed scale's units (``transforms``);
 padded and zoomed like numbers."""
 Share = Literal["all", "row", "col", "page", "none", "sliced"]
+
+
+class Range(NamedTuple):
+    """An axis's range over all of a plot's panels: what a figure's plots share
+    (``compose.Shared``)."""
+
+    kind: AxisKind
+    levels: tuple[str, ...]
+    """Its categories, a band axis's (else empty)."""
+    lo: float
+    hi: float
+
 
 PAD = 0.04
 """Room on each side of a continuous domain, as a fraction of its span."""

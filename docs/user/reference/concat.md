@@ -9,6 +9,7 @@
     options:
       members:
         - plots
+        - share
         - widget
         - save_html
         - to_html

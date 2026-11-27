@@ -8,6 +8,7 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from anytrellis import Concat, Trellis, concat, link
@@ -301,3 +302,96 @@ def test_the_browser_is_told_which_figure_shows_the_legends(
     kept.widget  # noqa: B018
     assert "legend" not in d.widget._figure
     assert "class='anytrellis-figure-legend'" not in kept.to_html()
+
+
+def _ranges(t: Trellis, axis: str) -> list[tuple[float, float]]:
+    spec, _ = t._scene()
+    origin = spec[axis]["origin"]
+    return [(p[axis][0] + origin, p[axis][1] + origin) for p in spec["panels"]]
+
+
+def _sharing_plots() -> tuple[Trellis, Trellis, Trellis]:
+    cars = load("cars")
+    light = cars.filter(pl.col("weight") < 3000)
+    heavy = cars.filter(pl.col("weight") >= 3000)
+    a = Trellis(light, wrap="origin").points(x="weight", y="mpg").share(y=False)
+    b = Trellis(heavy).points(x="weight", y="mpg")
+    c = Trellis(heavy).points(x="horsepower", y="acceleration")
+    return a, b, c
+
+
+def test_a_figure_shares_a_range_among_its_plots() -> None:
+    a, b, _c = _sharing_plots()
+    own_a, own_b = _ranges(a, "y"), _ranges(b, "y")
+    assert len(set(own_a)) > 1  # share(y=False): each panel its own
+    fig = (a | b).share(y=True)
+    assert not fig._bare()  # added to by |, it is kept whole
+    fig._svg(800, "light")
+    ya, yb = _ranges(a, "y"), _ranges(b, "y")
+    assert len(set(ya)) == 1
+    assert ya[0] == yb[0]
+    lo, hi = ya[0]
+    assert (lo, hi) == (min(r[0] for r in own_a + own_b), max(r[1] for r in own_a + own_b))
+    spec, _ = a._scene()
+    assert spec["y"]["share"] == "all"
+    assert {p["yg"] for p in spec["panels"]} == {0}
+    assert _ranges(a, "x") != _ranges(b, "x")  # x is each plot's own
+    # a page (the docs embed it) carries the range too
+    c, d = _sharing_plots()[:2]
+    page = concat(c, d, share_y=True)._embed_html()
+    specs = [json.loads(m)["spec"] for m in
+             re.findall(r"<script type='application/json'>(.*?)</script>", page)]  # fmt: skip
+    assert len(specs) == 2
+    shown = {(p["y"][0] + sp["y"]["origin"], p["y"][1] + sp["y"]["origin"])
+             for sp in specs for p in sp["panels"]}  # fmt: skip
+    assert shown == {c._joined["y"]}
+    assert c._joined["y"] == d._joined["y"]
+    # a figure that doesn't share gives each plot its own range back
+    (a | b)._svg(800, "light")
+    assert _ranges(a, "y") == own_a
+    assert _ranges(b, "y") == own_b
+
+
+def test_rows_columns_and_nested_figures_share() -> None:
+    a, b, c = _sharing_plots()
+    d = Trellis(load("cars")).points(x="weight", y="horsepower")
+    fig = concat(a, b, c, d, cols=2, share_y="row", share_x="col")
+    groups = {axis: [[id(p) for p in g] for g in fig._share_groups(axis)] for axis in "xy"}
+    assert groups["y"] == [[id(a), id(b)], [id(c), id(d)]]
+    assert groups["x"] == [[id(a), id(c)], [id(b), id(d)]]
+    # a nested figure in a row: all its plots in the row's group; lines meeting are one
+    inner = (b / c).share(y=True)
+    outer = concat(a, inner, share_y="row")
+    assert [sorted(map(id, g)) for g in outer._share_groups("y")] == [sorted([id(a), id(b), id(c)])]
+    # a row of one plot shares nothing
+    assert concat(a, b, cols=1, share_y="row")._share_groups("y") == []
+    with pytest.raises(ValueError, match="share_y must be"):
+        concat(a, b, share_y="page")
+
+
+def test_limits_and_a_plot_changed_later_move_the_shared_range() -> None:
+    a, b, _ = _sharing_plots()
+    a.limits(y=(0, None))
+    fig = concat(a, b, share_y=True)
+    assert fig.widget is not None  # shown: its plots' widgets get the range
+    assert _ranges(b, "y")[0][0] == 0
+    sent = b.widget._spec["panels"][0]["y"]
+    assert sent[0] == 0
+    a.limits(y=(-10, None))  # a shown plot changed: its peer follows
+    assert b.widget._spec["panels"][0]["y"][0] == -10
+
+
+def test_axes_that_cannot_share() -> None:
+    cars = load("cars")
+    a = Trellis(cars).points(x="weight", y="mpg")
+    log = Trellis(cars).points(x="weight", y="mpg").scale(y="log")
+    with pytest.raises(ValueError, match="different kinds"):
+        concat(a, log, share_y=True)._svg(800, "light")
+    bars = Trellis(cars).bars(x="origin", y="mpg", stat="mean")
+    some = Trellis(cars.filter(pl.col("origin") != "Japan")).bars(x="origin", y="mpg", stat="mean")
+    with pytest.raises(ValueError, match="different categories"):
+        concat(bars, some, share_x=True)._svg(800, "light")
+    same = Trellis(cars).bars(x="origin", y="horsepower", stat="mean")
+    concat(bars, same, share_x=True, share_y=True)._svg(800, "light")  # the same: fine
+    assert "x" not in bars._joined
+    assert "y" in bars._joined

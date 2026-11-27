@@ -105,7 +105,7 @@ from anytrellis.query import (
     panel_trends,
     within,
 )
-from anytrellis.scales import AxisKind, Extent, Share, domains, group_ids, share_mode
+from anytrellis.scales import AxisKind, Extent, Range, Share, domains, group_ids, share_mode
 from anytrellis.selection import (
     Brush,
     grow,
@@ -133,7 +133,7 @@ from anytrellis.theme import Theme, theme_of
 from anytrellis.transforms import SCALES, TRANSFORMS, forward, inverse, on_scale_expr, scalar
 
 if TYPE_CHECKING:
-    from anytrellis.compose import Concat
+    from anytrellis.compose import Concat, Shared
     from anytrellis.widget import TrellisWidget
 
 SPEC_VERSION = 1
@@ -477,6 +477,12 @@ class Trellis:
             raise ValueError(f"legend must be one of {LEGENDS}, got {legend!r}")
         self._legend: dict[str, Any] = {"position": legend, "title": None}
         self._limits: dict[str, tuple[Any, Any]] = {}
+        self._joined: dict[str, tuple[float, float]] = {}
+        """A figure's range for an axis, which every panel takes (``compose.Shared``)."""
+        self._sharing: dict[str, Shared] = {}
+        """The plots it shares an axis's range with, in the figure last shown or saved."""
+        self._own: dict[str, Range] = {}
+        """Its range on each axis over every panel, as last built (before ``_joined``)."""
         self._formats: dict[str, str] = {}
         self._notes: list[dict[str, Any]] = []
         """``annotate()``'s notes, as given."""
@@ -3912,6 +3918,8 @@ class Trellis:
             spec, _ = self._scene()
             self._widget._spec = spec
             self._sync_code()
+            for shared in set(self._sharing.values()):  # its range may have changed
+                shared.apply()
         if self._link_group is not None and self._link_group.source is not None:
             self._link_group.relay()  # the selected rows, or the marks showing them, changed
         return self
@@ -4435,30 +4443,36 @@ class Trellis:
         xg = group_ids(grid, self._share["x"])
         yg = group_ids(grid, self._share["y"])
         spans = {axis: _span(extents[axis], scales.get(axis)) for axis in ("x", "y")}
-        xd = domains(
-            extents["x"],
-            xg,
-            x_kind,
-            band_size=len(x_levels or []),
-            zero_base=zero_x,
-            sliced=self._share["x"] == "sliced",
-        )
-        yd = domains(
-            extents["y"],
-            yg,
-            y_kind,
-            band_size=len(y_levels or []),
-            zero_base=zero,
-            sliced=self._share["y"] == "sliced",
-        )
-        if shown and all(lr.stat == "horizon" for lr in shown):  # the bands' height, unpadded
-            top = float(np.nanmax(extents["y"].hi, initial=0.0)) or 1.0
-            yd = [(0.0, top)] * len(yd)
-        if x_kind != "band" and "x" not in self._limits:
-            room = self._end_room(shown, table_of, colors, grid.cols)
-            xd = [(lo, hi + room * (hi - lo)) for lo, hi in xd]
-        xd = _limited(xd, self._limits.get("x"), x_kind, x_levels, "x")
-        yd = _limited(yd, self._limits.get("y"), y_kind, y_levels, "y")
+        horizons = bool(shown) and all(lr.stat == "horizon" for lr in shown)
+        room = self._end_room(shown, table_of, colors, grid.cols) \
+            if x_kind != "band" and "x" not in self._limits else 0.0  # fmt: skip
+
+        def ranges(axis: str, groups: list[int], sliced: bool) -> list[tuple[float, float]]:
+            """Each panel's range on ``axis``: its group's data, padded, as ``limits()``
+            gives."""
+            kind, levels = (x_kind, x_levels) if axis == "x" else (y_kind, y_levels)
+            out = domains(extents[axis], groups, kind, band_size=len(levels or []),
+                          zero_base=zero_x if axis == "x" else zero, sliced=sliced)  # fmt: skip
+            if axis == "y" and horizons:  # the bands' height, unpadded
+                top = float(np.nanmax(extents["y"].hi, initial=0.0)) or 1.0
+                out = [(0.0, top)] * len(out)
+            if axis == "x" and room:
+                out = [(lo, hi + room * (hi - lo)) for lo, hi in out]
+            return _limited(out, self._limits.get(axis), kind, levels, axis)
+
+        xd = ranges("x", xg, self._share["x"] == "sliced")
+        yd = ranges("y", yg, self._share["y"] == "sliced")
+        # its range over every panel, for a figure to share (compose.Shared); then the
+        # figure's, given every panel, which share it as one group
+        npan = len(grid.panels)
+        self._own = {
+            "x": Range(x_kind, tuple(x_levels or ()), *ranges("x", [0] * npan, False)[0]),
+            "y": Range(y_kind, tuple(y_levels or ()), *ranges("y", [0] * npan, False)[0]),
+        } if npan else {}  # fmt: skip
+        if "x" in self._joined:
+            xd, xg = [self._joined["x"]] * npan, [0] * npan
+        if "y" in self._joined:
+            yd, yg = [self._joined["y"]] * npan, [0] * npan
         x_origin = _origin(xd, x_kind)
         y_origin = _origin(yd, y_kind)
         self._axes = {"x": (x_kind, x_levels, x_origin), "y": (y_kind, y_levels, y_origin)}
@@ -4507,13 +4521,13 @@ class Trellis:
             ],
             "x": {
                 **_axis_spec(
-                    x_kind, x_levels, x_origin, self._share["x"], x_title, self._reverse["x"]
+                    x_kind, x_levels, x_origin, self._shared("x"), x_title, self._reverse["x"]
                 ),
                 "format": self._axis_format("x", x_kind) or self._share_format("x"),
             },
             "y": {
                 **_axis_spec(
-                    y_kind, y_levels, y_origin, self._share["y"], y_title, self._reverse["y"]
+                    y_kind, y_levels, y_origin, self._shared("y"), y_title, self._reverse["y"]
                 ),
                 "format": self._axis_format("y", y_kind) or self._share_format("y"),
             },
@@ -4677,6 +4691,11 @@ class Trellis:
             spec_layer.update(_inline_tips(layer, table, geom, buffers, self._label))
         spec_layer["end_labels"] = self._end_labels(layer, table, geom, buffers)
         return spec_layer
+
+    def _shared(self, axis: str) -> Share:
+        """How the axis is shared among the panels: as ``share()`` says, or one range for
+        all when a figure shares it."""
+        return "all" if axis in self._joined else self._share[axis]
 
     def _end_room(self, shown: list[Layer], table_of: Callable[[int], Table],
                   colors: _ColorScales, cols: int) -> float:  # fmt: skip
