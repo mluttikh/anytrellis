@@ -1,12 +1,17 @@
 # 0014: Linked plots in a saved page, by keys on each mark
 
-- Status: **implemented**, 21 November 2026 (design review, Phase 3 item 4).
+- Status: **implemented**, 21 November 2026 (design review, Phase 3 item 4); amended 27
+  November 2026: `load="pages"` plots saved a chunk of panels at a time.
 - Changes: `linking.py` (`Link.save_html`, `to_html`, `_embed_html`, `saved_links`),
   `plot.py` (`_embed_html(link)`, `_saved_entries`, `page_html`), `js/src/core/savedlink.ts`
   (`readLink`, `chosenKeys`, `linkHighlight`, `LinkGroup`), `standalone.ts` (a link's
   plots grouped and started together), `view.ts` (`ownSelection`);
   `tests/test_saved_links.py`, `js/test/savedlink.mjs`; `docs/user/how-to/link.md`,
   `how-to/share.md`, `explanation/selection.md`.
+- A chunk at a time: `plot.py` (`Saved`, `_saved_entries(on)`, `_saved_members`,
+  `_chunked_scene` keeps its entries in `_full_entries`, `_alone` keeps `_reads_on`; the
+  every-row copy `_every_row` removed), `summaries.py` (`saved_members`, `_hits` out of
+  `_counted`), `linking.py` (`saved_links` from `_saved_entries`).
 
 ## Context
 
@@ -36,14 +41,30 @@ DuckDB in the browser; that is a large dependency for what a link needs.
   a grid of `cols` columns, with the bundle once; the selection made in Python is saved and
   shown in the others when the page opens. A link's plots start together (not each as it
   nears the screen), so the highlight is there to see.
-- **`load="pages"` plots are saved with every row**, read at once (a plot's own
-  `save_html` reads a few panels at a time: decision 0004), so their keys are real rows and
-  `on=` links them as in memory.
+- **The keys are those of the marks the page draws** (`Trellis._saved_entries`: each
+  spec layer's user layer, part, geometry, the table its rows are of, and a summary's
+  members), so a page's marks and its keys can't part: the same entries build both.
+- **`load="pages"` plots are saved a chunk of panels at a time**, as a plot's own
+  `save_html` is (decision 0004), never every row at once. Each chunk's reading has the
+  link's `on` columns (`_alone` keeps them as `_reads_on`, `_page_names` reads them), and
+  the chunks' entries, joined, are the ones the page draws (`_full_entries`): a plain
+  mark's key is its row's `on` values. A summary from the database has no rows in Python:
+  the database groups the rows by what its marks test (panel, colour, labels, values), by
+  their value in the range each covers (a histogram's bin; else the value) and by `on`
+  (`summaries.saved_members`), and each group finds its mark as `linked_counts`' do
+  (`_hits`). A histogram's bar has each key as often as its rows, so it fills to the share
+  of its rows chosen as in memory; other summaries' marks have each key once (they light
+  up or not). A backend that can't run the query leaves that layer unlinked, with a
+  warning. `on=` is required for `load="pages"` plots, so keys never need row positions.
 
 ## Known limits
 
 - The page holds a key per row per plot (four bytes), and a summary's bars the keys of all
   their rows: a link of plots of millions of rows makes a large page.
+- A database summary's keys come in one query a layer, not a chunk at a time: a group per
+  mark and key (a histogram's), or per value and key (a box's, a curve's: the value finds
+  its mark), so a summary of many distinct values reads as many narrow groups, the link's
+  columns and a count each.
 - `figure.py` draws one plot at a time; a saved link's images are each plot's own
   `save_svg`, with the highlight Python's link last sent it.
 - A plot can be in one link; a page links the plots of one `Link` (several links on one

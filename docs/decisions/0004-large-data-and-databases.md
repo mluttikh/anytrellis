@@ -42,7 +42,8 @@ there.
   layers are joined into one, the dense points' cells shaded by the densest cell of them
   all: the page is the one reading every row at once makes, and Python holds a chunk's
   rows, not the table's. A plot that doesn't page has read every row already: its scene is
-  the saved page's.
+  the saved page's. Linked plots saved together read their rows the same way, the link's
+  keys going with the rows kept (decision 0014).
 - **Rows find their panel by codes**, not by comparing values, so assigning a million rows
   to a thousand panels stays fast.
 
@@ -51,5 +52,4 @@ there.
 - A saved page holds every panel at the detail the plot starts with, so its size grows
   with the panels (258 MB for 1000 panels of 100,000 points), and Python holds about its
   size several times over while writing it.
-- `Link.save_html` of `load="pages"` plots reads every row at once (decision 0014).
 - A page saved without Python shows the plot at its starting level of detail.

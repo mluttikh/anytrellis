@@ -35,6 +35,28 @@ def no_full_read(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return loads
 
 
+def every_row(plot: Trellis) -> Trellis:
+    """A ``load="pages"`` plot reading every row at once (``load="all"``), on the page it
+    shows: what a saved page drawn a chunk of panels at a time must look like."""
+    import copy
+
+    assert plot._data is not None
+    whole = copy.copy(plot)
+    whole._load = "all"
+    whole._data = Table(plot._data.native)
+    whole._tables = {k: whole._data if t is plot._data else t for k, t in plot._tables.items()}
+    whole._widget = None
+    whole._link_group = None
+    whole._page_tables = {}
+    whole._read = None
+    whole._queried = {}
+    whole._paging = plot.paging
+    whole._scene_cache = None
+    whole._full_scene_cache = None
+    whole._full_entries = None
+    return whole
+
+
 def plots(kind: str, mark: str = "line", n: int = 30_000, **kw: Any) -> tuple[Trellis, Trellis]:
     """A plot reading pages, and the same plot of the rows in memory."""
     df = frame(n)
@@ -339,7 +361,7 @@ def test_a_saved_page_reads_a_chunk_of_panels_at_a_time(case: str, monkeypatch) 
     assert len(reads) == -(-len(saved[0]["panels"]) // 4)  # (121: one of no station)
     assert max(reads) <= 4 * 12_000 // 120  # a chunk's panels' rows
     assert sum(reads) == len(df)  # every row, once
-    same_scene(saved, paged._every_row()._full_scene())
+    same_scene(saved, every_row(paged)._full_scene())
     spec = saved[0]
     if case == "thinned":  # (the rows with a temperature: some 98 a panel, 4 columns' kept)
         assert spec["layers"][0]["count"] < len(df) * 0.9
